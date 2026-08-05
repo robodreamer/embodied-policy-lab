@@ -25,24 +25,125 @@ See `results/README.md` for measured runtime and GPU telemetry.
 The first run downloads approximately 11.6 GiB of checkpoint data into
 `cache/openpi`. Later runs reuse that cache.
 
-## Quick start
+## Live showcase
 
-From this directory:
+The showcase opens a local browser console displaying:
+
+- live external and wrist-camera model inputs;
+- the active language command and episode progress;
+- the predicted 10-step, 7-dimensional action chunk;
+- cold/JIT and warm inference latency;
+- GPU utilization, VRAM, power, and temperature;
+- task success and the local policy endpoint;
+- a syscall-level audit of model and simulator network destinations.
+
+Set up once, then launch:
 
 ```bash
 git submodule update --init --recursive
 ./scripts/setup.sh
 ./scripts/capture_system_info.sh
+./scripts/run_showcase.sh
+```
+
+The browser opens at <http://127.0.0.1:8085>. By default, the showcase runs task
+0 from `libero_spatial`, records one rollout, and audits network syscalls from
+the policy server and simulator. A normal cached run should report only the
+local policy connection at `127.0.0.1:8000` and no remote IP destination.
+
+Every run is retained under a timestamped `showcase-runs/` directory, and
+`showcase-runs/latest` points to the newest one. Important artifacts include:
+
+- `report.md` and `summary.json`: portable performance and network results;
+- `state.json`: dashboard snapshot, actions, task state, and latency samples;
+- `gpu.csv`: one-second NVIDIA telemetry;
+- `network-*`: raw `strace` network syscall evidence;
+- `videos/*.mp4`: simulator rollouts;
+- `client.log`, `server.log`, and `dashboard.log`: runtime trails.
+
+Review the last session or build an MP4 reel with:
+
+```bash
+./scripts/view_latest_showcase.sh
+./scripts/build_montage.sh
+```
+
+Useful showcase controls:
+
+| Environment variable | Default | Purpose |
+|---|---:|---|
+| `TASK_SUITE` | `libero_spatial` | Select a supported LIBERO suite |
+| `TASK_IDS` | `0` | Comma-separated task IDs, or `all` |
+| `TRIALS_PER_TASK` | `1` | Episodes per selected task |
+| `REALTIME_DELAY_MS` | `35` | Slow simulator steps for easier live viewing |
+| `AUTO_OPEN` | `1` | Open the dashboard in the desktop browser |
+| `HOLD_OPEN` | `0` | Keep the dashboard running after completion |
+| `NETWORK_AUDIT` | `1` | Trace and report network destinations |
+| `INITIAL_PROMPT` | empty | Initial override in interactive mode |
+| `LOCAL_LLM_URL` | empty | Loopback Ollama or chat-completions endpoint |
+| `LOCAL_LLM_MODEL` | empty | Model served by the local LLM endpoint |
+
+For example, run three tasks and keep the completed dashboard open:
+
+```bash
+TASK_IDS=0,1,2 HOLD_OPEN=1 ./scripts/run_showcase.sh
+```
+
+The network audit produces evidence; it is not a firewall or network namespace.
+Unprivileged network namespaces are disabled on the validation workstation, so
+the report records every observed IP destination instead of claiming hard kernel
+isolation. A `loopback_only` verdict means no remote inference connection was
+observed during that run.
+
+## Interactive experiment console
+
+Launch a persistent session when you want to reset the simulator, switch tasks,
+edit the π0.5 instruction while it is running, and accumulate success rates:
+
+```bash
+./scripts/run_interactive_showcase.sh
+```
+
+Use the browser controls to apply a typed prompt immediately, reset into a new
+rollout, change tasks, and stop cleanly to generate the final report. Applying a
+prompt discards the queued action chunk, so π0.5 replans from the next
+observation. The dashboard retains completed, failed, and aborted attempts and
+shows the running success rate; `summary.json` also records per-prompt totals.
+
+An important interpretation detail: selecting a LIBERO task chooses the world,
+initial state, and hidden success predicate. Editing only the prompt does not
+change that predicate. This makes prompt edits useful for testing paraphrase,
+ambiguity, or adversarial-instruction robustness against a fixed goal.
+
+To enable the **Generate locally** button, point it at a loopback-only Ollama or
+OpenAI-compatible server. For Ollama, for example:
+
+```bash
+LOCAL_LLM_URL=http://127.0.0.1:11434/api/generate \
+LOCAL_LLM_MODEL=gemma3:1b \
+./scripts/run_interactive_showcase.sh
+```
+
+For an OpenAI-compatible local server such as LM Studio, use its local
+`/v1/chat/completions` URL and model name. The launcher rejects non-loopback LLM
+URLs so prompt generation cannot silently become a hosted call. Ollama/LM Studio
+is optional and is not installed by setup.
+
+## Full-suite smoke test
+
+The original evaluator remains available for a straightforward 10-task check:
+
+```bash
 ./scripts/run_smoke_test.sh
 ```
 
 The smoke test automatically starts and stops the policy server. Results are in:
 
-- `videos/libero_spatial/*.mp4`: rollout videos, named with `success` or `failure`
-- `logs/client-*.log`: task descriptions and cumulative success counts
-- `logs/server-*.log`: checkpoint loading and policy-server messages
-- `logs/gpu-*.csv`: one-second GPU memory, utilization, and power samples
-- `logs/system-info.txt`: hardware, OS, runtime, and source revision
+- `videos/libero_spatial/*.mp4`: rollouts named with `success` or `failure`;
+- `logs/client-*.log`: task descriptions and cumulative success counts;
+- `logs/server-*.log`: checkpoint and policy-server messages;
+- `logs/gpu-*.csv`: GPU memory, utilization, and power samples;
+- `logs/system-info.txt`: hardware, OS, runtime, and source revision.
 
 ## Run server and client separately
 
@@ -100,7 +201,7 @@ you want a single rollout.
 Ubuntu packages required by the upstream dependency pins:
 
 ```bash
-sudo apt-get install -y linux-libc-dev build-essential git-lfs
+sudo apt-get install -y linux-libc-dev build-essential git-lfs strace ffmpeg
 ```
 
 Docker is not required for this installation. The official Docker Compose route

@@ -5,6 +5,9 @@ logs/*.log
 logs/*.csv
 logs/system-info.txt
 videos/
+showcase-runs/
+__pycache__/
+*.py[cod]
 
 # Keep empty runtime directories in a clone.
 !logs/.gitkeep

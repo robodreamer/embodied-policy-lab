@@ -1,5 +1,41 @@
 # Reproduction results
 
+## 2026-08-05 — interactive prompt/reset validation
+
+The persistent browser-controlled workflow was exercised through its HTTP
+control path with the real local checkpoint and simulator:
+
+- canonical task-0 rollout: **success**;
+- typed paraphrase followed by an interactive reset: **success**;
+- completed-attempt success rate: **2/2 (100%)**;
+- task switching and clean session stop: verified;
+- warm mean inference: approximately **127 ms** per action chunk;
+- peak observed GPU memory: **19,098 MiB**;
+- network audit: **`loopback_only`**, with only `127.0.0.1:8000` observed;
+- local-LLM adapter: enabled/disabled behavior and non-loopback URL rejection
+  verified against a temporary local test endpoint.
+
+This is an integration validation, not a statistically meaningful prompt
+robustness result. Run many seeded attempts before comparing prompt variants.
+
+## 2026-08-05 — instrumented local showcase
+
+The browser-console workflow was validated on `libero_spatial` task 1 with the
+cached official checkpoint:
+
+- result: **1/1 successful episode**;
+- runtime: local JAX/CUDA on the RTX PRO 5000 Blackwell Laptop GPU;
+- warm median action-chunk inference: approximately **132 ms**;
+- warm p95 action-chunk inference: approximately **141 ms**;
+- peak observed GPU memory: **19,096 MiB**;
+- peak observed GPU utilization: **94%**;
+- network audit: **`loopback_only`**;
+- observed IP destination: `127.0.0.1:8000`;
+- observed remote IP destinations: **none**.
+
+The instrumented runner completed successfully and generated its Markdown/JSON
+report, raw syscall traces, GPU telemetry, dashboard state, and MP4 rollout.
+
 ## 2026-08-05 — RTX PRO 5000 Blackwell Laptop GPU
 
 - Source revision: `15a9616a00943ada6c20a0f158e3adb39df2ccac`

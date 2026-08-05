@@ -21,10 +21,10 @@ if [[ "$ACTUAL_COMMIT" != "$EXPECTED_COMMIT" ]]; then
   echo "Warning: upstream-openpi is at $ACTUAL_COMMIT; documented baseline is $EXPECTED_COMMIT" >&2
 fi
 
-for command in git git-lfs uv cc; do
+for command in git git-lfs uv cc nvidia-smi strace ffmpeg; do
   if ! command -v "$command" >/dev/null 2>&1; then
     echo "Missing prerequisite: $command" >&2
-    echo "On Ubuntu install: sudo apt-get install -y linux-libc-dev build-essential git-lfs" >&2
+    echo "On Ubuntu install: sudo apt-get install -y linux-libc-dev build-essential git-lfs strace ffmpeg" >&2
     exit 1
   fi
 done

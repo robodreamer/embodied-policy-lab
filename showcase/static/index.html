@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>π0.5 Sim Lab — Local Robotics Console</title>
+    <link rel="stylesheet" href="/style.css">
+  </head>
+  <body>
+    <div class="noise"></div>
+    <header>
+      <div>
+        <p class="eyebrow">PHYSICAL AI / LOCAL RUNTIME</p>
+        <h1><span>π0.5</span> Sim Lab</h1>
+      </div>
+      <div class="status-cluster">
+        <div id="networkBadge" class="badge audit"><i></i> NETWORK AUDIT ACTIVE</div>
+        <div id="phaseBadge" class="badge phase">WAITING</div>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero-grid">
+        <article class="camera-card primary">
+          <div class="card-label"><span>01</span> EXTERNAL CAMERA · MODEL INPUT</div>
+          <div class="camera-frame">
+            <img id="externalFrame" alt="External camera feed">
+            <div class="reticle"></div>
+            <div class="live-tag"><i></i> LIVE</div>
+          </div>
+        </article>
+        <article class="camera-card">
+          <div class="card-label"><span>02</span> WRIST CAMERA · MODEL INPUT</div>
+          <div class="camera-frame wrist">
+            <img id="wristFrame" alt="Wrist camera feed">
+            <div class="reticle"></div>
+          </div>
+        </article>
+        <article class="command-card">
+          <div class="card-label"><span>03</span> LANGUAGE COMMAND</div>
+          <blockquote id="prompt">Waiting for an instruction…</blockquote>
+          <div id="interactiveControls" class="controls hidden">
+            <label><small>SIMULATOR TASK / SUCCESS PREDICATE</small><select id="taskSelect"></select></label>
+            <label><small>MODEL INSTRUCTION</small><textarea id="promptInput" rows="3" placeholder="Type a command, or leave blank for the canonical task prompt"></textarea></label>
+            <div class="control-buttons">
+              <button id="applyPrompt">APPLY + REPLAN</button>
+              <button id="generatePrompt" class="secondary">GENERATE LOCALLY</button>
+              <button id="resetRun" class="secondary">RESET / NEW ROLLOUT</button>
+              <button id="stopRun" class="danger">STOP SESSION</button>
+            </div>
+            <p id="controlNote">The selected task owns the success predicate; prompt edits test language robustness.</p>
+          </div>
+          <div class="task-meta">
+            <div><small>SUITE</small><strong id="suite">—</strong></div>
+            <div><small>TASK</small><strong id="taskPosition">—</strong></div>
+            <div><small>SEED</small><strong id="seed">—</strong></div>
+          </div>
+          <div class="progress-track"><div id="progressBar"></div></div>
+          <div class="progress-label"><span>EPISODE PROGRESS</span><span id="progressText">0%</span></div>
+        </article>
+      </section>
+
+      <section class="metric-grid">
+        <article class="metric accent"><small>INFERENCE</small><strong id="latency">—</strong><span>ms / action chunk</span></article>
+        <article class="metric"><small>GPU LOAD</small><strong id="gpuUtil">—</strong><span>percent</span></article>
+        <article class="metric"><small>VRAM</small><strong id="vram">—</strong><span>MiB local weights + runtime</span></article>
+        <article class="metric"><small>POWER</small><strong id="power">—</strong><span>watts</span></article>
+        <article class="metric"><small>SUCCESS</small><strong id="success">—</strong><span>completed episodes</span></article>
+      </section>
+
+      <section class="analysis-grid">
+        <article class="chart-card action-card">
+          <div class="card-label"><span>04</span> PREDICTED 10-STEP ACTION CHUNK</div>
+          <canvas id="actionChart"></canvas>
+          <div class="legend">
+            <span class="x">ΔX</span><span class="y">ΔY</span><span class="z">ΔZ</span>
+            <span class="r">ROTATION</span><span class="g">GRIPPER</span>
+          </div>
+        </article>
+        <article class="chart-card">
+          <div class="card-label"><span>05</span> WARM INFERENCE LATENCY</div>
+          <canvas id="latencyChart"></canvas>
+          <div class="latency-stats">
+            <div><small>MEDIAN</small><strong id="medianLatency">—</strong></div>
+            <div><small>P95</small><strong id="p95Latency">—</strong></div>
+            <div><small>REPLAN</small><strong id="replan">—</strong></div>
+          </div>
+        </article>
+        <article class="runtime-card">
+          <div class="card-label"><span>06</span> LOCAL RUNTIME PATH</div>
+          <div class="flow">
+            <div><b>CAMERAS + STATE</b><small>224×224 · 8D proprioception</small></div>
+            <em>→</em>
+            <div class="active"><b>π0.5 / JAX</b><small>RTX PRO 5000 Blackwell</small></div>
+            <em>→</em>
+            <div><b>7D ACTIONS</b><small>MuJoCo / LIBERO</small></div>
+          </div>
+          <code id="endpoint">ws://127.0.0.1:8000</code>
+          <p id="runtimeNote">Checkpoint and inference are resident on this workstation.</p>
+        </article>
+      </section>
+      <section id="historyCard" class="history-card hidden">
+        <div class="card-label"><span>07</span> ATTEMPT HISTORY · PER-PROMPT SUCCESS</div>
+        <div class="history-scroll"><table><thead><tr><th>ATTEMPT</th><th>TASK</th><th>INSTRUCTION</th><th>RESULT</th><th>RATE FOR TASK + PROMPT</th><th>DURATION</th></tr></thead><tbody id="historyBody"></tbody></table></div>
+      </section>
+    </main>
+
+    <footer><span>π0.5 SIM LAB</span><span id="updated">AWAITING TELEMETRY</span></footer>
+    <script src="/app.js"></script>
+  </body>
+</html>
