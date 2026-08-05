@@ -1,0 +1,11 @@
+cache/
+run/
+config/libero/config.yaml
+logs/*.log
+logs/*.csv
+logs/system-info.txt
+videos/
+
+# Keep empty runtime directories in a clone.
+!logs/.gitkeep
+!config/libero/.gitkeep

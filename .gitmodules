@@ -1,0 +1,3 @@
+[submodule "upstream-openpi"]
+	path = upstream-openpi
+	url = https://github.com/Physical-Intelligence/openpi.git
