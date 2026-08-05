@@ -3,6 +3,7 @@
 import collections
 import dataclasses
 import datetime
+import hashlib
 import json
 import logging
 import pathlib
@@ -84,14 +85,17 @@ def run(args):
     video_path.mkdir(parents=True, exist_ok=True)
     client = websocket_client_policy.WebsocketClientPolicy(args.host, args.port)
     inbox = ControlInbox(args.session_dir)
+    inference_audit_path = pathlib.Path(args.session_dir) / "inference-audit.jsonl"
     latencies = []
     history = []
     successes = 0
+    completed_attempts = 0
     completed_episodes = 0
     attempt_number = 0
     current_task_id = args.task_id
     prompt_override = args.initial_prompt.strip() or None
     prompt_source = "typed" if prompt_override else "canonical"
+    model_request_count = 0
     max_steps = core._max_steps(args.task_suite_name)
 
     state = core.LiveState(
@@ -113,10 +117,13 @@ def run(args):
             "started_at": _timestamp(),
             "successes": 0,
             "episodes": 0,
+            "completed_attempts": 0,
+            "unscored_attempts": 0,
             "aborted_attempts": 0,
             "attempt_history": [],
             "prompt_stats": {},
             "inference_latencies_ms": [],
+            "model_request_count": 0,
         },
     )
 
@@ -132,7 +139,8 @@ def run(args):
         requested_source = str(command.get("source", "typed"))
         prompt_source = (
             requested_source
-            if prompt_override and requested_source in ("typed", "local_llm")
+            if prompt_override
+            and requested_source in ("typed", "local_llm", "local_llm_exploratory")
             else "canonical"
         )
 
@@ -193,6 +201,8 @@ def run(args):
         action_plan = collections.deque()
         replay_images = []
         prompt_timeline = []
+        attempt_request_count = 0
+        first_action_chunk_sha256 = None
         done = False
         aborted = False
         auto_start_next = False
@@ -309,9 +319,40 @@ def run(args):
                             "source": prompt_source,
                         }
                     )
+                model_request_count += 1
+                attempt_request_count += 1
+                request_id = model_request_count
+                request_prompt = str(model_input["prompt"])
+                prompt_sha256 = hashlib.sha256(
+                    request_prompt.encode("utf-8")
+                ).hexdigest()
+                state.update(
+                    model_request_count=model_request_count,
+                    model_request_status="waiting_for_response",
+                    model_request_prompt=request_prompt,
+                    model_request_prompt_sha256=prompt_sha256,
+                    model_request_id=request_id,
+                )
                 inference_started = time.perf_counter()
                 action_chunk = np.asarray(client.infer(model_input)["actions"])
                 inference_latency = (time.perf_counter() - inference_started) * 1000.0
+                action_chunk_sha256 = hashlib.sha256(action_chunk.tobytes()).hexdigest()
+                if first_action_chunk_sha256 is None:
+                    first_action_chunk_sha256 = action_chunk_sha256
+                audit_event = {
+                    "created_at": _timestamp(),
+                    "request_id": request_id,
+                    "attempt": attempt_number,
+                    "task_id": attempt_task_id,
+                    "step": max(0, step - args.num_steps_wait),
+                    "prompt": request_prompt,
+                    "prompt_source": prompt_source,
+                    "prompt_sha256": prompt_sha256,
+                    "action_chunk_sha256": action_chunk_sha256,
+                    "inference_latency_ms": round(inference_latency, 2),
+                }
+                with inference_audit_path.open("a", encoding="utf-8") as stream:
+                    stream.write(json.dumps(audit_event) + "\n")
                 latencies.append(inference_latency)
                 action_plan.extend(action_chunk[: args.replan_steps])
                 state.update(
@@ -321,6 +362,11 @@ def run(args):
                         round(value, 2) for value in latencies[-120:]
                     ],
                     prompt_timeline=prompt_timeline,
+                    model_request_status="response_received",
+                    model_ack_prompt=request_prompt,
+                    model_ack_prompt_source=prompt_source,
+                    model_ack_prompt_sha256=prompt_sha256,
+                    last_inference_audit=audit_event,
                 )
 
             current_action = np.asarray(action_plan.popleft())
@@ -348,8 +394,6 @@ def run(args):
             status = "aborted"
         else:
             status = "success" if done else "failure"
-            completed_episodes += 1
-            successes += int(done)
 
         safe_task = canonical_prompt.replace(" ", "_")
         output_video = video_path / "attempt_{:03d}_{}_{}.mp4".format(
@@ -365,7 +409,19 @@ def run(args):
                 {"step": 0, "prompt": active_prompt, "source": prompt_source}
             )
         mixed_prompt = len({item["prompt"] for item in prompt_timeline}) > 1
-        rate_eligible = status in ("success", "failure") and not mixed_prompt
+        attempt_prompt_source = (
+            "mixed" if mixed_prompt else prompt_timeline[0]["source"]
+        )
+        rate_eligible = (
+            status in ("success", "failure")
+            and not mixed_prompt
+            and attempt_prompt_source != "local_llm_exploratory"
+        )
+        if status in ("success", "failure"):
+            completed_attempts += 1
+        if rate_eligible:
+            completed_episodes += 1
+            successes += int(done)
 
         history.append(
             {
@@ -373,12 +429,12 @@ def run(args):
                 "task_id": attempt_task_id,
                 "canonical_prompt": canonical_prompt,
                 "prompt": active_prompt,
-                "prompt_source": "mixed"
-                if mixed_prompt
-                else prompt_timeline[0]["source"],
+                "prompt_source": attempt_prompt_source,
                 "prompt_timeline": prompt_timeline,
                 "mixed_prompt": mixed_prompt,
                 "rate_eligible": rate_eligible,
+                "model_request_count": attempt_request_count,
+                "first_action_chunk_sha256": first_action_chunk_sha256,
                 "status": status,
                 "abort_reason": abort_reason,
                 "duration_seconds": round(duration, 2),
@@ -392,6 +448,8 @@ def run(args):
             last_attempt_status=status,
             successes=successes,
             episodes=completed_episodes,
+            completed_attempts=completed_attempts,
+            unscored_attempts=completed_attempts - completed_episodes,
             aborted_attempts=sum(item["status"] == "aborted" for item in history),
             success_rate=round(successes / completed_episodes, 4)
             if completed_episodes

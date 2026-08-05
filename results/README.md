@@ -1,5 +1,34 @@
 # Reproduction results
 
+## 2026-08-05 — prompt delivery and randomized generation audit
+
+A live interactive session was inspected after four task-4 rollouts. The command
+queue, client log, state, and per-attempt prompt timelines all agreed on the
+exact step-0 inputs: a `throw it` instruction, two `put it in the drawer`
+variants, and `close the drawer`. Results were one success followed by three
+failures. This confirms the edits reached the client model input; visually
+similar trajectories are policy behavior for novel LIBERO instructions, not the
+dashboard silently reusing the canonical text.
+
+The next-run instrumentation now records every synchronous request in
+`inference-audit.jsonl`, including the exact prompt and SHA-256 digests of both
+the prompt and returned action chunk. The dashboard displays the acknowledged
+prompt digest. A full validation session recorded 58 audited requests across
+three completed attempts. Its two scored attempts succeeded; the exploratory
+`Position the ramekin near the plate.` attempt also triggered the original
+LIBERO success condition, showing the policy's familiar-task fallback even
+though all 16 requests in that attempt carried the exploratory text. That
+attempt was correctly excluded, leaving a scored result of 2/2 and one
+unscored exploration.
+
+Random local generation was tested repeatedly with `gemma3:1b`. Accepted scored
+variations retain the ordered object/location/destination terms. Exploratory
+outputs included distinct commands such as `Pick up the ramekin`, `Position the
+ramekin near the plate`, and `Pick up the black bowl`; these are explicitly
+excluded from LIBERO success-rate denominators. After adding cue validation and
+a local-model fallback for repeated output, a final batch produced eight unique
+exploratory drafts in eight requests without an error.
+
 ## 2026-08-05 — local-LLM interactive workflow
 
 The revised three-step UI and combined GPU workflow were validated with Ollama

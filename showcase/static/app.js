@@ -6,6 +6,7 @@ let draftDirty = false;
 let taskDirty = false;
 let pendingPromptSource = "canonical";
 let localLlmEnabled = false;
+let randomGenerationEnabled = false;
 let pendingCommandId = null;
 
 function format(value, digits = 0) {
@@ -108,7 +109,9 @@ function populateTasks(tasks, selected) {
 
 function isRateEligible(item) {
   if (typeof item.rate_eligible === "boolean") return item.rate_eligible;
-  return ["success", "failure"].includes(item.status) && !item.mixed_prompt;
+  return ["success", "failure"].includes(item.status)
+    && !item.mixed_prompt
+    && item.prompt_source !== "local_llm_exploratory";
 }
 
 function renderHistory(history) {
@@ -127,7 +130,9 @@ function renderHistory(history) {
     const aggregate = isRateEligible(item) ? stats.get(`${item.task_id}\n${item.prompt}`) : null;
     const rate = aggregate
       ? `${aggregate.successes}/${aggregate.episodes} · ${Math.round(100 * aggregate.successes / aggregate.episodes)}%`
-      : (item.mixed_prompt ? "excluded · mixed prompt" : "excluded · aborted");
+      : (item.prompt_source === "local_llm_exploratory"
+        ? "excluded · exploratory"
+        : (item.mixed_prompt ? "excluded · mixed prompt" : "excluded · aborted"));
     const values = [
       item.attempt,
       Number(item.task_id) + 1,
@@ -160,6 +165,7 @@ function updateRunStatus(state) {
   const scored = Number(state.episodes) || 0;
   const successes = Number(state.successes) || 0;
   const aborted = Number(state.aborted_attempts) || 0;
+  const unscored = Number(state.unscored_attempts) || 0;
   if (phase === "running") {
     $("runStatus").textContent = `Running rollout ${state.attempt || 1}`;
     $("runDetail").textContent = `Step ${Number(state.step) || 0} of at most ${state.max_steps || "—"}; it may finish early.`;
@@ -168,16 +174,16 @@ function updateRunStatus(state) {
     $("progressText").textContent = `Step ${Number(state.step) || 0} / ${state.max_steps || "—"}`;
   } else if (phase === "stopped" || phase === "complete") {
     $("runStatus").textContent = "Session saved — review mode";
-    $("runDetail").textContent = `${successes}/${scored} scored successes; ${aborted} aborted and excluded.`;
+    $("runDetail").textContent = `${successes}/${scored} scored successes; ${unscored} exploratory/mixed and ${aborted} aborted.`;
     $("frameStatus").innerHTML = "<i></i> LAST FRAME";
     $("progressLabel").textContent = "SESSION SUMMARY";
-    $("progressText").textContent = `${successes}/${scored} scored · ${aborted} aborted`;
+    $("progressText").textContent = `${successes}/${scored} scored · ${unscored} unscored · ${aborted} aborted`;
   } else if (phase === "awaiting_command") {
-    $("runStatus").textContent = scored || aborted ? "Ready for another rollout" : "Ready to run your first rollout";
+    $("runStatus").textContent = scored || unscored || aborted ? "Ready for another rollout" : "Ready to run your first rollout";
     $("runDetail").textContent = "Choose a task and instruction below. Nothing runs until you press Start.";
-    $("frameStatus").innerHTML = scored || aborted ? "<i></i> PAUSED" : "<i></i> WAITING";
+    $("frameStatus").innerHTML = scored || unscored || aborted ? "<i></i> PAUSED" : "<i></i> WAITING";
     $("progressLabel").textContent = "SESSION SUMMARY";
-    $("progressText").textContent = `${successes}/${scored} scored · ${aborted} aborted`;
+    $("progressText").textContent = `${successes}/${scored} scored · ${unscored} unscored · ${aborted} aborted`;
   } else {
     $("runStatus").textContent = "Loading local simulator and model";
     $("runDetail").textContent = "The first inference includes a one-time JAX compile.";
@@ -195,10 +201,23 @@ function updateControls(state) {
   $("applyPrompt").disabled = stopped || !running || !draftDirty;
   $("finishRun").disabled = stopped || loading;
   $("generatePrompt").disabled = stopped || !localLlmEnabled;
+  $("generatorMode").disabled = stopped || !localLlmEnabled || !randomGenerationEnabled;
   $("taskSelect").disabled = stopped || loading;
   $("promptInput").disabled = stopped || loading;
-  $("startRun").textContent = running ? "3 · ABORT & START A FRESH ROLLOUT" : "3 · START A FRESH SCORED ROLLOUT";
+  const exploratory = pendingPromptSource === "local_llm_exploratory";
+  const rolloutType = exploratory ? "EXPLORATORY" : "SCORED";
+  $("startRun").textContent = running
+    ? `3 · ABORT & START A FRESH ${rolloutType} ROLLOUT`
+    : `3 · START A FRESH ${rolloutType} ROLLOUT`;
+  $("startHelp").textContent = exploratory
+    ? "Resets the scene and runs the generated experiment. It is excluded from success rates because the LIBERO scoring goal is different."
+    : "Resets the scene, uses the task and draft above, and counts the result toward the task/prompt success rate.";
   $("applyPrompt").textContent = running ? "APPLY DRAFT TO THIS ROLLOUT" : "AVAILABLE WHILE A ROLLOUT IS RUNNING";
+  $("applyHelp").textContent = stopped
+    ? "Unavailable in review mode because the simulator has stopped. Launch a new session to continue."
+    : (running
+      ? "Available now. Keeps the scene and replans; the mixed-prompt attempt is excluded from per-prompt rates."
+      : "Disabled until a rollout is running. Starting a rollout already applies the draft above.");
 }
 
 async function configureControls() {
@@ -206,9 +225,12 @@ async function configureControls() {
   configured = true;
   const config = await fetch("/api/config", {cache: "no-store"}).then(r => r.json());
   localLlmEnabled = Boolean(config.local_llm_enabled);
-  $("llmStatus").textContent = localLlmEnabled
-    ? `Local generator ready: ${config.local_llm_model}`
-    : "Optional local LLM is not configured. Type a prompt directly, or see README setup instructions.";
+  randomGenerationEnabled = Array.isArray(config.prompt_generation_modes);
+  $("llmStatus").textContent = localLlmEnabled && randomGenerationEnabled
+    ? `Local generator ready: ${config.local_llm_model}. Scored variations preserve the goal; exploratory commands are not scored.`
+    : (localLlmEnabled
+      ? `Local generator ready: ${config.local_llm_model}. Relaunch this session to enable randomized modes.`
+      : "Optional local LLM is not configured. Type a prompt directly, or see README setup instructions.");
   $("promptInput").addEventListener("focus", () => { editingPrompt = true; });
   $("promptInput").addEventListener("blur", () => { editingPrompt = false; });
   $("promptInput").addEventListener("input", () => {
@@ -229,6 +251,12 @@ async function configureControls() {
     syncTaskExplanation();
     setControlNote("Task and its canonical instruction are staged. Press Start when ready.");
     updateControls(lastState);
+  });
+  $("generatorMode").addEventListener("change", () => {
+    const exploratory = $("generatorMode").value === "exploratory";
+    setControlNote(exploratory
+      ? "Exploratory mode invents another plausible action using scene objects. Its rollout will not affect success rates."
+      : "Scored-variation mode randomizes the wording while preserving the selected task goal.");
   });
   $("startRun").onclick = async () => {
     try {
@@ -266,13 +294,21 @@ async function configureControls() {
   $("generatePrompt").onclick = async () => {
     const button = $("generatePrompt"); button.disabled = true;
     try {
-      const seed = $("promptInput").value.trim() || selectedTask()?.prompt || lastState.prompt;
-      const result = await postJson("/api/generate-prompt", {instruction: seed});
+      const task = selectedTask();
+      const mode = randomGenerationEnabled ? $("generatorMode").value : "scored_variation";
+      const result = await postJson("/api/generate-prompt", {
+        goal: task?.prompt || lastState.canonical_prompt || lastState.prompt,
+        instruction: $("promptInput").value.trim(),
+        mode,
+      });
       $("promptInput").value = result.prompt;
       draftDirty = true;
-      pendingPromptSource = "local_llm";
-      $("draftSource").textContent = "LOCAL LLM DRAFT";
-      setControlNote(`Generated locally with ${result.model} in ${format(result.duration_ms)} ms. Review it, then press Start or Apply.`);
+      pendingPromptSource = result.mode === "exploratory" ? "local_llm_exploratory" : "local_llm";
+      $("draftSource").textContent = result.mode === "exploratory" ? "UNSCORED EXPLORATORY DRAFT" : "LOCAL LLM SCORED DRAFT";
+      const scoringNote = result.mode === "exploratory"
+        ? "This explores another scene action and is excluded from prompt success rates."
+        : "This preserves the selected scoring goal.";
+      setControlNote(`Generated a new local draft with ${result.model} in ${format(result.duration_ms)} ms. ${scoringNote}`);
     } catch (error) { setControlNote(error.message, true); }
     finally { updateControls(lastState); }
   };
@@ -301,12 +337,22 @@ async function updateState() {
       $("promptInput").value = state.prompt || "";
       pendingPromptSource = state.prompt_source || "canonical";
       $("draftSource").textContent = `${pendingPromptSource.toUpperCase()} DRAFT`;
+      if (pendingPromptSource === "local_llm_exploratory") {
+        $("generatorMode").value = "exploratory";
+      }
     }
     updateRunStatus(state);
     updateControls(state);
-    $("prompt").textContent = state.prompt || "Waiting for an instruction…";
-    $("appliedSource").textContent = String(state.prompt_source || "—").toUpperCase();
-    $("appliedState").textContent = state.phase === "running" ? "Currently controlling the robot" : "Last applied instruction";
+    $("prompt").textContent = state.model_ack_prompt || state.prompt || "Waiting for an instruction…";
+    $("appliedSource").textContent = String(state.model_ack_prompt_source || state.prompt_source || "—").toUpperCase();
+    $("appliedState").textContent = state.model_request_status === "waiting_for_response"
+      ? `Sending model request #${state.model_request_id}`
+      : (state.model_ack_prompt_sha256
+        ? `Model response received for request #${state.model_request_id}`
+        : "No model request yet");
+    $("promptProof").textContent = state.model_ack_prompt_sha256
+      ? `ACKNOWLEDGED PROMPT SHA-256 · ${state.model_ack_prompt_sha256}`
+      : "No synchronous model request recorded yet";
     $("suite").textContent = state.suite || "—";
     $("taskPosition").textContent = state.task_position ? `Task ${state.task_position} of ${state.total_tasks}` : "—";
     $("seed").textContent = state.seed ?? "—";
@@ -318,8 +364,9 @@ async function updateState() {
     const episodes = Number(state.episodes) || 0;
     const successes = Number(state.successes) || 0;
     const aborted = Number(state.aborted_attempts) || 0;
+    const unscored = Number(state.unscored_attempts) || 0;
     $("success").textContent = episodes ? `${Math.round(100 * successes / episodes)}%` : "—";
-    $("successDetail").textContent = `${successes}/${episodes} scored · ${aborted} aborted (excluded)`;
+    $("successDetail").textContent = `${successes}/${episodes} scored · ${unscored} exploratory/mixed · ${aborted} aborted`;
     $("endpoint").textContent = state.policy_endpoint || "ws://127.0.0.1:8000";
     const runningProgress = state.phase === "running" ? Math.max(0, Math.min(1, Number(state.progress) || 0)) : 0;
     $("progressBar").style.transform = `scaleX(${runningProgress})`;

@@ -135,8 +135,26 @@ Ollama. Once Ollama is installed, prepare it with:
 
 The interactive launcher detects the local server and model automatically. The
 dashboard then shows **Local generator ready: gemma3:1b** and enables **Generate
-with local LLM**. Generated text remains a draft until you explicitly start a
-new rollout or apply it to the current rollout.
+random draft**. Choose either:
+
+- **Random scored variation** to produce a new wording while preserving the
+  selected task's exact goal; or
+- **Random exploratory command** to invent a different plausible pick/place
+  action using objects named in the scene. Exploratory and mixed-prompt attempts
+  are excluded from success rates because LIBERO's hidden goal has not changed.
+
+The generator records and avoids prior outputs from the session. Generated text
+remains a draft until you explicitly start a new rollout or apply it to the
+current rollout.
+
+For every synchronous inference request, the client records the exact prompt,
+its SHA-256 digest, the returned action-chunk digest, attempt, step, and latency
+in `inference-audit.jsonl`. The dashboard shows the last acknowledged prompt
+digest. This proves which text was serialized to the local policy server even
+when the robot's visible behavior does not change. The released `pi05_libero`
+checkpoint is trained around LIBERO-style instructions; a novel or physically
+unsupported command may still produce familiar task behavior despite receiving
+different text.
 
 To use another loopback-only Ollama or OpenAI-compatible server, override:
 

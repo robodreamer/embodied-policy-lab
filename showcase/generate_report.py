@@ -106,6 +106,7 @@ def main():
     duration = (finished - started).total_seconds()
     videos = sorted((session_dir / "videos").glob("*.mp4"))
     llm_events = local_llm_events(session_dir / "llm-generations.jsonl")
+    inference_events = local_llm_events(session_dir / "inference-audit.jsonl")
 
     summary = {
         "model": state.get("model"),
@@ -117,6 +118,9 @@ def main():
         "episodes": state.get("episodes"),
         "successes": state.get("successes"),
         "success_rate": state.get("success_rate"),
+        "completed_attempts": state.get("completed_attempts", state.get("episodes")),
+        "unscored_attempts": state.get("unscored_attempts", 0),
+        "aborted_attempts": state.get("aborted_attempts", 0),
         "duration_seconds": round(duration, 2),
         "cold_inference_latency_ms": state.get("cold_inference_latency_ms"),
         "mean_inference_latency_ms": state.get("mean_inference_latency_ms"),
@@ -129,6 +133,7 @@ def main():
         "attempt_history": state.get("attempt_history", []),
         "prompt_stats": state.get("prompt_stats", {}),
         "local_llm_generations": llm_events,
+        "inference_audit_events": len(inference_events),
     }
     (session_dir / "summary.json").write_text(
         json.dumps(summary, indent=2), encoding="utf-8"
@@ -146,6 +151,8 @@ def main():
 | Runtime | {runtime} |
 | LIBERO suite / task IDs | `{suite}` / `{task_ids}` |
 | Episodes successful | **{successes}/{episodes}** |
+| Unscored exploratory / mixed attempts | {unscored_attempts} |
+| Aborted attempts | {aborted_attempts} |
 | Session duration | {duration:.2f} s |
 | Cold/JIT inference latency | {cold_latency} ms |
 | Warm mean inference latency | {warm_mean_latency} ms |
@@ -156,6 +163,7 @@ def main():
 | Peak GPU power | {power:.2f} W |
 | Peak GPU temperature | {temperature:.0f} °C |
 | Local prompt generations | {llm_generation_count} |
+| Audited π0.5 requests | {inference_audit_count} |
 
 ## Local-inference network audit
 
@@ -177,6 +185,7 @@ with the local policy server over loopback.
 - `client.log` and `server.log`: runtime logs
 - `videos/`: rollout MP4 files ({video_count})
 - `llm-generations.jsonl`: local prompt-generation provenance ({llm_generation_count})
+- `inference-audit.jsonl`: prompt and action hashes for synchronous π0.5 requests ({inference_audit_count})
 """.format(
         model=summary["model"],
         runtime=summary["runtime"],
@@ -184,6 +193,8 @@ with the local policy server over loopback.
         task_ids=summary["task_ids"],
         successes=summary["successes"],
         episodes=summary["episodes"],
+        unscored_attempts=summary["unscored_attempts"],
+        aborted_attempts=summary["aborted_attempts"],
         duration=summary["duration_seconds"],
         cold_latency=summary["cold_inference_latency_ms"],
         warm_mean_latency=summary["warm_mean_inference_latency_ms"],
@@ -194,6 +205,7 @@ with the local policy server over loopback.
         power=gpu["max_power_w"],
         temperature=gpu["max_temperature_c"],
         llm_generation_count=len(llm_events),
+        inference_audit_count=len(inference_events),
         verdict=network["verdict"],
         loopback=loopback_text,
         remote=remote_text,

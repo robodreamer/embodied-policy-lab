@@ -37,14 +37,20 @@
             <textarea id="promptInput" rows="3" placeholder="Type the instruction π0.5 should follow"></textarea>
             <div class="prompt-tools">
               <span id="draftSource" class="source-chip">CANONICAL DRAFT</span>
-              <button id="generatePrompt" class="text-button">GENERATE WITH LOCAL LLM</button>
+              <div class="generator-tools">
+                <select id="generatorMode" aria-label="Local prompt generation mode">
+                  <option value="scored_variation">Random scored variation</option>
+                  <option value="exploratory">Random exploratory command</option>
+                </select>
+                <button id="generatePrompt" class="text-button">GENERATE RANDOM DRAFT</button>
+              </div>
             </div>
             <p id="llmStatus">Local LLM status loading…</p>
           </div>
         </div>
         <div class="control-actions">
-          <div class="action-item"><button id="startRun" class="primary-action">3 · START A FRESH SCORED ROLLOUT</button><small>Resets the scene, uses the task and draft above, and counts the result.</small></div>
-          <div class="action-item"><button id="applyPrompt" class="secondary">APPLY DRAFT TO CURRENT ROLLOUT</button><small>Keeps the scene and replans. The mixed-prompt attempt is excluded from per-prompt rates.</small></div>
+          <div class="action-item"><button id="startRun" class="primary-action">3 · START A FRESH SCORED ROLLOUT</button><small id="startHelp">Resets the scene, uses the task and draft above, and counts the result.</small></div>
+          <div class="action-item"><button id="applyPrompt" class="secondary">APPLY DRAFT TO CURRENT ROLLOUT</button><small id="applyHelp">Disabled until a rollout is running. Starting a rollout already applies the draft above.</small></div>
           <div class="action-item"><button id="finishRun" class="danger">FINISH &amp; SAVE REPORT</button><small>Stops local inference, writes artifacts, and leaves this page open for review.</small></div>
         </div>
         <p id="controlNote">Choose a task and instruction, then start. Aborted and mixed-prompt attempts are excluded from per-prompt rates.</p>
@@ -70,6 +76,7 @@
           <div class="card-label"><span>04</span> APPLIED INSTRUCTION</div>
           <blockquote id="prompt">Waiting for an instruction…</blockquote>
           <div class="applied-meta"><span id="appliedSource" class="source-chip">—</span><span id="appliedState">Not yet sent</span></div>
+          <code id="promptProof" class="prompt-proof">No synchronous model request recorded yet</code>
           <div class="task-meta">
             <div><small>SUITE</small><strong id="suite">—</strong></div>
             <div><small>TASK</small><strong id="taskPosition">—</strong></div>
