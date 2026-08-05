@@ -108,7 +108,23 @@ The browser now waits for you instead of starting automatically. Its workflow is
 
 1. Choose the **evaluation task**, which sets the scene and success scoring.
 2. Review or edit the **instruction sent to π0.5**.
-3. Press **Start a fresh scored rollout**.
+3. Choose **result handling** and a **rollout budget**. Use Scored only when the
+   instruction still means exactly the selected evaluation goal. Standard uses
+   the upstream benchmark limit, Extended allows 2× as many actions, and Long
+   allows 3×.
+4. Press **Start a fresh scored rollout**.
+
+Extended is the default and is recommended for language variants. A manual text
+edit defaults to a Long, unscored custom experiment; switch it back to Scored
+only for a true paraphrase of the selected goal. Locally generated scored
+variations automatically stage Extended; exploratory commands stage Long and
+unscored. A scored rollout still stops early when LIBERO detects its selected
+goal, so a fast successful variation is expected. Results and success-rate
+grouping record the step budget, preventing Standard and Extended attempts from
+being treated as identical trials. Custom experiments ignore that unrelated
+LIBERO completion signal and run their full selected budget unless you stop
+them; their history result is `unscored` rather than a misleading success or
+failure against the original goal.
 
 Changing the dropdown only stages a choice; it never resets a running attempt.
 During a rollout, **Apply draft to this rollout** changes the instruction and
@@ -117,6 +133,11 @@ attempt, the dashboard excludes it from per-prompt rates. **Abort & start a fres
 rollout** resets the simulator with the staged task and instruction. **Finish &
 save report** stops inference, writes artifacts, and leaves the dashboard open
 in review mode until you press Ctrl+C in the terminal.
+
+The dashboard keeps a submitted draft visible until the simulator acknowledges
+the command *and* publishes the matching prompt, task, and rollout budget. This
+avoids briefly restoring the previous instruction while a fresh environment is
+being constructed.
 
 The dashboard retains completed, failed, mixed-prompt, and aborted attempts.
 `summary.json` records prompt timelines and per-task/prompt totals.

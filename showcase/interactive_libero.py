@@ -63,8 +63,17 @@ def _prompt_stats(history):
     for attempt in history:
         if not attempt.get("rate_eligible"):
             continue
-        key = "task {} | {}".format(attempt["task_id"], attempt["prompt"])
-        item = stats.setdefault(key, {"episodes": 0, "successes": 0})
+        key = "task {} | {} | {} steps".format(
+            attempt["task_id"], attempt["prompt"], attempt["max_steps"]
+        )
+        item = stats.setdefault(
+            key,
+            {
+                "episodes": 0,
+                "successes": 0,
+                "max_steps": attempt["max_steps"],
+            },
+        )
         item["episodes"] += 1
         item["successes"] += int(attempt["status"] == "success")
         item["success_rate"] = round(item["successes"] / item["episodes"], 4)
@@ -95,8 +104,10 @@ def run(args):
     current_task_id = args.task_id
     prompt_override = args.initial_prompt.strip() or None
     prompt_source = "typed" if prompt_override else "canonical"
+    evaluation_mode = "exploratory" if prompt_override else "scored"
     model_request_count = 0
-    max_steps = core._max_steps(args.task_suite_name)
+    base_max_steps = core._max_steps(args.task_suite_name)
+    rollout_budget_multiplier = 3 if prompt_override else 2
 
     state = core.LiveState(
         args.session_dir,
@@ -114,6 +125,10 @@ def run(args):
             "seed": args.seed,
             "replan_steps": args.replan_steps,
             "action_horizon": 10,
+            "base_max_steps": base_max_steps,
+            "max_steps": base_max_steps * rollout_budget_multiplier,
+            "rollout_budget_multiplier": rollout_budget_multiplier,
+            "evaluation_mode": evaluation_mode,
             "started_at": _timestamp(),
             "successes": 0,
             "episodes": 0,
@@ -129,6 +144,7 @@ def run(args):
 
     def apply_rollout_settings(command):
         nonlocal current_task_id, prompt_override, prompt_source
+        nonlocal evaluation_mode, rollout_budget_multiplier
         requested_task = int(command.get("task_id", current_task_id))
         if requested_task < 0 or requested_task >= suite.n_tasks:
             raise ValueError("Invalid task ID: {}".format(requested_task))
@@ -143,6 +159,23 @@ def run(args):
             and requested_source in ("typed", "local_llm", "local_llm_exploratory")
             else "canonical"
         )
+        requested_multiplier = int(
+            command.get("rollout_budget_multiplier", rollout_budget_multiplier)
+        )
+        if requested_multiplier not in (1, 2, 3):
+            raise ValueError("Rollout budget multiplier must be 1, 2, or 3")
+        rollout_budget_multiplier = requested_multiplier
+        requested_evaluation = str(
+            command.get(
+                "evaluation_mode",
+                "exploratory"
+                if prompt_source == "local_llm_exploratory"
+                else evaluation_mode,
+            )
+        )
+        if requested_evaluation not in ("scored", "exploratory"):
+            raise ValueError("Evaluation mode must be scored or exploratory")
+        evaluation_mode = requested_evaluation
 
     initial_task = suite.get_task(current_task_id)
     initial_canonical_prompt = str(initial_task.language)
@@ -171,6 +204,11 @@ def run(args):
             prompt_source = (
                 str(command.get("source", "typed")) if candidate else "canonical"
             )
+            requested_evaluation = str(command.get("evaluation_mode", evaluation_mode))
+            if requested_evaluation not in ("scored", "exploratory"):
+                state.update(control_error="Invalid evaluation mode")
+                continue
+            evaluation_mode = requested_evaluation
         elif action == "set_task":
             try:
                 apply_rollout_settings(command)
@@ -194,6 +232,9 @@ def run(args):
         task = suite.get_task(current_task_id)
         canonical_prompt = str(task.language)
         active_prompt = prompt_override or canonical_prompt
+        attempt_budget_multiplier = rollout_budget_multiplier
+        attempt_evaluation_mode = evaluation_mode
+        attempt_max_steps = base_max_steps * attempt_budget_multiplier
         initial_states = suite.get_task_init_states(current_task_id)
         env, _ = core._get_libero_env(task, core.LIBERO_ENV_RESOLUTION, args.seed)
         env.reset()
@@ -204,6 +245,7 @@ def run(args):
         attempt_request_count = 0
         first_action_chunk_sha256 = None
         done = False
+        selected_goal_reached = False
         aborted = False
         auto_start_next = False
         abort_reason = None
@@ -220,7 +262,9 @@ def run(args):
             prompt_source=prompt_source,
             attempt=attempt_number,
             step=0,
-            max_steps=max_steps,
+            max_steps=attempt_max_steps,
+            rollout_budget_multiplier=attempt_budget_multiplier,
+            evaluation_mode=attempt_evaluation_mode,
             progress=0.0,
             last_action_chunk=[],
             current_action=[],
@@ -235,7 +279,7 @@ def run(args):
             active_prompt,
         )
 
-        while step < max_steps + args.num_steps_wait:
+        while step < attempt_max_steps + args.num_steps_wait:
             command = inbox.read()
             if command:
                 action = command.get("action")
@@ -252,11 +296,19 @@ def run(args):
                         if prompt_override
                         else "canonical"
                     )
+                    requested_evaluation = str(
+                        command.get("evaluation_mode", evaluation_mode)
+                    )
+                    if requested_evaluation not in ("scored", "exploratory"):
+                        state.update(control_error="Invalid evaluation mode")
+                        continue
+                    evaluation_mode = requested_evaluation
                     active_prompt = prompt_override or canonical_prompt
                     action_plan.clear()
                     state.update(
                         prompt=active_prompt,
                         prompt_source=prompt_source,
+                        evaluation_mode=evaluation_mode,
                         command_ack=command.get("id"),
                         command_message="Instruction applied; replanning",
                     )
@@ -280,6 +332,7 @@ def run(args):
                         current_task_id = requested_task
                         prompt_override = None
                         prompt_source = "canonical"
+                        evaluation_mode = "scored"
                     aborted = True
                     abort_reason = action
                     state.update(
@@ -347,9 +400,11 @@ def run(args):
                     "step": max(0, step - args.num_steps_wait),
                     "prompt": request_prompt,
                     "prompt_source": prompt_source,
+                    "evaluation_mode": attempt_evaluation_mode,
                     "prompt_sha256": prompt_sha256,
                     "action_chunk_sha256": action_chunk_sha256,
                     "inference_latency_ms": round(inference_latency, 2),
+                    "max_steps": attempt_max_steps,
                 }
                 with inference_audit_path.open("a", encoding="utf-8") as stream:
                     stream.write(json.dumps(audit_event) + "\n")
@@ -372,15 +427,18 @@ def run(args):
             current_action = np.asarray(action_plan.popleft())
             state.update(
                 step=step - args.num_steps_wait,
-                progress=min(1.0, float(step - args.num_steps_wait) / max_steps),
+                progress=min(
+                    1.0, float(step - args.num_steps_wait) / attempt_max_steps
+                ),
                 current_action=np.round(current_action, 5).tolist(),
                 robot_state=np.round(robot_state, 5).tolist(),
             )
             obs, _, done, _ = env.step(current_action.tolist())
+            selected_goal_reached = selected_goal_reached or bool(done)
             if args.realtime_delay_ms > 0:
                 time.sleep(args.realtime_delay_ms / 1000.0)
             step += 1
-            if done:
+            if done and attempt_evaluation_mode == "scored":
                 final_external, final_wrist, _, _ = core._prepare_observation(
                     obs, args.resize_size, active_prompt
                 )
@@ -392,8 +450,10 @@ def run(args):
         duration = time.perf_counter() - attempt_started
         if aborted:
             status = "aborted"
+        elif attempt_evaluation_mode == "exploratory":
+            status = "unscored"
         else:
-            status = "success" if done else "failure"
+            status = "success" if selected_goal_reached else "failure"
 
         safe_task = canonical_prompt.replace(" ", "_")
         output_video = video_path / "attempt_{:03d}_{}_{}.mp4".format(
@@ -415,13 +475,13 @@ def run(args):
         rate_eligible = (
             status in ("success", "failure")
             and not mixed_prompt
-            and attempt_prompt_source != "local_llm_exploratory"
+            and attempt_evaluation_mode == "scored"
         )
-        if status in ("success", "failure"):
+        if status in ("success", "failure", "unscored"):
             completed_attempts += 1
         if rate_eligible:
             completed_episodes += 1
-            successes += int(done)
+            successes += int(selected_goal_reached)
 
         history.append(
             {
@@ -433,6 +493,10 @@ def run(args):
                 "prompt_timeline": prompt_timeline,
                 "mixed_prompt": mixed_prompt,
                 "rate_eligible": rate_eligible,
+                "max_steps": attempt_max_steps,
+                "rollout_budget_multiplier": attempt_budget_multiplier,
+                "evaluation_mode": attempt_evaluation_mode,
+                "selected_goal_reached": selected_goal_reached,
                 "model_request_count": attempt_request_count,
                 "first_action_chunk_sha256": first_action_chunk_sha256,
                 "status": status,
@@ -444,7 +508,9 @@ def run(args):
         warm_latencies = latencies[1:] if len(latencies) > 1 else latencies
         state.update(
             phase="stopped" if should_stop else "awaiting_command",
-            task_success=bool(done) if status in ("success", "failure") else None,
+            task_success=selected_goal_reached
+            if status in ("success", "failure")
+            else None,
             last_attempt_status=status,
             successes=successes,
             episodes=completed_episodes,
@@ -458,7 +524,9 @@ def run(args):
             prompt_stats=_prompt_stats(history),
             task_ids=sorted({item["task_id"] for item in history}),
             last_video=str(output_video) if replay_images else None,
-            progress=1.0 if done else state.data.get("progress", 0.0),
+            progress=1.0
+            if status in ("success", "failure", "unscored")
+            else state.data.get("progress", 0.0),
             cold_inference_latency_ms=round(latencies[0], 2) if latencies else None,
             warm_mean_inference_latency_ms=round(float(np.mean(warm_latencies)), 2)
             if warm_latencies
@@ -496,9 +564,17 @@ def run(args):
                     if prompt_override
                     else "canonical"
                 )
+                requested_evaluation = str(
+                    command.get("evaluation_mode", evaluation_mode)
+                )
+                if requested_evaluation not in ("scored", "exploratory"):
+                    state.update(control_error="Invalid evaluation mode")
+                    continue
+                evaluation_mode = requested_evaluation
                 state.update(
                     prompt=prompt_override or canonical_prompt,
                     prompt_source=prompt_source,
+                    evaluation_mode=evaluation_mode,
                     command_ack=command.get("id"),
                     command_message="Instruction staged for the next rollout",
                 )
@@ -508,6 +584,7 @@ def run(args):
                     current_task_id = requested_task
                     prompt_override = None
                     prompt_source = "canonical"
+                    evaluation_mode = "scored"
                     state.update(
                         command_ack=command.get("id"), command_message="Switching task"
                     )
@@ -518,6 +595,7 @@ def run(args):
                         canonical_prompt=canonical_prompt,
                         prompt=canonical_prompt,
                         prompt_source="canonical",
+                        evaluation_mode=evaluation_mode,
                     )
                     continue
                 state.update(control_error="Invalid task ID: {}".format(requested_task))

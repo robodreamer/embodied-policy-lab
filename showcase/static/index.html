@@ -48,8 +48,27 @@
             <p id="llmStatus">Local LLM status loading…</p>
           </div>
         </div>
+        <div class="rollout-settings">
+          <div class="rollout-setting">
+            <label for="evaluationMode"><span><b>3A</b> Result handling</span><small>DOES THIS INSTRUCTION STILL MATCH THE SELECTED GOAL?</small></label>
+            <select id="evaluationMode">
+              <option value="scored">Scored · same goal as the evaluation task</option>
+              <option value="exploratory">Custom · different goal, unscored</option>
+            </select>
+            <p id="evaluationHelp">Use Scored only for wording variants that preserve the selected task exactly.</p>
+          </div>
+          <div class="rollout-setting">
+            <label for="rolloutBudget"><span><b>3B</b> Rollout budget</span><small>MORE STEPS FOR LANGUAGE VARIANTS AND MULTI-STEP EXPERIMENTS</small></label>
+            <select id="rolloutBudget">
+              <option value="1">Standard · 1× benchmark budget</option>
+              <option value="2" selected>Extended · 2× steps (recommended for variants)</option>
+              <option value="3">Long · 3× steps (multi-step experiments)</option>
+            </select>
+            <p id="budgetHelp">Extended attempts get twice as many simulator actions. A scored rollout still ends early when LIBERO detects success.</p>
+          </div>
+        </div>
         <div class="control-actions">
-          <div class="action-item"><button id="startRun" class="primary-action">3 · START A FRESH SCORED ROLLOUT</button><small id="startHelp">Resets the scene, uses the task and draft above, and counts the result.</small></div>
+          <div class="action-item"><button id="startRun" class="primary-action">4 · START A FRESH SCORED ROLLOUT</button><small id="startHelp">Resets the scene, uses the task and draft above, and counts the result.</small></div>
           <div class="action-item"><button id="applyPrompt" class="secondary">APPLY DRAFT TO CURRENT ROLLOUT</button><small id="applyHelp">Disabled until a rollout is running. Starting a rollout already applies the draft above.</small></div>
           <div class="action-item"><button id="finishRun" class="danger">FINISH &amp; SAVE REPORT</button><small>Stops local inference, writes artifacts, and leaves this page open for review.</small></div>
         </div>
@@ -129,7 +148,7 @@
       </section>
       <section id="historyCard" class="history-card hidden">
         <div class="card-label"><span>08</span> ATTEMPT HISTORY · PER-PROMPT SUCCESS</div>
-        <div class="history-scroll"><table><thead><tr><th>ATTEMPT</th><th>TASK</th><th>INSTRUCTION</th><th>SOURCE</th><th>RESULT</th><th>RATE FOR TASK + PROMPT</th><th>DURATION</th></tr></thead><tbody id="historyBody"></tbody></table></div>
+        <div class="history-scroll"><table><thead><tr><th>ATTEMPT</th><th>TASK</th><th>INSTRUCTION</th><th>SOURCE</th><th>BUDGET</th><th>RESULT</th><th>RATE FOR TASK + PROMPT + BUDGET</th><th>DURATION</th></tr></thead><tbody id="historyBody"></tbody></table></div>
         <p class="sample-note">Success rates describe only this session. Small samples are functional checks, not benchmark accuracy.</p>
       </section>
     </main>

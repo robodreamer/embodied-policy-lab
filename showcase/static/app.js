@@ -7,7 +7,9 @@ let taskDirty = false;
 let pendingPromptSource = "canonical";
 let localLlmEnabled = false;
 let randomGenerationEnabled = false;
-let pendingCommandId = null;
+let budgetDirty = false;
+let evaluationDirty = false;
+let pendingCommand = null;
 
 function format(value, digits = 0) {
   return value !== null && value !== "" && Number.isFinite(Number(value))
@@ -85,6 +87,34 @@ function selectedTask() {
   return tasks.find(task => String(task.id) === $("taskSelect").value);
 }
 
+function selectedBudget() {
+  return Number($("rolloutBudget").value) || 1;
+}
+
+function selectedEvaluationMode() {
+  return $("evaluationMode").value === "exploratory" ? "exploratory" : "scored";
+}
+
+function updateEvaluationHelp() {
+  const exploratory = selectedEvaluationMode() === "exploratory";
+  $("evaluationHelp").textContent = exploratory
+    ? "This command can pursue a different goal. Its outcome and video are saved, but it is excluded from the selected task’s success rate."
+    : "Use Scored only for wording variants that preserve the selected task exactly.";
+}
+
+function selectedBudgetSteps(state = lastState) {
+  return (Number(state.base_max_steps) || Number(state.max_steps) || 220) * selectedBudget();
+}
+
+function updateBudgetHelp() {
+  const multiplier = selectedBudget();
+  const steps = selectedBudgetSteps();
+  const label = multiplier === 1 ? "Standard" : (multiplier === 2 ? "Extended" : "Long");
+  $("budgetHelp").textContent = selectedEvaluationMode() === "exploratory"
+    ? `${label} gives this custom rollout ${steps} simulator actions unless you stop it.`
+    : `${label} gives this rollout up to ${steps} simulator actions. It ends early if the selected LIBERO goal succeeds.`;
+}
+
 function syncTaskExplanation() {
   const task = selectedTask();
   $("successRule").textContent = task
@@ -111,6 +141,7 @@ function isRateEligible(item) {
   if (typeof item.rate_eligible === "boolean") return item.rate_eligible;
   return ["success", "failure"].includes(item.status)
     && !item.mixed_prompt
+    && item.evaluation_mode !== "exploratory"
     && item.prompt_source !== "local_llm_exploratory";
 }
 
@@ -118,7 +149,7 @@ function renderHistory(history) {
   const source = Array.isArray(history) ? history : [];
   const stats = new Map();
   source.filter(isRateEligible).forEach(item => {
-    const key = `${item.task_id}\n${item.prompt}`;
+    const key = `${item.task_id}\n${item.prompt}\n${item.max_steps || "legacy"}`;
     const current = stats.get(key) || {episodes: 0, successes: 0};
     current.episodes += 1;
     current.successes += Number(item.status === "success");
@@ -127,17 +158,18 @@ function renderHistory(history) {
   $("historyCard").classList.toggle("hidden", !lastState.interactive);
   $("historyBody").replaceChildren(...source.slice().reverse().map(item => {
     const row = document.createElement("tr");
-    const aggregate = isRateEligible(item) ? stats.get(`${item.task_id}\n${item.prompt}`) : null;
+    const aggregate = isRateEligible(item) ? stats.get(`${item.task_id}\n${item.prompt}\n${item.max_steps || "legacy"}`) : null;
     const rate = aggregate
       ? `${aggregate.successes}/${aggregate.episodes} · ${Math.round(100 * aggregate.successes / aggregate.episodes)}%`
-      : (item.prompt_source === "local_llm_exploratory"
-        ? "excluded · exploratory"
+      : (item.evaluation_mode === "exploratory" || item.prompt_source === "local_llm_exploratory"
+        ? "excluded · custom"
         : (item.mixed_prompt ? "excluded · mixed prompt" : "excluded · aborted"));
     const values = [
       item.attempt,
       Number(item.task_id) + 1,
       item.mixed_prompt ? `${item.prompt} (changed mid-run)` : item.prompt,
       item.prompt_source || "—",
+      item.max_steps ? `${item.max_steps} steps` : "legacy",
       item.status,
       rate,
       `${format(item.duration_seconds, 1)} s`,
@@ -145,7 +177,7 @@ function renderHistory(history) {
     values.forEach((value, index) => {
       const cell = document.createElement("td");
       cell.textContent = value ?? "—";
-      if (index === 4) cell.className = `result-${item.status}`;
+      if (index === 5) cell.className = `result-${item.status}`;
       row.appendChild(cell);
     });
     return row;
@@ -168,7 +200,9 @@ function updateRunStatus(state) {
   const unscored = Number(state.unscored_attempts) || 0;
   if (phase === "running") {
     $("runStatus").textContent = `Running rollout ${state.attempt || 1}`;
-    $("runDetail").textContent = `Step ${Number(state.step) || 0} of at most ${state.max_steps || "—"}; it may finish early.`;
+    $("runDetail").textContent = state.evaluation_mode === "exploratory"
+      ? `Step ${Number(state.step) || 0} of ${state.max_steps || "—"}; custom experiments run the full budget unless stopped.`
+      : `Step ${Number(state.step) || 0} of at most ${state.max_steps || "—"}; it ends early only when the selected goal succeeds.`;
     $("frameStatus").innerHTML = "<i></i> LIVE";
     $("progressLabel").textContent = "CURRENT ROLLOUT";
     $("progressText").textContent = `Step ${Number(state.step) || 0} / ${state.max_steps || "—"}`;
@@ -197,21 +231,27 @@ function updateControls(state) {
   const stopped = ["stopped", "complete"].includes(state.phase);
   const running = state.phase === "running";
   const loading = !state.interactive || state.phase === "initializing";
-  $("startRun").disabled = stopped || loading;
-  $("applyPrompt").disabled = stopped || !running || !draftDirty;
+  const commandPending = Boolean(pendingCommand);
+  $("startRun").disabled = stopped || loading || commandPending;
+  $("applyPrompt").disabled = stopped || !running || !draftDirty || commandPending;
   $("finishRun").disabled = stopped || loading;
   $("generatePrompt").disabled = stopped || !localLlmEnabled;
   $("generatorMode").disabled = stopped || !localLlmEnabled || !randomGenerationEnabled;
-  $("taskSelect").disabled = stopped || loading;
-  $("promptInput").disabled = stopped || loading;
-  const exploratory = pendingPromptSource === "local_llm_exploratory";
-  const rolloutType = exploratory ? "EXPLORATORY" : "SCORED";
-  $("startRun").textContent = running
-    ? `3 · ABORT & START A FRESH ${rolloutType} ROLLOUT`
-    : `3 · START A FRESH ${rolloutType} ROLLOUT`;
+  $("taskSelect").disabled = stopped || loading || commandPending;
+  $("promptInput").disabled = stopped || loading || commandPending;
+  $("rolloutBudget").disabled = stopped || loading || commandPending;
+  $("evaluationMode").disabled = stopped || loading || commandPending;
+  const exploratory = selectedEvaluationMode() === "exploratory";
+  const rolloutType = exploratory ? "CUSTOM UNSCORED" : "SCORED";
+  $("startRun").textContent = commandPending
+    ? "START REQUEST SENT · WAITING FOR NEW STATE"
+    : (running
+      ? `4 · ABORT & START A FRESH ${rolloutType} ROLLOUT`
+      : `4 · START A FRESH ${rolloutType} ROLLOUT`);
+  const budgetText = `${selectedBudgetSteps(state)}-step budget`;
   $("startHelp").textContent = exploratory
-    ? "Resets the scene and runs the generated experiment. It is excluded from success rates because the LIBERO scoring goal is different."
-    : "Resets the scene, uses the task and draft above, and counts the result toward the task/prompt success rate.";
+    ? `Resets the scene and runs the custom experiment with a ${budgetText}. Its result is saved but excluded from the selected task’s success rate.`
+    : `Resets the scene with a ${budgetText} and counts the result for this task, prompt, and budget.`;
   $("applyPrompt").textContent = running ? "APPLY DRAFT TO THIS ROLLOUT" : "AVAILABLE WHILE A ROLLOUT IS RUNNING";
   $("applyHelp").textContent = stopped
     ? "Unavailable in review mode because the simulator has stopped. Launch a new session to continue."
@@ -234,9 +274,19 @@ async function configureControls() {
   $("promptInput").addEventListener("focus", () => { editingPrompt = true; });
   $("promptInput").addEventListener("blur", () => { editingPrompt = false; });
   $("promptInput").addEventListener("input", () => {
+    const firstManualEdit = pendingPromptSource !== "typed" || !draftDirty;
     draftDirty = true;
     pendingPromptSource = "typed";
     $("draftSource").textContent = "TYPED DRAFT";
+    if (firstManualEdit) {
+      $("evaluationMode").value = "exploratory";
+      evaluationDirty = true;
+      $("rolloutBudget").value = "3";
+      budgetDirty = true;
+      updateEvaluationHelp();
+      updateBudgetHelp();
+      setControlNote("Manual edits default to a long, unscored custom experiment. Choose Scored only if the wording still preserves the selected task exactly.");
+    }
     updateControls(lastState);
   });
   $("taskSelect").addEventListener("change", () => {
@@ -247,6 +297,12 @@ async function configureControls() {
       draftDirty = true;
       pendingPromptSource = "canonical";
       $("draftSource").textContent = "CANONICAL DRAFT";
+      $("evaluationMode").value = "scored";
+      evaluationDirty = true;
+      $("rolloutBudget").value = "2";
+      budgetDirty = true;
+      updateEvaluationHelp();
+      updateBudgetHelp();
     }
     syncTaskExplanation();
     setControlNote("Task and its canonical instruction are staged. Press Start when ready.");
@@ -258,17 +314,48 @@ async function configureControls() {
       ? "Exploratory mode invents another plausible action using scene objects. Its rollout will not affect success rates."
       : "Scored-variation mode randomizes the wording while preserving the selected task goal.");
   });
+  $("evaluationMode").addEventListener("change", () => {
+    evaluationDirty = true;
+    updateEvaluationHelp();
+    updateBudgetHelp();
+    const scored = selectedEvaluationMode() === "scored";
+    setControlNote(scored
+      ? "This attempt will be scored against the selected simulator goal. Use this only when the instruction has the same meaning."
+      : "This custom experiment will save its video and telemetry without affecting the selected task’s success rate.");
+    updateControls(lastState);
+  });
+  $("rolloutBudget").addEventListener("change", () => {
+    budgetDirty = true;
+    updateBudgetHelp();
+    setControlNote(`Staged a ${selectedBudgetSteps()}-step budget for the next fresh rollout.`);
+    updateControls(lastState);
+  });
+  updateEvaluationHelp();
+  updateBudgetHelp();
   $("startRun").onclick = async () => {
     try {
+      const expectedPrompt = $("promptInput").value.trim();
+      const expectedTask = Number($("taskSelect").value);
+      const expectedBudget = selectedBudget();
+      const expectedEvaluation = selectedEvaluationMode();
       const result = await postJson("/api/control", {
         action: "start_rollout",
-        task_id: Number($("taskSelect").value),
-        prompt: $("promptInput").value,
+        task_id: expectedTask,
+        prompt: expectedPrompt,
         source: pendingPromptSource,
+        rollout_budget_multiplier: expectedBudget,
+        evaluation_mode: expectedEvaluation,
       });
-      pendingCommandId = result.command.id;
-      taskDirty = false;
-      setControlNote("Starting from a fresh simulator state with the task and instruction above.");
+      pendingCommand = {
+        id: result.command.id,
+        action: "start_rollout",
+        prompt: expectedPrompt,
+        taskId: expectedTask,
+        budget: expectedBudget,
+        evaluationMode: expectedEvaluation,
+      };
+      setControlNote(`Start requested. Keeping this draft visible until the new simulator state confirms the exact prompt and ${selectedBudgetSteps()}-step budget.`);
+      updateControls(lastState);
     } catch (error) { setControlNote(error.message, true); }
   };
   $("applyPrompt").onclick = async () => {
@@ -276,18 +363,26 @@ async function configureControls() {
     try {
       const result = await postJson("/api/control", {
         action: "set_prompt",
-        prompt: $("promptInput").value,
+        prompt: $("promptInput").value.trim(),
         source: pendingPromptSource,
+        evaluation_mode: selectedEvaluationMode(),
       });
-      pendingCommandId = result.command.id;
+      pendingCommand = {
+        id: result.command.id,
+        action: "set_prompt",
+        prompt: $("promptInput").value.trim(),
+        taskId: Number($("taskSelect").value),
+        evaluationMode: selectedEvaluationMode(),
+      };
       setControlNote("Draft sent. π0.5 will replan from the next observation; this attempt is now mixed-prompt.");
+      updateControls(lastState);
     } catch (error) { setControlNote(error.message, true); }
   };
   $("finishRun").onclick = async () => {
     if (!window.confirm("Finish this session and save its report? The dashboard will remain open in review mode.")) return;
     try {
       const result = await postJson("/api/control", {action: "stop"});
-      pendingCommandId = result.command.id;
+      pendingCommand = {id: result.command.id, action: "stop"};
       setControlNote("Finishing the simulator and saving the report. This dashboard will remain open for review.");
     } catch (error) { setControlNote(error.message, true); }
   };
@@ -305,10 +400,16 @@ async function configureControls() {
       draftDirty = true;
       pendingPromptSource = result.mode === "exploratory" ? "local_llm_exploratory" : "local_llm";
       $("draftSource").textContent = result.mode === "exploratory" ? "UNSCORED EXPLORATORY DRAFT" : "LOCAL LLM SCORED DRAFT";
+      $("evaluationMode").value = result.mode === "exploratory" ? "exploratory" : "scored";
+      evaluationDirty = true;
+      $("rolloutBudget").value = result.mode === "exploratory" ? "3" : "2";
+      budgetDirty = true;
+      updateEvaluationHelp();
+      updateBudgetHelp();
       const scoringNote = result.mode === "exploratory"
         ? "This explores another scene action and is excluded from prompt success rates."
         : "This preserves the selected scoring goal.";
-      setControlNote(`Generated a new local draft with ${result.model} in ${format(result.duration_ms)} ms. ${scoringNote}`);
+      setControlNote(`Generated a new local draft with ${result.model} in ${format(result.duration_ms)} ms and staged a ${selectedBudgetSteps()}-step rollout. ${scoringNote}`);
     } catch (error) { setControlNote(error.message, true); }
     finally { updateControls(lastState); }
   };
@@ -319,10 +420,27 @@ async function updateState() {
     const state = await fetch("/api/state", {cache: "no-store"}).then(r => r.json());
     lastState = state;
     await configureControls();
-    if (pendingCommandId && state.command_ack === pendingCommandId) {
-      pendingCommandId = null;
-      draftDirty = false;
-      taskDirty = false;
+    if (pendingCommand && state.command_ack === pendingCommand.id) {
+      const promptMatches = pendingCommand.prompt === undefined
+        || String(state.prompt || "").trim() === pendingCommand.prompt;
+      const taskMatches = pendingCommand.taskId === undefined
+        || Number(state.task_id) === pendingCommand.taskId;
+      const budgetMatches = pendingCommand.budget === undefined
+        || Number(state.rollout_budget_multiplier) === pendingCommand.budget;
+      const evaluationMatches = pendingCommand.evaluationMode === undefined
+        || String(state.evaluation_mode || "scored") === pendingCommand.evaluationMode;
+      if (promptMatches && taskMatches && budgetMatches && evaluationMatches) {
+        if (pendingCommand.action === "start_rollout") {
+          draftDirty = false;
+          taskDirty = false;
+          budgetDirty = false;
+          evaluationDirty = false;
+        } else if (pendingCommand.action === "set_prompt") {
+          draftDirty = false;
+          evaluationDirty = false;
+        }
+        pendingCommand = null;
+      }
     }
     if (state.network_verdict === "loopback_only") {
       $("networkBadge").innerHTML = "<i></i> LOCAL-ONLY VERIFIED";
@@ -333,6 +451,14 @@ async function updateState() {
     $("phaseBadge").textContent = humanPhase(state);
     $("interactiveControls").classList.toggle("hidden", !state.interactive);
     populateTasks(state.available_tasks, state.task_id);
+    if (!budgetDirty && !pendingCommand && state.rollout_budget_multiplier) {
+      $("rolloutBudget").value = String(state.rollout_budget_multiplier);
+      updateBudgetHelp();
+    }
+    if (!evaluationDirty && !pendingCommand && state.evaluation_mode) {
+      $("evaluationMode").value = state.evaluation_mode;
+      updateEvaluationHelp();
+    }
     if (!draftDirty && !editingPrompt) {
       $("promptInput").value = state.prompt || "";
       pendingPromptSource = state.prompt_source || "canonical";

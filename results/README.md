@@ -1,5 +1,31 @@
 # Reproduction results
 
+## 2026-08-05 — prompt handoff and rollout-budget diagnosis
+
+Session `20260805-153435` reproduced both reported symptoms. The dashboard
+acknowledged a fresh-start command before the new environment published its
+prompt, allowing the previous state to repaint the draft briefly. Failed custom
+commands also stopped at the fixed `libero_spatial` cap of 220 actions, which
+took about 17.7–18.0 seconds on this workstation. A successful scored variation
+ended after 105 policy steps (8.95 seconds) because LIBERO detected the selected
+goal; that early stop is correct for a scored attempt.
+
+The dashboard now retains a submitted draft until the acknowledged state also
+matches its prompt, task, evaluation mode, and budget. Fresh rollouts support
+Standard (1×), Extended (2×), and Long (3×) budgets, with Extended as the
+default. Manual edits default to a Long custom experiment. Custom experiments
+run the full budget and are reported as unscored; true goal-preserving variants
+can be marked Scored and still stop as soon as the selected goal succeeds.
+
+Session `20260805-154934` validated the fix against the real local policy. A
+browser-driven fresh start sampled the instruction field 97 times during the
+handoff; every sample retained the newly submitted prompt and the pending state
+was visible. A custom 220-step run reached the hidden LIBERO goal but continued
+through all 44 policy requests and finished `unscored` after 28.12 seconds. The
+same scene then ran a true scored wording variation, succeeded after 23 policy
+requests in 9.22 seconds, and was recorded separately as 1/1 scored plus one
+unscored custom attempt.
+
 ## 2026-08-05 — prompt delivery and randomized generation audit
 
 A live interactive session was inspected after four task-4 rollouts. The command
