@@ -60,7 +60,7 @@ def _timestamp():
 def _prompt_stats(history):
     stats = {}
     for attempt in history:
-        if attempt["status"] not in ("success", "failure"):
+        if not attempt.get("rate_eligible"):
             continue
         key = "task {} | {}".format(attempt["task_id"], attempt["prompt"])
         item = stats.setdefault(key, {"episodes": 0, "successes": 0})
@@ -120,7 +120,67 @@ def run(args):
         },
     )
 
+    def apply_rollout_settings(command):
+        nonlocal current_task_id, prompt_override, prompt_source
+        requested_task = int(command.get("task_id", current_task_id))
+        if requested_task < 0 or requested_task >= suite.n_tasks:
+            raise ValueError("Invalid task ID: {}".format(requested_task))
+        current_task_id = requested_task
+        canonical = str(suite.get_task(current_task_id).language)
+        candidate = str(command.get("prompt", canonical)).strip()
+        prompt_override = candidate if candidate and candidate != canonical else None
+        requested_source = str(command.get("source", "typed"))
+        prompt_source = (
+            requested_source
+            if prompt_override and requested_source in ("typed", "local_llm")
+            else "canonical"
+        )
+
+    initial_task = suite.get_task(current_task_id)
+    initial_canonical_prompt = str(initial_task.language)
+    state.update(
+        phase="awaiting_command",
+        task_id=current_task_id,
+        task_position=current_task_id + 1,
+        canonical_prompt=initial_canonical_prompt,
+        prompt=prompt_override or initial_canonical_prompt,
+        prompt_source=prompt_source,
+        command_message="Choose a task and instruction, then start a rollout",
+    )
+
     should_stop = False
+    while not should_stop and attempt_number == 0:
+        command = inbox.read()
+        if not command:
+            time.sleep(0.1)
+            continue
+        action = command.get("action")
+        if action == "stop":
+            should_stop = True
+        elif action == "set_prompt":
+            candidate = str(command.get("prompt", "")).strip()
+            prompt_override = candidate or None
+            prompt_source = (
+                str(command.get("source", "typed")) if candidate else "canonical"
+            )
+        elif action == "set_task":
+            try:
+                apply_rollout_settings(command)
+            except ValueError as error:
+                state.update(control_error=str(error))
+                continue
+        elif action in ("start", "reset", "start_rollout"):
+            if action == "start_rollout":
+                try:
+                    apply_rollout_settings(command)
+                except ValueError as error:
+                    state.update(control_error=str(error))
+                    continue
+            state.update(
+                command_ack=command.get("id"), command_message="Starting rollout"
+            )
+            break
+
     while not should_stop:
         attempt_task_id = current_task_id
         task = suite.get_task(current_task_id)
@@ -132,8 +192,10 @@ def run(args):
         obs = env.set_init_state(initial_states[attempt_number % len(initial_states)])
         action_plan = collections.deque()
         replay_images = []
+        prompt_timeline = []
         done = False
         aborted = False
+        auto_start_next = False
         abort_reason = None
         step = 0
         attempt_number += 1
@@ -153,6 +215,8 @@ def run(args):
             last_action_chunk=[],
             current_action=[],
             inference_latency_ms=None,
+            command_message="Running attempt {}".format(attempt_number),
+            control_error=None,
         )
         logging.info(
             "Interactive attempt %d, task %d: %s",
@@ -184,9 +248,17 @@ def run(args):
                         prompt=active_prompt,
                         prompt_source=prompt_source,
                         command_ack=command.get("id"),
+                        command_message="Instruction applied; replanning",
                     )
-                elif action in ("reset", "set_task"):
-                    if action == "set_task":
+                elif action in ("reset", "set_task", "start_rollout"):
+                    if action == "start_rollout":
+                        try:
+                            apply_rollout_settings(command)
+                        except ValueError as error:
+                            state.update(control_error=str(error))
+                            continue
+                        auto_start_next = True
+                    elif action == "set_task":
                         requested_task = int(command.get("task_id", current_task_id))
                         if requested_task < 0 or requested_task >= suite.n_tasks:
                             state.update(
@@ -200,7 +272,18 @@ def run(args):
                         prompt_source = "canonical"
                     aborted = True
                     abort_reason = action
-                    state.update(command_ack=command.get("id"))
+                    state.update(
+                        command_ack=command.get("id"),
+                        command_message=(
+                            "Starting a fresh rollout"
+                            if action == "start_rollout"
+                            else (
+                                "Switching task"
+                                if action == "set_task"
+                                else "Resetting"
+                            )
+                        ),
+                    )
                     break
 
             if step < args.num_steps_wait:
@@ -215,6 +298,17 @@ def run(args):
             replay_images.append(external)
 
             if not action_plan:
+                if (
+                    not prompt_timeline
+                    or prompt_timeline[-1]["prompt"] != active_prompt
+                ):
+                    prompt_timeline.append(
+                        {
+                            "step": max(0, step - args.num_steps_wait),
+                            "prompt": active_prompt,
+                            "source": prompt_source,
+                        }
+                    )
                 inference_started = time.perf_counter()
                 action_chunk = np.asarray(client.infer(model_input)["actions"])
                 inference_latency = (time.perf_counter() - inference_started) * 1000.0
@@ -226,6 +320,7 @@ def run(args):
                     inference_latencies_ms=[
                         round(value, 2) for value in latencies[-120:]
                     ],
+                    prompt_timeline=prompt_timeline,
                 )
 
             current_action = np.asarray(action_plan.popleft())
@@ -265,13 +360,25 @@ def run(args):
                 output_video, [np.asarray(frame) for frame in replay_images], fps=10
             )
 
+        if not prompt_timeline:
+            prompt_timeline.append(
+                {"step": 0, "prompt": active_prompt, "source": prompt_source}
+            )
+        mixed_prompt = len({item["prompt"] for item in prompt_timeline}) > 1
+        rate_eligible = status in ("success", "failure") and not mixed_prompt
+
         history.append(
             {
                 "attempt": attempt_number,
                 "task_id": attempt_task_id,
                 "canonical_prompt": canonical_prompt,
                 "prompt": active_prompt,
-                "prompt_source": prompt_source,
+                "prompt_source": "mixed"
+                if mixed_prompt
+                else prompt_timeline[0]["source"],
+                "prompt_timeline": prompt_timeline,
+                "mixed_prompt": mixed_prompt,
+                "rate_eligible": rate_eligible,
                 "status": status,
                 "abort_reason": abort_reason,
                 "duration_seconds": round(duration, 2),
@@ -281,7 +388,8 @@ def run(args):
         warm_latencies = latencies[1:] if len(latencies) > 1 else latencies
         state.update(
             phase="stopped" if should_stop else "awaiting_command",
-            task_success=bool(done),
+            task_success=bool(done) if status in ("success", "failure") else None,
+            last_attempt_status=status,
             successes=successes,
             episodes=completed_episodes,
             aborted_attempts=sum(item["status"] == "aborted" for item in history),
@@ -303,7 +411,13 @@ def run(args):
             p95_inference_latency_ms=round(float(np.percentile(warm_latencies, 95)), 2)
             if warm_latencies
             else None,
+            command_message=(
+                "Session finished" if should_stop else "Ready to start another rollout"
+            ),
         )
+
+        if auto_start_next and not should_stop:
+            continue
 
         while not should_stop and state.data["phase"] == "awaiting_command":
             command = inbox.read()
@@ -313,6 +427,9 @@ def run(args):
             action = command.get("action")
             if action == "stop":
                 should_stop = True
+                state.update(
+                    command_ack=command.get("id"), command_message="Finishing session"
+                )
             elif action == "set_prompt":
                 candidate = str(command.get("prompt", "")).strip()
                 prompt_override = candidate or None
@@ -325,6 +442,7 @@ def run(args):
                     prompt=prompt_override or canonical_prompt,
                     prompt_source=prompt_source,
                     command_ack=command.get("id"),
+                    command_message="Instruction staged for the next rollout",
                 )
             elif action == "set_task":
                 requested_task = int(command.get("task_id", current_task_id))
@@ -332,14 +450,40 @@ def run(args):
                     current_task_id = requested_task
                     prompt_override = None
                     prompt_source = "canonical"
-                    state.update(command_ack=command.get("id"))
-                    break
+                    state.update(
+                        command_ack=command.get("id"), command_message="Switching task"
+                    )
+                    canonical_prompt = str(suite.get_task(current_task_id).language)
+                    state.update(
+                        task_id=current_task_id,
+                        task_position=current_task_id + 1,
+                        canonical_prompt=canonical_prompt,
+                        prompt=canonical_prompt,
+                        prompt_source="canonical",
+                    )
+                    continue
                 state.update(control_error="Invalid task ID: {}".format(requested_task))
+            elif action == "start_rollout":
+                try:
+                    apply_rollout_settings(command)
+                except ValueError as error:
+                    state.update(control_error=str(error))
+                    continue
+                state.update(
+                    command_ack=command.get("id"), command_message="Starting rollout"
+                )
+                break
             elif action in ("reset", "start"):
-                state.update(command_ack=command.get("id"))
+                state.update(
+                    command_ack=command.get("id"), command_message="Starting rollout"
+                )
                 break
 
-    state.update(phase="stopped", finished_at=_timestamp())
+    state.update(
+        phase="stopped",
+        finished_at=_timestamp(),
+        command_message="Review saved results",
+    )
 
 
 if __name__ == "__main__":

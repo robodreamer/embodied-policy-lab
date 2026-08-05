@@ -104,30 +104,52 @@ edit the π0.5 instruction while it is running, and accumulate success rates:
 ./scripts/run_interactive_showcase.sh
 ```
 
-Use the browser controls to apply a typed prompt immediately, reset into a new
-rollout, change tasks, and stop cleanly to generate the final report. Applying a
-prompt discards the queued action chunk, so π0.5 replans from the next
-observation. The dashboard retains completed, failed, and aborted attempts and
-shows the running success rate; `summary.json` also records per-prompt totals.
+The browser now waits for you instead of starting automatically. Its workflow is:
+
+1. Choose the **evaluation task**, which sets the scene and success scoring.
+2. Review or edit the **instruction sent to π0.5**.
+3. Press **Start a fresh scored rollout**.
+
+Changing the dropdown only stages a choice; it never resets a running attempt.
+During a rollout, **Apply draft to this rollout** changes the instruction and
+forces a replan without resetting the scene. Because that creates a mixed-prompt
+attempt, the dashboard excludes it from per-prompt rates. **Abort & start a fresh
+rollout** resets the simulator with the staged task and instruction. **Finish &
+save report** stops inference, writes artifacts, and leaves the dashboard open
+in review mode until you press Ctrl+C in the terminal.
+
+The dashboard retains completed, failed, mixed-prompt, and aborted attempts.
+`summary.json` records prompt timelines and per-task/prompt totals.
 
 An important interpretation detail: selecting a LIBERO task chooses the world,
 initial state, and hidden success predicate. Editing only the prompt does not
 change that predicate. This makes prompt edits useful for testing paraphrase,
 ambiguity, or adversarial-instruction robustness against a fixed goal.
 
-To enable the **Generate locally** button, point it at a loopback-only Ollama or
-OpenAI-compatible server. For Ollama, for example:
+The default optional prompt generator is the compact `gemma3:1b` model served by
+Ollama. Once Ollama is installed, prepare it with:
+
+```bash
+./scripts/setup_local_llm.sh
+```
+
+The interactive launcher detects the local server and model automatically. The
+dashboard then shows **Local generator ready: gemma3:1b** and enables **Generate
+with local LLM**. Generated text remains a draft until you explicitly start a
+new rollout or apply it to the current rollout.
+
+To use another loopback-only Ollama or OpenAI-compatible server, override:
 
 ```bash
 LOCAL_LLM_URL=http://127.0.0.1:11434/api/generate \
-LOCAL_LLM_MODEL=gemma3:1b \
+LOCAL_LLM_MODEL=your-model \
 ./scripts/run_interactive_showcase.sh
 ```
 
 For an OpenAI-compatible local server such as LM Studio, use its local
 `/v1/chat/completions` URL and model name. The launcher rejects non-loopback LLM
 URLs so prompt generation cannot silently become a hosted call. Ollama/LM Studio
-is optional and is not installed by setup.
+remains optional; the core π0.5 showcase does not require either one.
 
 ## Full-suite smoke test
 
@@ -201,7 +223,7 @@ you want a single rollout.
 Ubuntu packages required by the upstream dependency pins:
 
 ```bash
-sudo apt-get install -y linux-libc-dev build-essential git-lfs strace ffmpeg
+sudo apt-get install -y linux-libc-dev build-essential git-lfs curl strace ffmpeg
 ```
 
 Docker is not required for this installation. The official Docker Compose route
@@ -225,6 +247,11 @@ PI05_PORT=8010 ./scripts/run_client.sh
 
 If a first checkpoint download was interrupted, rerun the server. The official
 downloader uses a `.partial` directory and finalizes it after all files arrive.
+
+Older installations may print the same `datasets path ... does not exist`
+warning repeatedly. That directory contains optional training demonstrations and
+is not used by this evaluator. Rerun `./scripts/setup.sh`; it now creates the
+configured directory so the harmless warning does not obscure rollout results.
 
 ## Sources
 

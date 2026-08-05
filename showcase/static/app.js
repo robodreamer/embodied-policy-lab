@@ -1,11 +1,16 @@
 const $ = (id) => document.getElementById(id);
 let lastState = {};
-let editingPrompt = false;
 let configured = false;
-let pendingPromptSource = "typed";
+let editingPrompt = false;
+let draftDirty = false;
+let taskDirty = false;
+let pendingPromptSource = "canonical";
+let localLlmEnabled = false;
+let pendingCommandId = null;
 
 function format(value, digits = 0) {
-  return value !== null && value !== "" && Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : "—";
+  return value !== null && value !== "" && Number.isFinite(Number(value))
+    ? Number(value).toFixed(digits) : "—";
 }
 
 function drawSeries(canvas, series, colors, fixedRange = null) {
@@ -47,7 +52,9 @@ function drawAction(chunk) {
 }
 
 function drawLatency(values) {
-  drawSeries($("latencyChart"), [Array.isArray(values) ? values.map(Number) : []], ["#b8ff36"]);
+  const samples = Array.isArray(values) ? values.map(Number) : [];
+  const warmSamples = samples.length > 1 ? samples.slice(1) : [];
+  drawSeries($("latencyChart"), [warmSamples], ["#b8ff36"]);
 }
 
 function refreshFrames() {
@@ -57,7 +64,11 @@ function refreshFrames() {
 }
 
 async function postJson(route, payload) {
-  const response = await fetch(route, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload)});
+  const response = await fetch(route, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(payload),
+  });
   const result = await response.json();
   if (!response.ok) throw new Error(result.error || `Request failed (${response.status})`);
   return result;
@@ -65,83 +76,205 @@ async function postJson(route, payload) {
 
 function setControlNote(message, error = false) {
   $("controlNote").textContent = message;
-  $("controlNote").style.color = error ? "#ff5f57" : "";
+  $("controlNote").classList.toggle("error", error);
+}
+
+function selectedTask() {
+  const tasks = Array.isArray(lastState.available_tasks) ? lastState.available_tasks : [];
+  return tasks.find(task => String(task.id) === $("taskSelect").value);
+}
+
+function syncTaskExplanation() {
+  const task = selectedTask();
+  $("successRule").textContent = task
+    ? `the simulator detects completion of: “${task.prompt}”`
+    : "the selected simulator goal is completed";
 }
 
 function populateTasks(tasks, selected) {
   const select = $("taskSelect");
-  if (!Array.isArray(tasks) || select.options.length === tasks.length) {
-    select.value = String(selected ?? 0);
-    return;
+  if (!Array.isArray(tasks)) return;
+  if (select.options.length !== tasks.length) {
+    select.replaceChildren(...tasks.map(task => {
+      const option = document.createElement("option");
+      option.value = task.id;
+      option.textContent = `Task ${Number(task.id) + 1} — ${task.prompt}`;
+      return option;
+    }));
   }
-  select.replaceChildren(...tasks.map(task => {
-    const option = document.createElement("option");
-    option.value = task.id;
-    option.textContent = `${task.id}: ${task.prompt}`;
-    return option;
-  }));
-  select.value = String(selected ?? 0);
+  if (!taskDirty) select.value = String(selected ?? 0);
+  syncTaskExplanation();
+}
+
+function isRateEligible(item) {
+  if (typeof item.rate_eligible === "boolean") return item.rate_eligible;
+  return ["success", "failure"].includes(item.status) && !item.mixed_prompt;
 }
 
 function renderHistory(history) {
   const source = Array.isArray(history) ? history : [];
   const stats = new Map();
-  source.filter(item => ["success", "failure"].includes(item.status)).forEach(item => {
+  source.filter(isRateEligible).forEach(item => {
     const key = `${item.task_id}\n${item.prompt}`;
     const current = stats.get(key) || {episodes: 0, successes: 0};
-    current.episodes += 1; current.successes += Number(item.status === "success"); stats.set(key, current);
+    current.episodes += 1;
+    current.successes += Number(item.status === "success");
+    stats.set(key, current);
   });
-  const rows = source.slice().reverse();
   $("historyCard").classList.toggle("hidden", !lastState.interactive);
-  $("historyBody").replaceChildren(...rows.map(item => {
+  $("historyBody").replaceChildren(...source.slice().reverse().map(item => {
     const row = document.createElement("tr");
-    const aggregate = stats.get(`${item.task_id}\n${item.prompt}`);
-    const rate = aggregate ? `${aggregate.successes}/${aggregate.episodes} · ${Math.round(100 * aggregate.successes / aggregate.episodes)}%` : "excluded";
-    [item.attempt, item.task_id, item.prompt, item.status, rate, `${format(item.duration_seconds, 1)} s`].forEach((value, index) => {
+    const aggregate = isRateEligible(item) ? stats.get(`${item.task_id}\n${item.prompt}`) : null;
+    const rate = aggregate
+      ? `${aggregate.successes}/${aggregate.episodes} · ${Math.round(100 * aggregate.successes / aggregate.episodes)}%`
+      : (item.mixed_prompt ? "excluded · mixed prompt" : "excluded · aborted");
+    const values = [
+      item.attempt,
+      Number(item.task_id) + 1,
+      item.mixed_prompt ? `${item.prompt} (changed mid-run)` : item.prompt,
+      item.prompt_source || "—",
+      item.status,
+      rate,
+      `${format(item.duration_seconds, 1)} s`,
+    ];
+    values.forEach((value, index) => {
       const cell = document.createElement("td");
       cell.textContent = value ?? "—";
-      if (index === 3) cell.className = `result-${item.status}`;
+      if (index === 4) cell.className = `result-${item.status}`;
       row.appendChild(cell);
     });
     return row;
   }));
 }
 
+function humanPhase(state) {
+  if (state.phase === "running") return "RUNNING";
+  if (state.phase === "awaiting_command") return "READY";
+  if (state.phase === "stopped") return "SAVED";
+  if (state.phase === "complete") return "COMPLETE";
+  return "LOADING";
+}
+
+function updateRunStatus(state) {
+  const phase = state.phase;
+  const scored = Number(state.episodes) || 0;
+  const successes = Number(state.successes) || 0;
+  const aborted = Number(state.aborted_attempts) || 0;
+  if (phase === "running") {
+    $("runStatus").textContent = `Running rollout ${state.attempt || 1}`;
+    $("runDetail").textContent = `Step ${Number(state.step) || 0} of at most ${state.max_steps || "—"}; it may finish early.`;
+    $("frameStatus").innerHTML = "<i></i> LIVE";
+    $("progressLabel").textContent = "CURRENT ROLLOUT";
+    $("progressText").textContent = `Step ${Number(state.step) || 0} / ${state.max_steps || "—"}`;
+  } else if (phase === "stopped" || phase === "complete") {
+    $("runStatus").textContent = "Session saved — review mode";
+    $("runDetail").textContent = `${successes}/${scored} scored successes; ${aborted} aborted and excluded.`;
+    $("frameStatus").innerHTML = "<i></i> LAST FRAME";
+    $("progressLabel").textContent = "SESSION SUMMARY";
+    $("progressText").textContent = `${successes}/${scored} scored · ${aborted} aborted`;
+  } else if (phase === "awaiting_command") {
+    $("runStatus").textContent = scored || aborted ? "Ready for another rollout" : "Ready to run your first rollout";
+    $("runDetail").textContent = "Choose a task and instruction below. Nothing runs until you press Start.";
+    $("frameStatus").innerHTML = scored || aborted ? "<i></i> PAUSED" : "<i></i> WAITING";
+    $("progressLabel").textContent = "SESSION SUMMARY";
+    $("progressText").textContent = `${successes}/${scored} scored · ${aborted} aborted`;
+  } else {
+    $("runStatus").textContent = "Loading local simulator and model";
+    $("runDetail").textContent = "The first inference includes a one-time JAX compile.";
+    $("frameStatus").innerHTML = "<i></i> WAITING";
+  }
+  $("frameStatus").classList.toggle("paused", phase !== "running");
+  $("runDot").className = phase === "running" ? "active" : phase === "stopped" ? "saved" : "";
+}
+
+function updateControls(state) {
+  const stopped = ["stopped", "complete"].includes(state.phase);
+  const running = state.phase === "running";
+  const loading = !state.interactive || state.phase === "initializing";
+  $("startRun").disabled = stopped || loading;
+  $("applyPrompt").disabled = stopped || !running || !draftDirty;
+  $("finishRun").disabled = stopped || loading;
+  $("generatePrompt").disabled = stopped || !localLlmEnabled;
+  $("taskSelect").disabled = stopped || loading;
+  $("promptInput").disabled = stopped || loading;
+  $("startRun").textContent = running ? "3 · ABORT & START A FRESH ROLLOUT" : "3 · START A FRESH SCORED ROLLOUT";
+  $("applyPrompt").textContent = running ? "APPLY DRAFT TO THIS ROLLOUT" : "AVAILABLE WHILE A ROLLOUT IS RUNNING";
+}
+
 async function configureControls() {
   if (configured) return;
   configured = true;
   const config = await fetch("/api/config", {cache: "no-store"}).then(r => r.json());
-  $("generatePrompt").disabled = !config.local_llm_enabled;
-  $("generatePrompt").title = config.local_llm_enabled ? `Generate with ${config.local_llm_model}` : "Set LOCAL_LLM_URL and LOCAL_LLM_MODEL to enable";
+  localLlmEnabled = Boolean(config.local_llm_enabled);
+  $("llmStatus").textContent = localLlmEnabled
+    ? `Local generator ready: ${config.local_llm_model}`
+    : "Optional local LLM is not configured. Type a prompt directly, or see README setup instructions.";
   $("promptInput").addEventListener("focus", () => { editingPrompt = true; });
   $("promptInput").addEventListener("blur", () => { editingPrompt = false; });
-  $("promptInput").addEventListener("input", () => { pendingPromptSource = "typed"; });
+  $("promptInput").addEventListener("input", () => {
+    draftDirty = true;
+    pendingPromptSource = "typed";
+    $("draftSource").textContent = "TYPED DRAFT";
+    updateControls(lastState);
+  });
+  $("taskSelect").addEventListener("change", () => {
+    taskDirty = true;
+    const task = selectedTask();
+    if (task) {
+      $("promptInput").value = task.prompt;
+      draftDirty = true;
+      pendingPromptSource = "canonical";
+      $("draftSource").textContent = "CANONICAL DRAFT";
+    }
+    syncTaskExplanation();
+    setControlNote("Task and its canonical instruction are staged. Press Start when ready.");
+    updateControls(lastState);
+  });
+  $("startRun").onclick = async () => {
+    try {
+      const result = await postJson("/api/control", {
+        action: "start_rollout",
+        task_id: Number($("taskSelect").value),
+        prompt: $("promptInput").value,
+        source: pendingPromptSource,
+      });
+      pendingCommandId = result.command.id;
+      taskDirty = false;
+      setControlNote("Starting from a fresh simulator state with the task and instruction above.");
+    } catch (error) { setControlNote(error.message, true); }
+  };
   $("applyPrompt").onclick = async () => {
-    try { await postJson("/api/control", {action: "set_prompt", prompt: $("promptInput").value, source: pendingPromptSource}); setControlNote("Prompt accepted; the next action chunk will be replanned."); }
-    catch (error) { setControlNote(error.message, true); }
+    if (!window.confirm("Apply this draft during the current rollout? The attempt will be marked mixed-prompt and excluded from per-prompt success rates.")) return;
+    try {
+      const result = await postJson("/api/control", {
+        action: "set_prompt",
+        prompt: $("promptInput").value,
+        source: pendingPromptSource,
+      });
+      pendingCommandId = result.command.id;
+      setControlNote("Draft sent. π0.5 will replan from the next observation; this attempt is now mixed-prompt.");
+    } catch (error) { setControlNote(error.message, true); }
   };
-  $("resetRun").onclick = async () => {
-    try { await postJson("/api/control", {action: "reset"}); setControlNote("Environment reset requested."); }
-    catch (error) { setControlNote(error.message, true); }
-  };
-  $("stopRun").onclick = async () => {
-    try { await postJson("/api/control", {action: "stop"}); setControlNote("Stopping after the current simulator tick."); }
-    catch (error) { setControlNote(error.message, true); }
-  };
-  $("taskSelect").onchange = async () => {
-    try { await postJson("/api/control", {action: "set_task", task_id: Number($("taskSelect").value)}); setControlNote("Task changed; starting from its canonical initial state."); }
-    catch (error) { setControlNote(error.message, true); }
+  $("finishRun").onclick = async () => {
+    if (!window.confirm("Finish this session and save its report? The dashboard will remain open in review mode.")) return;
+    try {
+      const result = await postJson("/api/control", {action: "stop"});
+      pendingCommandId = result.command.id;
+      setControlNote("Finishing the simulator and saving the report. This dashboard will remain open for review.");
+    } catch (error) { setControlNote(error.message, true); }
   };
   $("generatePrompt").onclick = async () => {
     const button = $("generatePrompt"); button.disabled = true;
     try {
-      const seed = $("promptInput").value.trim() || lastState.canonical_prompt || lastState.prompt;
+      const seed = $("promptInput").value.trim() || selectedTask()?.prompt || lastState.prompt;
       const result = await postJson("/api/generate-prompt", {instruction: seed});
       $("promptInput").value = result.prompt;
+      draftDirty = true;
       pendingPromptSource = "local_llm";
-      setControlNote(`Generated locally with ${result.model}; press APPLY + REPLAN to use it.`);
+      $("draftSource").textContent = "LOCAL LLM DRAFT";
+      setControlNote(`Generated locally with ${result.model} in ${format(result.duration_ms)} ms. Review it, then press Start or Apply.`);
     } catch (error) { setControlNote(error.message, true); }
-    finally { button.disabled = !config.local_llm_enabled; }
+    finally { updateControls(lastState); }
   };
 }
 
@@ -150,34 +283,49 @@ async function updateState() {
     const state = await fetch("/api/state", {cache: "no-store"}).then(r => r.json());
     lastState = state;
     await configureControls();
+    if (pendingCommandId && state.command_ack === pendingCommandId) {
+      pendingCommandId = null;
+      draftDirty = false;
+      taskDirty = false;
+    }
     if (state.network_verdict === "loopback_only") {
       $("networkBadge").innerHTML = "<i></i> LOCAL-ONLY VERIFIED";
     } else if (state.network_verdict === "remote_detected") {
       $("networkBadge").innerHTML = "<i></i> REMOTE CONNECTION DETECTED";
-      $("networkBadge").style.color = "#ff5f57";
-      $("networkBadge").style.borderColor = "#7c2926";
+      $("networkBadge").classList.add("danger-badge");
     }
-    $("phaseBadge").textContent = String(state.phase || "waiting").toUpperCase();
-    $("prompt").textContent = state.prompt || "Waiting for an instruction…";
+    $("phaseBadge").textContent = humanPhase(state);
     $("interactiveControls").classList.toggle("hidden", !state.interactive);
-    if (state.interactive) {
-      populateTasks(state.available_tasks, state.task_id);
-      if (!editingPrompt) $("promptInput").value = state.prompt || "";
-      renderHistory(state.attempt_history);
+    populateTasks(state.available_tasks, state.task_id);
+    if (!draftDirty && !editingPrompt) {
+      $("promptInput").value = state.prompt || "";
+      pendingPromptSource = state.prompt_source || "canonical";
+      $("draftSource").textContent = `${pendingPromptSource.toUpperCase()} DRAFT`;
     }
+    updateRunStatus(state);
+    updateControls(state);
+    $("prompt").textContent = state.prompt || "Waiting for an instruction…";
+    $("appliedSource").textContent = String(state.prompt_source || "—").toUpperCase();
+    $("appliedState").textContent = state.phase === "running" ? "Currently controlling the robot" : "Last applied instruction";
     $("suite").textContent = state.suite || "—";
-    $("taskPosition").textContent = state.task_position ? `${state.task_position}/${state.total_tasks}` : "—";
+    $("taskPosition").textContent = state.task_position ? `Task ${state.task_position} of ${state.total_tasks}` : "—";
     $("seed").textContent = state.seed ?? "—";
     $("latency").textContent = format(state.inference_latency_ms, 1);
-    $("medianLatency").textContent = state.median_inference_latency_ms ? `${format(state.median_inference_latency_ms,1)} ms` : "LIVE";
+    $("medianLatency").textContent = state.median_inference_latency_ms ? `${format(state.median_inference_latency_ms,1)} ms` : "PENDING";
     $("p95Latency").textContent = state.p95_inference_latency_ms ? `${format(state.p95_inference_latency_ms,1)} ms` : "PENDING";
+    $("coldLatency").textContent = state.cold_inference_latency_ms ? `${format(state.cold_inference_latency_ms / 1000,1)} s` : "PENDING";
     $("replan").textContent = state.replan_steps ? `${state.replan_steps} STEPS` : "—";
-    $("success").textContent = `${state.successes || 0}/${state.episodes || 0}`;
+    const episodes = Number(state.episodes) || 0;
+    const successes = Number(state.successes) || 0;
+    const aborted = Number(state.aborted_attempts) || 0;
+    $("success").textContent = episodes ? `${Math.round(100 * successes / episodes)}%` : "—";
+    $("successDetail").textContent = `${successes}/${episodes} scored · ${aborted} aborted (excluded)`;
     $("endpoint").textContent = state.policy_endpoint || "ws://127.0.0.1:8000";
-    const progress = Math.max(0, Math.min(1, Number(state.progress) || 0));
-    $("progressBar").style.transform = `scaleX(${progress})`;
-    $("progressText").textContent = `${Math.round(progress * 100)}%`;
+    const runningProgress = state.phase === "running" ? Math.max(0, Math.min(1, Number(state.progress) || 0)) : 0;
+    $("progressBar").style.transform = `scaleX(${runningProgress})`;
     $("updated").textContent = state.updated_at ? `UPDATED ${new Date(state.updated_at).toLocaleTimeString()}` : "AWAITING TELEMETRY";
+    if (state.control_error) setControlNote(state.control_error, true);
+    renderHistory(state.attempt_history);
     drawAction(state.last_action_chunk || []);
     drawLatency(state.inference_latencies_ms || []);
     refreshFrames();
@@ -191,10 +339,13 @@ async function updateTelemetry() {
     $("gpuUtil").textContent = format(completed ? gpu.max_utilization_pct : gpu.utilization_pct);
     $("vram").textContent = format(completed ? gpu.max_memory_mib : gpu.memory_mib);
     $("power").textContent = format(completed ? gpu.max_power_w : gpu.power_w, 1);
-  } catch (_) { /* dashboard remains useful without nvidia-smi */ }
+  } catch (_) { /* Dashboard remains useful without nvidia-smi. */ }
 }
 
-window.addEventListener("resize", () => { drawAction(lastState.last_action_chunk || []); drawLatency(lastState.inference_latencies_ms || []); });
+window.addEventListener("resize", () => {
+  drawAction(lastState.last_action_chunk || []);
+  drawLatency(lastState.inference_latencies_ms || []);
+});
 updateState(); updateTelemetry();
 setInterval(updateState, 300);
 setInterval(updateTelemetry, 1000);

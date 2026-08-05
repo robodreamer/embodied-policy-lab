@@ -64,6 +64,12 @@ wait_for_port() {
   return 1
 }
 
+if [[ "$LOCAL_LLM_URL" == http://127.0.0.1:11434/* ]] && \
+  [[ -n "$LOCAL_LLM_MODEL" ]] && command -v ollama >/dev/null 2>&1; then
+  echo "Reserving GPU memory for π0.5 before loading the optional prompt model..."
+  ollama stop "$LOCAL_LLM_MODEL" >/dev/null 2>&1 || true
+fi
+
 echo "Starting local π0.5 server..."
 if [[ "$NETWORK_AUDIT" == "1" ]]; then
   setsid strace -f -e trace=network -s 256 -o "$SESSION_DIR/network-server.log" \
@@ -113,6 +119,9 @@ fi
 DASHBOARD_URL="http://127.0.0.1:$DASHBOARD_PORT"
 echo "Dashboard: $DASHBOARD_URL"
 echo "Session: $SESSION_DIR"
+if [[ "$INTERACTIVE" == "1" ]]; then
+  echo "Interactive mode: use the browser to run attempts and end the session."
+fi
 if [[ "$AUTO_OPEN" == "1" ]] && [[ -n "${DISPLAY:-}" ]]; then
   xdg-open "$DASHBOARD_URL" >/dev/null 2>&1 || true
 fi
@@ -181,12 +190,17 @@ wait "$GPU_PID" 2>/dev/null || true
 GPU_PID=""
 
 "$OPENPI_DIR/.venv/bin/python" "$PROJECT_DIR/showcase/generate_report.py" "$SESSION_DIR"
-echo "Showcase exit status: $CLIENT_STATUS"
+if [[ "$CLIENT_STATUS" == "0" ]]; then
+  echo "Session saved successfully."
+else
+  echo "Simulator exited with status $CLIENT_STATUS." >&2
+fi
 echo "Report: $SESSION_DIR/report.md"
 echo "Dashboard snapshot data: $SESSION_DIR/state.json"
 
 if [[ "$HOLD_OPEN" == "1" ]]; then
-  echo "Dashboard remains available at $DASHBOARD_URL; press Ctrl+C to stop."
+  echo "Dashboard is now in review mode at $DASHBOARD_URL."
+  echo "Press Ctrl+C here when you are finished reviewing the results."
   wait "$DASHBOARD_PID"
 fi
 

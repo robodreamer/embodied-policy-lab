@@ -77,6 +77,14 @@ def network_destinations(session_dir):
     return {"verdict": verdict, "loopback": local, "remote": remote}
 
 
+def local_llm_events(path):
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return []
+    return [json.loads(line) for line in lines if line.strip()]
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("session_dir")
@@ -97,6 +105,7 @@ def main():
     )
     duration = (finished - started).total_seconds()
     videos = sorted((session_dir / "videos").glob("*.mp4"))
+    llm_events = local_llm_events(session_dir / "llm-generations.jsonl")
 
     summary = {
         "model": state.get("model"),
@@ -119,6 +128,7 @@ def main():
         "videos": [video.name for video in videos],
         "attempt_history": state.get("attempt_history", []),
         "prompt_stats": state.get("prompt_stats", {}),
+        "local_llm_generations": llm_events,
     }
     (session_dir / "summary.json").write_text(
         json.dumps(summary, indent=2), encoding="utf-8"
@@ -145,6 +155,7 @@ def main():
 | Peak GPU utilization | {utilization:.0f}% |
 | Peak GPU power | {power:.2f} W |
 | Peak GPU temperature | {temperature:.0f} °C |
+| Local prompt generations | {llm_generation_count} |
 
 ## Local-inference network audit
 
@@ -165,6 +176,7 @@ with the local policy server over loopback.
 - `network-*`: raw network system-call traces
 - `client.log` and `server.log`: runtime logs
 - `videos/`: rollout MP4 files ({video_count})
+- `llm-generations.jsonl`: local prompt-generation provenance ({llm_generation_count})
 """.format(
         model=summary["model"],
         runtime=summary["runtime"],
@@ -181,6 +193,7 @@ with the local policy server over loopback.
         utilization=gpu["max_utilization_pct"],
         power=gpu["max_power_w"],
         temperature=gpu["max_temperature_c"],
+        llm_generation_count=len(llm_events),
         verdict=network["verdict"],
         loopback=loopback_text,
         remote=remote_text,

@@ -1,5 +1,24 @@
 # Reproduction results
 
+## 2026-08-05 — local-LLM interactive workflow
+
+The revised three-step UI and combined GPU workflow were validated with Ollama
+`gemma3:1b` and the local π0.5 checkpoint:
+
+- the simulator remained idle until an explicit **Start a fresh scored rollout**
+  action;
+- the dashboard generated `Pick up the black bowl and place it on the plate.`
+  locally through `127.0.0.1:11434`;
+- the generated prompt was recorded with source `local_llm`;
+- the resulting task-0 rollout completed successfully: **1/1**;
+- warm median π0.5 inference: approximately **135 ms** per action chunk;
+- combined peak GPU memory: **20,483 MiB**;
+- traced π0.5/simulator network verdict: **`loopback_only`**.
+
+Launch ordering was also tested: the runner unloads an already-resident Ollama
+model before π0.5 checkpoint restoration, then allows the small prompt model to
+load on demand. This avoids JAX checkpoint-load memory pressure on the 24 GB GPU.
+
 ## 2026-08-05 — interactive prompt/reset validation
 
 The persistent browser-controlled workflow was exercised through its HTTP

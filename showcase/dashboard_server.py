@@ -5,6 +5,7 @@ import csv
 import json
 import os
 import pathlib
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -84,6 +85,8 @@ def generate_prompt(url, model, instruction):
                 {"role": "user", "content": instruction},
             ],
             "temperature": 0.4,
+            "max_tokens": 64,
+            "stop": ["\n"],
         }
     else:
         payload = {
@@ -93,7 +96,11 @@ def generate_prompt(url, model, instruction):
                 "imperative sentence. Return only the sentence:\n" + instruction
             ),
             "stream": False,
-            "options": {"temperature": 0.4},
+            "options": {
+                "temperature": 0.2,
+                "num_predict": 48,
+                "stop": ["\n"],
+            },
         }
     request = urllib.request.Request(
         url,
@@ -120,6 +127,7 @@ def main():
     static_dir = pathlib.Path(args.static_dir).resolve()
     local_llm_url = require_loopback_url(args.local_llm_url.strip())
     local_llm_model = args.local_llm_model.strip()
+    llm_event_lock = threading.Lock()
 
     class Handler(SimpleHTTPRequestHandler):
         def __init__(self, *handler_args, **handler_kwargs):
@@ -176,7 +184,14 @@ def main():
                     return
                 body = json.loads(self.rfile.read(length) or b"{}")
                 if route == "/api/control":
-                    allowed = {"reset", "start", "stop", "set_prompt", "set_task"}
+                    allowed = {
+                        "reset",
+                        "start",
+                        "start_rollout",
+                        "stop",
+                        "set_prompt",
+                        "set_task",
+                    }
                     if body.get("action") not in allowed:
                         self._json({"error": "Unsupported control action"}, 400)
                         return
@@ -198,10 +213,32 @@ def main():
                     if not instruction:
                         self._json({"error": "Instruction is empty"}, 400)
                         return
+                    started = time.perf_counter()
                     prompt = generate_prompt(
                         local_llm_url, local_llm_model, instruction
                     )
-                    self._json({"prompt": prompt, "model": local_llm_model})
+                    duration_ms = round((time.perf_counter() - started) * 1000.0, 2)
+                    event = {
+                        "created_at": time.time(),
+                        "model": local_llm_model,
+                        "endpoint_host": urllib.parse.urlparse(local_llm_url).hostname,
+                        "instruction": instruction,
+                        "generated_prompt": prompt,
+                        "duration_ms": duration_ms,
+                    }
+                    with llm_event_lock:
+                        with (session_dir / "llm-generations.jsonl").open(
+                            "a", encoding="utf-8"
+                        ) as stream:
+                            stream.write(json.dumps(event) + "\n")
+                    self._json(
+                        {
+                            "prompt": prompt,
+                            "model": local_llm_model,
+                            "duration_ms": duration_ms,
+                            "local": True,
+                        }
+                    )
                 else:
                     self._json({"error": "Unknown endpoint"}, 404)
             except (json.JSONDecodeError, KeyError, TypeError, ValueError) as error:

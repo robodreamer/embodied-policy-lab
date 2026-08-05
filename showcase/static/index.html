@@ -20,43 +20,63 @@
     </header>
 
     <main>
+      <section id="interactiveControls" class="control-panel hidden">
+        <div class="card-label"><span>01</span> RUN AN EXPERIMENT</div>
+        <div class="run-status">
+          <div><i id="runDot"></i><strong id="runStatus">Preparing the local model…</strong></div>
+          <span id="runDetail">The first action request includes a one-time JAX compile.</span>
+        </div>
+        <div class="control-layout">
+          <div class="control-field">
+            <label for="taskSelect"><span><b>1</b> Evaluation task</span><small>SETS THE SCENE AND HOW SUCCESS IS SCORED</small></label>
+            <select id="taskSelect"></select>
+            <div class="success-rule"><small>SUCCESS IS SCORED WHEN</small><span id="successRule">the selected simulator goal is completed</span></div>
+          </div>
+          <div class="control-field">
+            <label for="promptInput"><span><b>2</b> Instruction sent to π0.5</span><small>CHANGES THE LANGUAGE ONLY</small></label>
+            <textarea id="promptInput" rows="3" placeholder="Type the instruction π0.5 should follow"></textarea>
+            <div class="prompt-tools">
+              <span id="draftSource" class="source-chip">CANONICAL DRAFT</span>
+              <button id="generatePrompt" class="text-button">GENERATE WITH LOCAL LLM</button>
+            </div>
+            <p id="llmStatus">Local LLM status loading…</p>
+          </div>
+        </div>
+        <div class="control-actions">
+          <div class="action-item"><button id="startRun" class="primary-action">3 · START A FRESH SCORED ROLLOUT</button><small>Resets the scene, uses the task and draft above, and counts the result.</small></div>
+          <div class="action-item"><button id="applyPrompt" class="secondary">APPLY DRAFT TO CURRENT ROLLOUT</button><small>Keeps the scene and replans. The mixed-prompt attempt is excluded from per-prompt rates.</small></div>
+          <div class="action-item"><button id="finishRun" class="danger">FINISH &amp; SAVE REPORT</button><small>Stops local inference, writes artifacts, and leaves this page open for review.</small></div>
+        </div>
+        <p id="controlNote">Choose a task and instruction, then start. Aborted and mixed-prompt attempts are excluded from per-prompt rates.</p>
+      </section>
+
       <section class="hero-grid">
         <article class="camera-card primary">
-          <div class="card-label"><span>01</span> EXTERNAL CAMERA · MODEL INPUT</div>
+          <div class="card-label"><span>02</span> EXTERNAL CAMERA · MODEL INPUT</div>
           <div class="camera-frame">
             <img id="externalFrame" alt="External camera feed">
             <div class="reticle"></div>
-            <div class="live-tag"><i></i> LIVE</div>
+            <div id="frameStatus" class="live-tag"><i></i> WAITING</div>
           </div>
         </article>
         <article class="camera-card">
-          <div class="card-label"><span>02</span> WRIST CAMERA · MODEL INPUT</div>
+          <div class="card-label"><span>03</span> WRIST CAMERA · MODEL INPUT</div>
           <div class="camera-frame wrist">
             <img id="wristFrame" alt="Wrist camera feed">
             <div class="reticle"></div>
           </div>
         </article>
         <article class="command-card">
-          <div class="card-label"><span>03</span> LANGUAGE COMMAND</div>
+          <div class="card-label"><span>04</span> APPLIED INSTRUCTION</div>
           <blockquote id="prompt">Waiting for an instruction…</blockquote>
-          <div id="interactiveControls" class="controls hidden">
-            <label><small>SIMULATOR TASK / SUCCESS PREDICATE</small><select id="taskSelect"></select></label>
-            <label><small>MODEL INSTRUCTION</small><textarea id="promptInput" rows="3" placeholder="Type a command, or leave blank for the canonical task prompt"></textarea></label>
-            <div class="control-buttons">
-              <button id="applyPrompt">APPLY + REPLAN</button>
-              <button id="generatePrompt" class="secondary">GENERATE LOCALLY</button>
-              <button id="resetRun" class="secondary">RESET / NEW ROLLOUT</button>
-              <button id="stopRun" class="danger">STOP SESSION</button>
-            </div>
-            <p id="controlNote">The selected task owns the success predicate; prompt edits test language robustness.</p>
-          </div>
+          <div class="applied-meta"><span id="appliedSource" class="source-chip">—</span><span id="appliedState">Not yet sent</span></div>
           <div class="task-meta">
             <div><small>SUITE</small><strong id="suite">—</strong></div>
             <div><small>TASK</small><strong id="taskPosition">—</strong></div>
             <div><small>SEED</small><strong id="seed">—</strong></div>
           </div>
           <div class="progress-track"><div id="progressBar"></div></div>
-          <div class="progress-label"><span>EPISODE PROGRESS</span><span id="progressText">0%</span></div>
+          <div class="progress-label"><span id="progressLabel">ROLLOUT PROGRESS</span><span id="progressText">Waiting</span></div>
         </article>
       </section>
 
@@ -65,12 +85,12 @@
         <article class="metric"><small>GPU LOAD</small><strong id="gpuUtil">—</strong><span>percent</span></article>
         <article class="metric"><small>VRAM</small><strong id="vram">—</strong><span>MiB local weights + runtime</span></article>
         <article class="metric"><small>POWER</small><strong id="power">—</strong><span>watts</span></article>
-        <article class="metric"><small>SUCCESS</small><strong id="success">—</strong><span>completed episodes</span></article>
+        <article class="metric"><small>SCORED SUCCESS</small><strong id="success">—</strong><span id="successDetail">aborted attempts are not scored</span></article>
       </section>
 
       <section class="analysis-grid">
         <article class="chart-card action-card">
-          <div class="card-label"><span>04</span> PREDICTED 10-STEP ACTION CHUNK</div>
+          <div class="card-label"><span>05</span> PREDICTED 10-STEP ACTION CHUNK</div>
           <canvas id="actionChart"></canvas>
           <div class="legend">
             <span class="x">ΔX</span><span class="y">ΔY</span><span class="z">ΔZ</span>
@@ -78,16 +98,17 @@
           </div>
         </article>
         <article class="chart-card">
-          <div class="card-label"><span>05</span> WARM INFERENCE LATENCY</div>
+          <div class="card-label"><span>06</span> WARM INFERENCE LATENCY · STARTUP COMPILE EXCLUDED</div>
           <canvas id="latencyChart"></canvas>
           <div class="latency-stats">
             <div><small>MEDIAN</small><strong id="medianLatency">—</strong></div>
             <div><small>P95</small><strong id="p95Latency">—</strong></div>
+            <div><small>STARTUP</small><strong id="coldLatency">—</strong></div>
             <div><small>REPLAN</small><strong id="replan">—</strong></div>
           </div>
         </article>
         <article class="runtime-card">
-          <div class="card-label"><span>06</span> LOCAL RUNTIME PATH</div>
+          <div class="card-label"><span>07</span> LOCAL RUNTIME PATH</div>
           <div class="flow">
             <div><b>CAMERAS + STATE</b><small>224×224 · 8D proprioception</small></div>
             <em>→</em>
@@ -100,8 +121,9 @@
         </article>
       </section>
       <section id="historyCard" class="history-card hidden">
-        <div class="card-label"><span>07</span> ATTEMPT HISTORY · PER-PROMPT SUCCESS</div>
-        <div class="history-scroll"><table><thead><tr><th>ATTEMPT</th><th>TASK</th><th>INSTRUCTION</th><th>RESULT</th><th>RATE FOR TASK + PROMPT</th><th>DURATION</th></tr></thead><tbody id="historyBody"></tbody></table></div>
+        <div class="card-label"><span>08</span> ATTEMPT HISTORY · PER-PROMPT SUCCESS</div>
+        <div class="history-scroll"><table><thead><tr><th>ATTEMPT</th><th>TASK</th><th>INSTRUCTION</th><th>SOURCE</th><th>RESULT</th><th>RATE FOR TASK + PROMPT</th><th>DURATION</th></tr></thead><tbody id="historyBody"></tbody></table></div>
+        <p class="sample-note">Success rates describe only this session. Small samples are functional checks, not benchmark accuracy.</p>
       </section>
     </main>
 

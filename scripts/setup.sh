@@ -21,10 +21,10 @@ if [[ "$ACTUAL_COMMIT" != "$EXPECTED_COMMIT" ]]; then
   echo "Warning: upstream-openpi is at $ACTUAL_COMMIT; documented baseline is $EXPECTED_COMMIT" >&2
 fi
 
-for command in git git-lfs uv cc nvidia-smi strace ffmpeg; do
+for command in git git-lfs uv cc curl nvidia-smi strace ffmpeg; do
   if ! command -v "$command" >/dev/null 2>&1; then
     echo "Missing prerequisite: $command" >&2
-    echo "On Ubuntu install: sudo apt-get install -y linux-libc-dev build-essential git-lfs strace ffmpeg" >&2
+    echo "On Ubuntu install: sudo apt-get install -y linux-libc-dev build-essential git-lfs curl strace ffmpeg" >&2
     exit 1
   fi
 done
@@ -52,6 +52,14 @@ if [[ ! -f "$PROJECT_DIR/config/libero/config.yaml" ]]; then
     PYTHONPATH="$OPENPI_DIR/third_party/libero" \
     examples/libero/.venv/bin/python -c 'import libero.libero'
 fi
+
+# LIBERO warns about every configured path during each lookup, even though
+# evaluation does not use the demonstration datasets. Keep that configured
+# directory present so valid simulator runs are not buried in repeated warnings.
+LIBERO_DATASETS_DIR="$(examples/libero/.venv/bin/python -c \
+  'import sys, yaml; print(yaml.safe_load(open(sys.argv[1]))["datasets"])' \
+  "$PROJECT_DIR/config/libero/config.yaml")"
+mkdir -p "$LIBERO_DATASETS_DIR"
 
 uv run python -c "import jax; print('JAX devices:', jax.devices())"
 env \
