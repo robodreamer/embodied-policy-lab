@@ -1,10 +1,27 @@
 # π0.5 Sim Lab
 
-This folder is a reproducible local deployment of Physical Intelligence's official
-`pi05_libero` checkpoint in the LIBERO robot-manipulation simulator. It uses the
-official `openpi` policy server, LIBERO/robosuite, MuJoCo, and the workstation's
-NVIDIA GPU. Simulation rendering is headless through EGL; each rollout is saved
-as an MP4 for inspection.
+> The same local dashboard and CLI support LIBERO and RoboCasa365 with
+> backend-matched π0.5 checkpoints, observations, actions, horizons, and success
+> predicates. See [the RoboCasa development notes](docs/robocasa-backend.md).
+
+Quick RoboCasa checks:
+
+```bash
+./scripts/run_robocasa_smoke.sh         # simulator only
+./scripts/run_robocasa_policy_smoke.sh  # one real local π0.5 request
+```
+
+Interactive and automatic RoboCasa rollouts use the original showcase scripts:
+
+```bash
+./scripts/run_interactive_showcase.sh --backend robocasa
+./scripts/run_showcase.sh --backend robocasa --batch --task-id 0 --trials 3
+```
+
+This folder is a reproducible local deployment of π0.5 in the LIBERO and
+RoboCasa robot-manipulation simulators. It uses pinned OpenPI integrations,
+robosuite, MuJoCo, and the workstation's NVIDIA GPU. Simulation rendering is
+headless through EGL; each rollout is saved as an MP4 for inspection.
 
 The project is structured for publication: `upstream-openpi` is a pinned Git
 submodule, while model weights and generated machine-specific artifacts are
@@ -14,24 +31,26 @@ excluded from version control.
 
 - Upstream source: `Physical-Intelligence/openpi`
 - Pinned commit: see `UPSTREAM_COMMIT`
-- Model: `gs://openpi-assets/checkpoints/pi05_libero`
+- Models: `pi05_libero` and RoboCasa `pi05_pretrain_human300`
 - Policy runtime: Python 3.11 + JAX/CUDA
-- Simulator runtime: Python 3.8 + LIBERO + robosuite + MuJoCo
-- Default smoke test: one seeded rollout for each of 10 `libero_spatial` tasks
+- Simulator runtimes: Python 3.8 LIBERO and isolated Python 3.11 RoboCasa
+- Default backend: LIBERO; select RoboCasa explicitly with `--backend robocasa`
 
-Initial validation on August 5, 2026 completed all 10/10 smoke-test episodes.
+Initial LIBERO validation on August 5, 2026 completed all 10/10 smoke-test episodes.
 See `results/README.md` for measured runtime and GPU telemetry.
 
-The first run downloads approximately 11.6 GiB of checkpoint data into
-`cache/openpi`. Later runs reuse that cache.
+The first LIBERO run downloads approximately 11.6 GiB into `cache/openpi`.
+RoboCasa setup downloads approximately 10 GB of kitchen assets and 12 GB of
+inference checkpoint data. Later runs reuse both caches.
 
 ## Live showcase
 
 The showcase opens a local browser console displaying:
 
-- live external and wrist-camera model inputs;
+- live external and wrist-camera simulator views, rendered independently from
+  the lower-resolution tensors sent to the model;
 - the active language command and episode progress;
-- the predicted 10-step, 7-dimensional action chunk;
+- the backend-specific action chunk (10×7D LIBERO or 50×12D RoboCasa);
 - cold/JIT and warm inference latency;
 - GPU utilization, VRAM, power, and temperature;
 - task success and the local policy endpoint;
@@ -44,6 +63,14 @@ git submodule update --init --recursive
 ./scripts/setup.sh
 ./scripts/capture_system_info.sh
 ./scripts/run_showcase.sh
+```
+
+For RoboCasa, run its one-time setup instead of `setup.sh`:
+
+```bash
+ROBOCASA_DOWNLOAD_ASSETS=1 ROBOCASA_DOWNLOAD_CHECKPOINT=1 \
+  ./scripts/setup_robocasa.sh
+./scripts/run_interactive_showcase.sh --backend robocasa
 ```
 
 The browser opens at <http://127.0.0.1:8085>. By default, the showcase runs task
@@ -72,9 +99,14 @@ Useful showcase controls:
 
 | Environment variable | Default | Purpose |
 |---|---:|---|
-| `TASK_SUITE` | `libero_spatial` | Select a supported LIBERO suite |
+| `BACKEND` | `libero` | Select `libero` or `robocasa` |
+| `TASK_SUITE` | backend default | Select a LIBERO suite or RoboCasa task set |
 | `TASK_IDS` | `0` | Comma-separated task IDs, or `all` |
 | `TRIALS_PER_TASK` | `1` | Episodes per selected task |
+| `ROBOCASA_SPLIT` | `target` | Select the RoboCasa `target` or `pretrain` split |
+| `VIEWER_WIDTH` | `960` | RoboCasa high-resolution dashboard width |
+| `VIEWER_HEIGHT` | `540` | RoboCasa high-resolution dashboard height |
+| `VIEWER_FPS` | `6` | Maximum RoboCasa dashboard render rate |
 | `REALTIME_DELAY_MS` | `35` | Slow simulator steps for easier live viewing |
 | `AUTO_OPEN` | `1` | Open the dashboard in the desktop browser |
 | `HOLD_OPEN` | `0` | Keep the dashboard running after completion |
@@ -88,6 +120,37 @@ For example, run three tasks and keep the completed dashboard open:
 ```bash
 TASK_IDS=0,1,2 HOLD_OPEN=1 ./scripts/run_showcase.sh
 ```
+
+The scripts also expose a flag-based CLI. Run
+`./scripts/run_showcase.sh --help` for the full reference. Examples:
+
+```bash
+# Persistent browser-controlled RoboCasa session
+./scripts/run_interactive_showcase.sh \
+  --backend robocasa --task-set atomic_seen --split target
+
+# Three automatic trials for each selected RoboCasa task
+./scripts/run_showcase.sh \
+  --backend robocasa --batch --task-ids 0,2 --trials 3 --budget 1
+
+# Existing LIBERO behavior remains available
+./scripts/run_showcase.sh \
+  --backend libero --task-suite libero_spatial --task-ids 0,1
+```
+
+RoboCasa's browser views default to 960×540 at up to 6 FPS. These are separate
+MuJoCo presentation renders; the official square camera observations and
+224×224 π0.5 inputs remain unchanged. Override the quality/performance balance
+without modifying code:
+
+```bash
+./scripts/run_interactive_showcase.sh \
+  --backend robocasa \
+  --viewer-width 1280 --viewer-height 720 --viewer-fps 8
+```
+
+The dashboard labels both resolutions so a high-resolution simulator view is
+never mistaken for the exact tensor sent to the policy.
 
 The network audit produces evidence; it is not a firewall or network namespace.
 Unprivileged network namespaces are disabled on the validation workstation, so
@@ -104,6 +167,23 @@ edit the π0.5 instruction while it is running, and accumulate success rates:
 ./scripts/run_interactive_showcase.sh
 ```
 
+Add `--backend robocasa` to use RoboCasa and its matching local checkpoint. The
+task dropdown prepares a selected kitchen scene far enough to publish its exact
+scene-dependent canonical instruction before prompt generation or execution.
+`--task-id` selects only the scene shown when the session opens; it does not
+restrict the dropdown. The default `atomic_seen` collection exposes 18 tasks.
+Choose a broader registered RoboCasa collection at launch when useful:
+
+```bash
+# Populate the same browser dropdown with all 65 atomic tasks.
+./scripts/run_interactive_showcase.sh \
+  --backend robocasa --task-set all_atomic_tasks
+
+# Or use the 16-task seen composite collection.
+./scripts/run_interactive_showcase.sh \
+  --backend robocasa --task-set composite_seen
+```
+
 The browser now waits for you instead of starting automatically. Its workflow is:
 
 1. Choose the **evaluation task**, which sets the scene and success scoring.
@@ -118,11 +198,11 @@ Extended is the default and is recommended for language variants. A manual text
 edit defaults to a Long, unscored custom experiment; switch it back to Scored
 only for a true paraphrase of the selected goal. Locally generated scored
 variations automatically stage Extended; exploratory commands stage Long and
-unscored. A scored rollout still stops early when LIBERO detects its selected
-goal, so a fast successful variation is expected. Results and success-rate
+unscored. A scored rollout still stops early when the selected simulator detects
+its goal, so a fast successful variation is expected. Results and success-rate
 grouping record the step budget, preventing Standard and Extended attempts from
 being treated as identical trials. Custom experiments ignore that unrelated
-LIBERO completion signal and run their full selected budget unless you stop
+simulator completion signal and run their full selected budget unless you stop
 them; their history result is `unscored` rather than a misleading success or
 failure against the original goal.
 
@@ -142,7 +222,7 @@ being constructed.
 The dashboard retains completed, failed, mixed-prompt, and aborted attempts.
 `summary.json` records prompt timelines and per-task/prompt totals.
 
-An important interpretation detail: selecting a LIBERO task chooses the world,
+An important interpretation detail: selecting an evaluation task chooses the world,
 initial state, and hidden success predicate. Editing only the prompt does not
 change that predicate. This makes prompt edits useful for testing paraphrase,
 ambiguity, or adversarial-instruction robustness against a fixed goal.
@@ -162,7 +242,7 @@ random draft**. Choose either:
   selected task's exact goal; or
 - **Random exploratory command** to invent a different plausible pick/place
   action using objects named in the scene. Exploratory and mixed-prompt attempts
-  are excluded from success rates because LIBERO's hidden goal has not changed.
+  are excluded from success rates because the simulator's hidden goal has not changed.
 
 The generator records and avoids prior outputs from the session. Generated text
 remains a draft until you explicitly start a new rollout or apply it to the
@@ -172,9 +252,9 @@ For every synchronous inference request, the client records the exact prompt,
 its SHA-256 digest, the returned action-chunk digest, attempt, step, and latency
 in `inference-audit.jsonl`. The dashboard shows the last acknowledged prompt
 digest. This proves which text was serialized to the local policy server even
-when the robot's visible behavior does not change. The released `pi05_libero`
-checkpoint is trained around LIBERO-style instructions; a novel or physically
-unsupported command may still produce familiar task behavior despite receiving
+when the robot's visible behavior does not change. Each released checkpoint is
+trained around its backend's task distribution; a novel or physically
+unsupported command may still produce familiar behavior despite receiving
 different text.
 
 To use another loopback-only Ollama or OpenAI-compatible server, override:

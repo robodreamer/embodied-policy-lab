@@ -109,6 +109,8 @@ def main():
     inference_events = local_llm_events(session_dir / "inference-audit.jsonl")
 
     summary = {
+        "backend": state.get("backend", "libero"),
+        "simulator": state.get("simulator", "LIBERO / robosuite / MuJoCo"),
         "model": state.get("model"),
         "runtime": state.get("runtime"),
         "suite": state.get("suite"),
@@ -147,9 +149,11 @@ def main():
 
 | Measurement | Result |
 |---|---:|
+| Backend | `{backend}` |
+| Simulator | {simulator} |
 | Model | `{model}` |
 | Runtime | {runtime} |
-| LIBERO suite / task IDs | `{suite}` / `{task_ids}` |
+| Task collection / IDs | `{suite}` / `{task_ids}` |
 | Episodes successful | **{successes}/{episodes}** |
 | Unscored exploratory / mixed attempts | {unscored_attempts} |
 | Aborted attempts | {aborted_attempts} |
@@ -187,6 +191,8 @@ with the local policy server over loopback.
 - `llm-generations.jsonl`: local prompt-generation provenance ({llm_generation_count})
 - `inference-audit.jsonl`: prompt and action hashes for synchronous π0.5 requests ({inference_audit_count})
 """.format(
+        backend=summary["backend"],
+        simulator=summary["simulator"],
         model=summary["model"],
         runtime=summary["runtime"],
         suite=summary["suite"],

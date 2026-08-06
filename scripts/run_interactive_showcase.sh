@@ -13,4 +13,4 @@ if [[ -z "${LOCAL_LLM_URL:-}" && -z "${LOCAL_LLM_MODEL:-}" ]] && \
   export LOCAL_LLM_MODEL="gemma3:1b"
 fi
 
-exec "$SCRIPT_DIR/run_showcase.sh"
+exec "$SCRIPT_DIR/run_showcase.sh" "$@"

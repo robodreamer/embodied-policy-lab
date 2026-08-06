@@ -28,8 +28,9 @@
         </div>
         <div class="control-layout">
           <div class="control-field">
-            <label for="taskSelect"><span><b>1</b> Evaluation task</span><small>SETS THE SCENE AND HOW SUCCESS IS SCORED</small></label>
+            <label for="taskSelect"><span><b>1</b> Evaluation task</span><small>SWITCH THE SCENE AND SUCCESS GOAL</small></label>
             <select id="taskSelect"></select>
+            <p id="taskCatalogSummary" class="catalog-summary">Loading the task catalog…</p>
             <div class="success-rule"><small>SUCCESS IS SCORED WHEN</small><span id="successRule">the selected simulator goal is completed</span></div>
           </div>
           <div class="control-field">
@@ -64,7 +65,7 @@
               <option value="2" selected>Extended · 2× steps (recommended for variants)</option>
               <option value="3">Long · 3× steps (multi-step experiments)</option>
             </select>
-            <p id="budgetHelp">Extended attempts get twice as many simulator actions. A scored rollout still ends early when LIBERO detects success.</p>
+            <p id="budgetHelp">Extended attempts get twice as many simulator actions. A scored rollout still ends early when the selected simulator detects success.</p>
           </div>
         </div>
         <div class="control-actions">
@@ -77,7 +78,7 @@
 
       <section class="hero-grid">
         <article class="camera-card primary">
-          <div class="card-label"><span>02</span> EXTERNAL CAMERA · MODEL INPUT</div>
+          <div class="card-label"><span>02</span> EXTERNAL CAMERA · SIMULATOR VIEW <small id="externalCameraMeta" class="camera-quality">—</small></div>
           <div class="camera-frame">
             <img id="externalFrame" alt="External camera feed">
             <div class="reticle"></div>
@@ -85,7 +86,7 @@
           </div>
         </article>
         <article class="camera-card">
-          <div class="card-label"><span>03</span> WRIST CAMERA · MODEL INPUT</div>
+          <div class="card-label"><span>03</span> WRIST CAMERA · SIMULATOR VIEW <small id="wristCameraMeta" class="camera-quality">—</small></div>
           <div class="camera-frame wrist">
             <img id="wristFrame" alt="Wrist camera feed">
             <div class="reticle"></div>
@@ -116,9 +117,9 @@
 
       <section class="analysis-grid">
         <article class="chart-card action-card">
-          <div class="card-label"><span>05</span> PREDICTED 10-STEP ACTION CHUNK</div>
+          <div class="card-label"><span>05</span> <b id="actionTitle">PREDICTED 10-STEP ACTION CHUNK</b></div>
           <canvas id="actionChart"></canvas>
-          <div class="legend">
+          <div id="actionLegend" class="legend">
             <span class="x">ΔX</span><span class="y">ΔY</span><span class="z">ΔZ</span>
             <span class="r">ROTATION</span><span class="g">GRIPPER</span>
           </div>
@@ -136,11 +137,11 @@
         <article class="runtime-card">
           <div class="card-label"><span>07</span> LOCAL RUNTIME PATH</div>
           <div class="flow">
-            <div><b>CAMERAS + STATE</b><small>224×224 · 8D proprioception</small></div>
+            <div><b>CAMERAS + STATE</b><small id="stateShape">224×224 · 8D proprioception</small></div>
             <em>→</em>
             <div class="active"><b>π0.5 / JAX</b><small>RTX PRO 5000 Blackwell</small></div>
             <em>→</em>
-            <div><b>7D ACTIONS</b><small>MuJoCo / LIBERO</small></div>
+            <div><b id="actionShape">7D ACTIONS</b><small id="simulatorLabel">MuJoCo / LIBERO</small></div>
           </div>
           <code id="endpoint">ws://127.0.0.1:8000</code>
           <p id="runtimeNote">Checkpoint and inference are resident on this workstation.</p>

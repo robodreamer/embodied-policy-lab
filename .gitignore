@@ -6,8 +6,11 @@ logs/*.csv
 logs/system-info.txt
 videos/
 showcase-runs/
+results/robocasa-smoke/
+results/robocasa-policy-smoke/
 __pycache__/
 *.py[cod]
+MUJOCO_LOG.TXT
 
 # Keep empty runtime directories in a clone.
 !logs/.gitkeep

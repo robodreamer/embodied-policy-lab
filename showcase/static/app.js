@@ -50,7 +50,8 @@ function drawSeries(canvas, series, colors, fixedRange = null) {
 
 function drawAction(chunk) {
   if (!Array.isArray(chunk) || !chunk.length) return drawSeries($("actionChart"), [], []);
-  const dimensions = [0,1,2,3,4,5,6].map(d => chunk.map(step => Number(step[d]) || 0));
+  const dimensionCount = Array.isArray(chunk[0]) ? chunk[0].length : 0;
+  const dimensions = Array.from({length: dimensionCount}, (_, d) => chunk.map(step => Number(step[d]) || 0));
   drawSeries($("actionChart"), dimensions, ["#b8ff36", "#43d9c5", "#ffba3b", "#9b7cff", "#8467df", "#c795ff", "#ff5f57"]);
 }
 
@@ -112,7 +113,7 @@ function updateBudgetHelp() {
   const label = multiplier === 1 ? "Standard" : (multiplier === 2 ? "Extended" : "Long");
   $("budgetHelp").textContent = selectedEvaluationMode() === "exploratory"
     ? `${label} gives this custom rollout ${steps} simulator actions unless you stop it.`
-    : `${label} gives this rollout up to ${steps} simulator actions. It ends early if the selected LIBERO goal succeeds.`;
+    : `${label} gives this rollout up to ${steps} simulator actions. It ends early if the selected simulator goal succeeds.`;
 }
 
 function syncTaskExplanation() {
@@ -125,15 +126,16 @@ function syncTaskExplanation() {
 function populateTasks(tasks, selected) {
   const select = $("taskSelect");
   if (!Array.isArray(tasks)) return;
-  if (select.options.length !== tasks.length) {
-    select.replaceChildren(...tasks.map(task => {
-      const option = document.createElement("option");
-      option.value = task.id;
-      option.textContent = `Task ${Number(task.id) + 1} — ${task.prompt}`;
-      return option;
-    }));
-  }
-  if (!taskDirty) select.value = String(selected ?? 0);
+  const desired = taskDirty ? select.value : String(selected ?? 0);
+  select.replaceChildren(...tasks.map(task => {
+    const option = document.createElement("option");
+    option.value = task.id;
+    option.textContent = `Task ${Number(task.id) + 1} — ${task.name || task.prompt}`;
+    return option;
+  }));
+  select.value = desired;
+  const collection = lastState.suite || "the selected task set";
+  $("taskCatalogSummary").textContent = `${tasks.length} tasks loaded from ${collection}. The CLI task ID chooses only the initial scene; switch here at any time.`;
   syncTaskExplanation();
 }
 
@@ -186,6 +188,7 @@ function renderHistory(history) {
 
 function humanPhase(state) {
   if (state.phase === "running") return "RUNNING";
+  if (state.phase === "preparing_task") return "PREPARING";
   if (state.phase === "awaiting_command") return "READY";
   if (state.phase === "stopped") return "SAVED";
   if (state.phase === "complete") return "COMPLETE";
@@ -206,6 +209,13 @@ function updateRunStatus(state) {
     $("frameStatus").innerHTML = "<i></i> LIVE";
     $("progressLabel").textContent = "CURRENT ROLLOUT";
     $("progressText").textContent = `Step ${Number(state.step) || 0} / ${state.max_steps || "—"}`;
+  } else if (phase === "preparing_task") {
+    const task = selectedTask();
+    $("runStatus").textContent = `Preparing ${task?.name || "selected task"}`;
+    $("runDetail").textContent = "RoboCasa is constructing the kitchen scene and loading its exact instruction. This normally takes several seconds.";
+    $("frameStatus").innerHTML = "<i></i> PREPARING";
+    $("progressLabel").textContent = "SCENE PREPARATION";
+    $("progressText").textContent = "Please wait";
   } else if (phase === "stopped" || phase === "complete") {
     $("runStatus").textContent = "Session saved — review mode";
     $("runDetail").textContent = `${successes}/${scored} scored successes; ${unscored} exploratory/mixed and ${aborted} aborted.`;
@@ -230,12 +240,12 @@ function updateRunStatus(state) {
 function updateControls(state) {
   const stopped = ["stopped", "complete"].includes(state.phase);
   const running = state.phase === "running";
-  const loading = !state.interactive || state.phase === "initializing";
+  const loading = !state.interactive || ["initializing", "preparing_task"].includes(state.phase);
   const commandPending = Boolean(pendingCommand);
   $("startRun").disabled = stopped || loading || commandPending;
   $("applyPrompt").disabled = stopped || !running || !draftDirty || commandPending;
   $("finishRun").disabled = stopped || loading;
-  $("generatePrompt").disabled = stopped || !localLlmEnabled;
+  $("generatePrompt").disabled = stopped || !localLlmEnabled || commandPending;
   $("generatorMode").disabled = stopped || !localLlmEnabled || !randomGenerationEnabled;
   $("taskSelect").disabled = stopped || loading || commandPending;
   $("promptInput").disabled = stopped || loading || commandPending;
@@ -243,15 +253,19 @@ function updateControls(state) {
   $("evaluationMode").disabled = stopped || loading || commandPending;
   const exploratory = selectedEvaluationMode() === "exploratory";
   const rolloutType = exploratory ? "CUSTOM UNSCORED" : "SCORED";
-  $("startRun").textContent = commandPending
-    ? "START REQUEST SENT · WAITING FOR NEW STATE"
-    : (running
-      ? `4 · ABORT & START A FRESH ${rolloutType} ROLLOUT`
-      : `4 · START A FRESH ${rolloutType} ROLLOUT`);
+  $("startRun").textContent = stopped
+    ? "SESSION SAVED · LAUNCH A NEW SESSION TO RUN AGAIN"
+    : (commandPending
+      ? "START REQUEST SENT · WAITING FOR NEW STATE"
+      : (running
+        ? `4 · ABORT & START A FRESH ${rolloutType} ROLLOUT`
+        : `4 · START A FRESH ${rolloutType} ROLLOUT`));
   const budgetText = `${selectedBudgetSteps(state)}-step budget`;
-  $("startHelp").textContent = exploratory
-    ? `Resets the scene and runs the custom experiment with a ${budgetText}. Its result is saved but excluded from the selected task’s success rate.`
-    : `Resets the scene with a ${budgetText} and counts the result for this task, prompt, and budget.`;
+  $("startHelp").textContent = stopped
+    ? "Unavailable in review mode. Launch the entry script again to start a new session."
+    : (exploratory
+      ? `Resets the scene and runs the custom experiment with a ${budgetText}. Its result is saved but excluded from the selected task’s success rate.`
+      : `Resets the scene with a ${budgetText} and counts the result for this task, prompt, and budget.`);
   $("applyPrompt").textContent = running ? "APPLY DRAFT TO THIS ROLLOUT" : "AVAILABLE WHILE A ROLLOUT IS RUNNING";
   $("applyHelp").textContent = stopped
     ? "Unavailable in review mode because the simulator has stopped. Launch a new session to continue."
@@ -289,7 +303,7 @@ async function configureControls() {
     }
     updateControls(lastState);
   });
-  $("taskSelect").addEventListener("change", () => {
+  $("taskSelect").addEventListener("change", async () => {
     taskDirty = true;
     const task = selectedTask();
     if (task) {
@@ -305,7 +319,23 @@ async function configureControls() {
       updateBudgetHelp();
     }
     syncTaskExplanation();
-    setControlNote("Task and its canonical instruction are staged. Press Start when ready.");
+    if (lastState.dynamic_task_prompts && task && lastState.phase === "awaiting_command") {
+      try {
+        draftDirty = false;
+        const result = await postJson("/api/control", {
+          action: "set_task",
+          task_id: Number(task.id),
+        });
+        pendingCommand = {
+          id: result.command.id,
+          action: "set_task",
+          taskId: Number(task.id),
+        };
+        setControlNote("Preparing the selected RoboCasa scene and its exact canonical instruction…");
+      } catch (error) { setControlNote(error.message, true); }
+    } else {
+      setControlNote("Task and its canonical instruction are staged. Press Start when ready.");
+    }
     updateControls(lastState);
   });
   $("generatorMode").addEventListener("change", () => {
@@ -350,6 +380,7 @@ async function configureControls() {
         id: result.command.id,
         action: "start_rollout",
         prompt: expectedPrompt,
+        source: pendingPromptSource,
         taskId: expectedTask,
         budget: expectedBudget,
         evaluationMode: expectedEvaluation,
@@ -421,7 +452,9 @@ async function updateState() {
     lastState = state;
     await configureControls();
     if (pendingCommand && state.command_ack === pendingCommand.id) {
-      const promptMatches = pendingCommand.prompt === undefined
+      const canonicalPromptAck = pendingCommand.source === "canonical"
+        && String(state.prompt_source || "") === "canonical";
+      const promptMatches = pendingCommand.prompt === undefined || canonicalPromptAck
         || String(state.prompt || "").trim() === pendingCommand.prompt;
       const taskMatches = pendingCommand.taskId === undefined
         || Number(state.task_id) === pendingCommand.taskId;
@@ -438,6 +471,11 @@ async function updateState() {
         } else if (pendingCommand.action === "set_prompt") {
           draftDirty = false;
           evaluationDirty = false;
+        } else if (pendingCommand.action === "set_task") {
+          draftDirty = false;
+          taskDirty = false;
+          budgetDirty = false;
+          evaluationDirty = false;
         }
         pendingCommand = null;
       }
@@ -447,6 +485,8 @@ async function updateState() {
     } else if (state.network_verdict === "remote_detected") {
       $("networkBadge").innerHTML = "<i></i> REMOTE CONNECTION DETECTED";
       $("networkBadge").classList.add("danger-badge");
+    } else if (state.network_verdict === "not_audited" || state.network_audit === false) {
+      $("networkBadge").innerHTML = "<i></i> NETWORK AUDIT OFF";
     }
     $("phaseBadge").textContent = humanPhase(state);
     $("interactiveControls").classList.toggle("hidden", !state.interactive);
@@ -494,6 +534,26 @@ async function updateState() {
     $("success").textContent = episodes ? `${Math.round(100 * successes / episodes)}%` : "—";
     $("successDetail").textContent = `${successes}/${episodes} scored · ${unscored} exploratory/mixed · ${aborted} aborted`;
     $("endpoint").textContent = state.policy_endpoint || "ws://127.0.0.1:8000";
+    const modelWidth = Number(state.model_image_width) || 224;
+    const modelHeight = Number(state.model_image_height) || 224;
+    const viewerWidth = Number(state.viewer_width) || modelWidth;
+    const viewerHeight = Number(state.viewer_height) || modelHeight;
+    const cameraMeta = `${viewerWidth}×${viewerHeight} VIEW · π INPUT ${modelWidth}×${modelHeight}`;
+    $("externalCameraMeta").textContent = cameraMeta;
+    $("wristCameraMeta").textContent = cameraMeta;
+    document.documentElement.style.setProperty("--camera-aspect", `${viewerWidth} / ${viewerHeight}`);
+    $("stateShape").textContent = `${modelWidth}×${modelHeight} · ${state.state_dimension || 8}D proprioception`;
+    $("actionShape").textContent = `${state.action_dimension || 7}D ACTIONS`;
+    $("simulatorLabel").textContent = state.simulator || "MuJoCo / LIBERO";
+    $("actionTitle").textContent = `PREDICTED ${state.action_horizon || 10}-STEP ACTION CHUNK`;
+    const actionLabels = Array.isArray(state.action_labels)
+      ? state.action_labels
+      : Array.from({length: Number(state.action_dimension) || 7}, (_, index) => `ACTION ${index + 1}`);
+    $("actionLegend").replaceChildren(...actionLabels.map(label => {
+      const item = document.createElement("span");
+      item.textContent = label;
+      return item;
+    }));
     const runningProgress = state.phase === "running" ? Math.max(0, Math.min(1, Number(state.progress) || 0)) : 0;
     $("progressBar").style.transform = `scaleX(${runningProgress})`;
     $("updated").textContent = state.updated_at ? `UPDATED ${new Date(state.updated_at).toLocaleTimeString()}` : "AWAITING TELEMETRY";

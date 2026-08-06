@@ -1,5 +1,39 @@
 # Reproduction results
 
+## 2026-08-05 — unified RoboCasa CLI and dashboard adapter
+
+Session `20260805-173321` ran one complete `CloseToasterOvenDoor` episode through
+the same `run_showcase.sh` entrypoint used by LIBERO. It completed the 450-action
+horizon with 90 audited local π0.5 requests and produced a 226-frame video. The
+policy did not complete this seed, so the recorded score is **0/1**. Cold/JIT
+latency was 9.59 seconds, warm median latency was 134.49 ms, warm P95 was
+141.16 ms, and peak GPU memory was 21,045 MiB.
+
+Session `20260805-173442` validated interactive scene preparation, task
+switching, local-LLM prompt generation, prompt hash acknowledgement, live
+replanning, deliberate stop, aborted-attempt exclusion, report generation, and
+process cleanup. The exact locally generated instruction was acknowledged by
+π0.5 on three requests. See `docs/robocasa-backend.md` for commands and the full
+interpretation notes. A final unified-entrypoint regression reran LIBERO task 0
+successfully (**1/1**). RoboCasa session `20260805-174340` also validated the
+default syscall audit: only `127.0.0.1:8004` was observed and the verdict was
+`loopback_only`.
+
+## 2026-08-05 — experimental RoboCasa local-policy smoke
+
+The isolated RoboCasa365 runtime reset and rendered `CloseBlenderLid` on the
+target split. The matching `pi05_pretrain_human300` checkpoint then loaded from
+the local cache and received the official three-camera plus 16D-state input.
+It returned a 50-step, 12D action chunk; five converted actions were executed
+and recorded in MuJoCo. First-request latency, including JAX compilation, was
+10.48 seconds. Peak observed GPU memory was 21,121 MiB.
+
+Prompt and action hashes, telemetry, logs, JSON, and video were generated under
+`results/robocasa-policy-smoke/20260805-171258/`. The five-action smoke did not
+complete the 900-step task and is not a success-rate measurement. Full setup,
+the upstream checkpoint-statistics workaround, exact commands, and future
+adapter work are documented in `docs/robocasa-backend.md`.
+
 ## 2026-08-05 — prompt handoff and rollout-budget diagnosis
 
 Session `20260805-153435` reproduced both reported symptoms. The dashboard

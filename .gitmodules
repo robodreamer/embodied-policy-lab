@@ -1,3 +1,14 @@
 [submodule "upstream-openpi"]
 	path = upstream-openpi
 	url = https://github.com/Physical-Intelligence/openpi.git
+[submodule "upstream-robocasa"]
+	path = upstream-robocasa
+	url = https://github.com/robocasa/robocasa.git
+	ignore = untracked
+[submodule "upstream-robocasa-openpi"]
+	path = upstream-robocasa-openpi
+	url = https://github.com/robocasa-benchmark/openpi.git
+[submodule "upstream-robosuite"]
+	path = upstream-robosuite
+	url = https://github.com/ARISE-Initiative/robosuite.git
+	ignore = untracked

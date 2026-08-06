@@ -93,7 +93,28 @@ IGNORED_GOAL_WORDS = {
     "the",
     "up",
 }
-ACTION_WORDS = {"lift", "move", "pick", "place", "position", "put", "relocate", "set"}
+ACTION_WORDS = {
+    "arrange",
+    "close",
+    "cut",
+    "deliver",
+    "get",
+    "lift",
+    "load",
+    "move",
+    "navigate",
+    "open",
+    "pack",
+    "pick",
+    "place",
+    "position",
+    "press",
+    "put",
+    "relocate",
+    "set",
+    "slide",
+    "turn",
+}
 NON_OBJECT_WORDS = IGNORED_GOAL_WORDS | {
     "between",
     "black",
@@ -193,10 +214,34 @@ def _preserves_scored_goal(candidate, goal):
     )
 
 
+def _leading_action(value):
+    words = re.findall(r"[a-z0-9]+", value.lower())
+    prefixes = (
+        ("please",),
+        ("carefully",),
+        ("go", "ahead", "and"),
+        ("make", "sure", "to"),
+        ("for", "this", "task"),
+    )
+    for prefix in prefixes:
+        if tuple(words[: len(prefix)]) == prefix:
+            words = words[len(prefix) :]
+            break
+    return next((word for word in words if word in ACTION_WORDS), None)
+
+
 def _valid_generated_prompt(candidate, goal, mode, required_objects=None):
+    # Reject token-list output such as "Close, toaster, oven, door." even when
+    # it happens to contain every required word.
+    if candidate.count(",") > 1:
+        return False
     candidate_words = set(re.findall(r"[a-z0-9]+", candidate.lower()))
     if mode == "scored_variation":
-        return _preserves_scored_goal(candidate, goal)
+        goal_action = _leading_action(goal)
+        candidate_action = _leading_action(candidate)
+        return _preserves_scored_goal(candidate, goal) and (
+            goal_action is None or candidate_action == goal_action
+        )
     object_terms = set(_scene_objects(goal))
     return (
         bool(candidate_words & object_terms)
@@ -259,6 +304,21 @@ Return exactly one short imperative sentence and nothing else.""".format(
         nonce=nonce,
     )
     return instruction, exploration_cue
+
+
+def _scored_fallback_cues(goal):
+    """Build conservative variants that retain the complete canonical command."""
+    command = goal.strip().rstrip(".!?")
+    if not command:
+        return []
+    first = command[0].lower() + command[1:]
+    return [
+        "Please {}.".format(first),
+        "Carefully {}.".format(first),
+        "Go ahead and {}.".format(first),
+        "Make sure to {}.".format(first),
+        "For this task, {}.".format(first),
+    ]
 
 
 def _request_generation(url, model, instruction):
@@ -345,6 +405,30 @@ def generate_prompt(url, model, goal, mode, avoid):
                 and _valid_generated_prompt(candidate, goal, mode, _scene_objects(cue))
             ):
                 return candidate
+    else:
+        cues = _scored_fallback_cues(goal)
+        secrets.SystemRandom().shuffle(cues)
+        for cue in cues:
+            if _normalize_prompt(cue) in normalized_avoid:
+                continue
+            forced_instruction = (
+                "Return exactly the robot command below, including every word. "
+                "Do not explain or paraphrase it:\n" + cue
+            )
+            candidate = _clean_prompt(
+                _request_generation(url, model, forced_instruction)
+            )
+            if (
+                candidate
+                and _normalize_prompt(candidate) not in normalized_avoid
+                and _valid_generated_prompt(candidate, goal, mode)
+            ):
+                return candidate
+            # The local model was still consulted, but a tiny model can ignore
+            # exact-copy constraints. The conservative cue itself preserves the
+            # complete goal and is safer than accepting a lossy paraphrase.
+            if _valid_generated_prompt(cue, goal, mode):
+                return cue
     raise ValueError("The local model repeated previous prompts; try Generate again")
 
 
