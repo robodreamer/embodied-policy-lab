@@ -145,7 +145,7 @@ def main():
     loopback_text = (
         ", ".join(network["loopback"]) if network["loopback"] else "None observed"
     )
-    report = """# π0.5 local showcase report
+    report = """# Embodied Policy Lab local showcase report
 
 | Measurement | Result |
 |---|---:|
@@ -158,7 +158,7 @@ def main():
 | Unscored exploratory / mixed attempts | {unscored_attempts} |
 | Aborted attempts | {aborted_attempts} |
 | Session duration | {duration:.2f} s |
-| Cold/JIT inference latency | {cold_latency} ms |
+| Cold/startup inference latency | {cold_latency} ms |
 | Warm mean inference latency | {warm_mean_latency} ms |
 | Warm median inference latency | {median_latency} ms |
 | Warm P95 inference latency | {p95_latency} ms |
@@ -167,7 +167,7 @@ def main():
 | Peak GPU power | {power:.2f} W |
 | Peak GPU temperature | {temperature:.0f} °C |
 | Local prompt generations | {llm_generation_count} |
-| Audited π0.5 requests | {inference_audit_count} |
+| Audited policy requests | {inference_audit_count} |
 
 ## Local-inference network audit
 
@@ -189,7 +189,7 @@ with the local policy server over loopback.
 - `client.log` and `server.log`: runtime logs
 - `videos/`: rollout MP4 files ({video_count})
 - `llm-generations.jsonl`: local prompt-generation provenance ({llm_generation_count})
-- `inference-audit.jsonl`: prompt and action hashes for synchronous π0.5 requests ({inference_audit_count})
+- `inference-audit.jsonl`: prompt and action hashes for synchronous policy requests ({inference_audit_count})
 """.format(
         backend=summary["backend"],
         simulator=summary["simulator"],

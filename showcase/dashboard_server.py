@@ -1,4 +1,4 @@
-"""Dependency-free local web server for the π0.5 showcase dashboard."""
+"""Dependency-free local web server for the Embodied Policy Lab dashboard."""
 
 import argparse
 import csv
@@ -321,7 +321,7 @@ def _scored_fallback_cues(goal):
     ]
 
 
-def _request_generation(url, model, instruction):
+def _request_generation(url, model, instruction, ollama_num_gpu):
     if "chat/completions" in url:
         payload = {
             "model": model,
@@ -346,6 +346,7 @@ def _request_generation(url, model, instruction):
                 "temperature": 0.85,
                 "top_p": 0.9,
                 "num_predict": 48,
+                "num_gpu": ollama_num_gpu,
                 "stop": ["\n"],
             },
         }
@@ -362,14 +363,16 @@ def _request_generation(url, model, instruction):
     return str(result["response"]).strip()
 
 
-def generate_prompt(url, model, goal, mode, avoid):
+def generate_prompt(url, model, goal, mode, avoid, ollama_num_gpu=0):
     normalized_avoid = {_normalize_prompt(item) for item in [goal, *avoid]}
     candidate = ""
     last_exploration_cue = ""
     attempts = 12 if mode == "exploratory" else 8
     for _ in range(attempts):
         instruction, last_exploration_cue = _generation_instruction(goal, mode, avoid)
-        candidate = _clean_prompt(_request_generation(url, model, instruction))
+        candidate = _clean_prompt(
+            _request_generation(url, model, instruction, ollama_num_gpu)
+        )
         if (
             candidate
             and _normalize_prompt(candidate) not in normalized_avoid
@@ -397,7 +400,7 @@ def generate_prompt(url, model, goal, mode, avoid):
                 "Do not explain or change its objects:\n" + cue
             )
             candidate = _clean_prompt(
-                _request_generation(url, model, forced_instruction)
+                _request_generation(url, model, forced_instruction, ollama_num_gpu)
             )
             if (
                 candidate
@@ -416,7 +419,7 @@ def generate_prompt(url, model, goal, mode, avoid):
                 "Do not explain or paraphrase it:\n" + cue
             )
             candidate = _clean_prompt(
-                _request_generation(url, model, forced_instruction)
+                _request_generation(url, model, forced_instruction, ollama_num_gpu)
             )
             if (
                 candidate
@@ -439,6 +442,7 @@ def main():
     parser.add_argument("--port", type=int, default=8085)
     parser.add_argument("--local-llm-url", default="")
     parser.add_argument("--local-llm-model", default="")
+    parser.add_argument("--local-llm-num-gpu", type=int, default=0)
     args = parser.parse_args()
     session_dir = pathlib.Path(args.session_dir).resolve()
     static_dir = pathlib.Path(args.static_dir).resolve()
@@ -450,12 +454,18 @@ def main():
         def __init__(self, *handler_args, **handler_kwargs):
             super().__init__(*handler_args, directory=str(static_dir), **handler_kwargs)
 
+        def end_headers(self):
+            # Dashboard assets change frequently during local development. Never
+            # let a browser retain model-specific labels from an earlier run.
+            self.send_header("Cache-Control", "no-store, max-age=0")
+            self.send_header("Pragma", "no-cache")
+            super().end_headers()
+
         def _json(self, payload, status=200):
             data = json.dumps(payload).encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(data)))
-            self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(data)
 
@@ -468,7 +478,6 @@ def main():
             self.send_response(200)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(data)))
-            self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(data)
 
@@ -483,6 +492,9 @@ def main():
                     {
                         "local_llm_enabled": bool(local_llm_url and local_llm_model),
                         "local_llm_model": local_llm_model or None,
+                        "local_llm_execution": (
+                            "CPU" if args.local_llm_num_gpu == 0 else "GPU"
+                        ),
                         "prompt_generation_modes": ["scored_variation", "exploratory"],
                     }
                 )
@@ -549,13 +561,21 @@ def main():
                         previous.append(current_draft)
                     started = time.perf_counter()
                     prompt = generate_prompt(
-                        local_llm_url, local_llm_model, goal, mode, previous
+                        local_llm_url,
+                        local_llm_model,
+                        goal,
+                        mode,
+                        previous,
+                        args.local_llm_num_gpu,
                     )
                     duration_ms = round((time.perf_counter() - started) * 1000.0, 2)
                     event = {
                         "created_at": time.time(),
                         "model": local_llm_model,
                         "endpoint_host": urllib.parse.urlparse(local_llm_url).hostname,
+                        "execution": (
+                            "CPU" if args.local_llm_num_gpu == 0 else "GPU"
+                        ),
                         "goal": goal,
                         "mode": mode,
                         "instruction": current_draft,

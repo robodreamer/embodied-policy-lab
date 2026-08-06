@@ -16,7 +16,6 @@ import re
 import gymnasium as gym
 import numpy as np
 import robocasa  # noqa: F401 - importing registers robocasa/* Gym environments
-from openpi_client import image_tools
 from PIL import Image
 from robocasa.utils.dataset_registry import TASK_SET_REGISTRY
 from robocasa.utils.dataset_registry_utils import get_task_horizon
@@ -96,15 +95,7 @@ def create_environment(task_name: str, split: str, seed: int):
     )
 
 
-def prepare_observation(observation: dict, resize_size: int, prompt: str):
-    images = [
-        image_tools.convert_to_uint8(
-            image_tools.resize_with_pad(
-                np.ascontiguousarray(observation[key]), resize_size, resize_size
-            )
-        )
-        for key in CAMERA_KEYS
-    ]
+def robot_state_from_observation(observation: dict) -> np.ndarray:
     robot_state = np.concatenate(
         (
             observation["state.end_effector_position_relative"],
@@ -117,14 +108,7 @@ def prepare_observation(observation: dict, resize_size: int, prompt: str):
     )
     if robot_state.shape != (16,):
         raise ValueError(f"Expected a 16D RoboCasa state; got {robot_state.shape}")
-    model_input = {
-        "observation/image": images[0],
-        "observation/wrist_image": images[1],
-        "observation/right_image": images[2],
-        "observation/state": robot_state,
-        "prompt": str(prompt),
-    }
-    return images, robot_state, model_input
+    return robot_state
 
 
 def render_viewer_frames(env, width: int, height: int) -> tuple[np.ndarray, ...]:

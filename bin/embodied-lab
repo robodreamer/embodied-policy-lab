@@ -1,0 +1,227 @@
+#!/usr/bin/env bash
+# Pick a simulator/model profile and run the shared showcase CLI.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+
+die() { echo "embodied-lab: $*" >&2; exit 1; }
+have_tty() { [[ -t 0 || -t 1 || -t 2 ]] && [[ -r /dev/tty ]]; }
+have_fzf() { command -v fzf >/dev/null 2>&1; }
+
+usage() {
+  cat <<'EOF'
+embodied-lab — choose and run a local robot policy + simulator
+
+Usage:
+  ./lab                              interactive picker
+  ./lab --default                    run the recommended RoboCasa + π0.5 profile
+  ./lab [OPTIONS] [-- EXTRA_ARGS]    preselect values or pass advanced flags
+
+Options:
+  --backend NAME       robocasa (default) or libero
+  --model NAME         pi05 (default) or groot-n1.5
+  --mode MODE          interactive (default) or batch
+  --task-set NAME      task collection (backend default when omitted)
+  --task-id ID         initial/batch task (interactive default: 0, no prompt)
+  --trials COUNT       batch attempts (default: 1)
+  --default            skip the picker and use missing defaults
+  --dry-run            print the resolved command without running it
+  --list               show compatible simulator/model profiles
+  -h, --help           show this help
+
+Examples:
+  ./lab
+  ./lab --default
+  ./lab --backend robocasa --model groot-n1.5 --mode interactive --default
+  ./lab --default --dry-run -- --dashboard-port 8086
+
+The recommended/default setup is RoboCasa + π0.5 + atomic_seen task 0 in the
+interactive browser dashboard. Install fzf for arrow-key menus; a numbered
+terminal menu is used otherwise.
+EOF
+}
+
+list_profiles() {
+  cat <<'EOF'
+BACKEND   MODEL         STATUS
+robocasa  pi05          ready / default
+robocasa  groot-n1.5    ready
+libero    pi05          ready
+libero    groot-n1.5    incompatible
+EOF
+}
+
+# Options are id<TAB>human label. Prints only the selected id.
+pick_id() {
+  local header="$1"
+  shift
+  [[ $# -gt 0 ]] || return 1
+  local selected=""
+  if have_fzf && have_tty; then
+    selected="$(printf '%s\n' "$@" | fzf \
+      --height=12 \
+      --layout=reverse \
+      --border=rounded \
+      --header="$header" \
+      --prompt="> " \
+      --with-nth=2..)" || return 1
+  else
+    have_tty || die "interactive selection needs a terminal (or use --default)"
+    echo >&2
+    echo "embodied-lab: $header" >&2
+    have_fzf || echo "(Install fzf for arrow-key selection.)" >&2
+    local index=1 option answer
+    for option in "$@"; do
+      echo "  $index) ${option#*$'\t'}" >&2
+      ((index++)) || true
+    done
+    echo "  0) Cancel" >&2
+    read -r -p "Enter number [0=cancel]: " answer </dev/tty || return 1
+    [[ "$answer" =~ ^[0-9]+$ ]] || die "invalid selection"
+    (( answer > 0 && answer <= $# )) || return 1
+    eval "selected=\${$answer}"
+  fi
+  printf '%s\n' "${selected%%$'\t'*}"
+}
+
+read_value() {
+  local prompt="$1" default_value="$2" value=""
+  have_tty || die "interactive input needs a terminal"
+  read -r -e -i "$default_value" -p "$prompt" value </dev/tty || return 1
+  printf '%s\n' "${value:-$default_value}"
+}
+
+shell_command() {
+  local value
+  printf 'cd %q &&' "$PROJECT_DIR"
+  for value in "$@"; do
+    printf ' %q' "$value"
+  done
+  printf '\n'
+}
+
+main() {
+  local backend="" model="" mode="" task_set="" task_id="0" trials="1"
+  local use_defaults=0 dry_run=0 list_only=0 task_id_set=0 trials_set=0
+  local -a extra_args=()
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --backend) backend="${2:?--backend requires a value}"; shift 2 ;;
+      --model) model="${2:?--model requires a value}"; shift 2 ;;
+      --mode) mode="${2:?--mode requires a value}"; shift 2 ;;
+      --task-set|--task-suite) task_set="${2:?$1 requires a value}"; shift 2 ;;
+      --task-id) task_id="${2:?--task-id requires a value}"; task_id_set=1; shift 2 ;;
+      --trials) trials="${2:?--trials requires a value}"; trials_set=1; shift 2 ;;
+      --default) use_defaults=1; shift ;;
+      --dry-run) dry_run=1; shift ;;
+      --list) list_only=1; shift ;;
+      -h|--help) usage; return 0 ;;
+      --) shift; extra_args=("$@"); break ;;
+      *) die "unknown option: $1 (use -- before advanced showcase flags)" ;;
+    esac
+  done
+
+  if [[ "$list_only" == "1" ]]; then
+    list_profiles
+    return 0
+  fi
+
+  if [[ "$use_defaults" == "0" ]]; then
+    backend="${backend:-$(pick_id \
+      "1/4 · Choose simulator (recommended first)" \
+      $'robocasa\tRoboCasa365 · mobile kitchen manipulation · recommended' \
+      $'libero\tLIBERO · fixed-arm tabletop benchmark')}" || return 1
+
+    if [[ -z "$model" ]]; then
+      if [[ "$backend" == "robocasa" ]]; then
+        model="$(pick_id \
+          "2/4 · Choose a compatible local policy (default first)" \
+          $'pi05\tPhysical Intelligence π0.5 · default' \
+          $'groot-n1.5\tNVIDIA Isaac GR00T N1.5')" || return 1
+      else
+        model="pi05"
+        echo "embodied-lab: LIBERO currently selects its only compatible model, π0.5." >&2
+      fi
+    fi
+
+    mode="${mode:-$(pick_id \
+      "3/4 · Choose run mode" \
+      $'interactive\tInteractive dashboard · change task/prompt and repeat' \
+      $'batch\tAutomatic batch · run selected task and exit')}" || return 1
+
+    if [[ -z "$task_set" ]]; then
+      if [[ "$backend" == "robocasa" ]]; then
+        task_set="$(pick_id \
+          "4/4 · Choose RoboCasa task collection" \
+          $'atomic_seen\tatomic_seen · 18 tasks · recommended' \
+          $'composite_seen\tcomposite_seen · 16 multi-step tasks' \
+          $'all_atomic_tasks\tall_atomic_tasks · 65 tasks')" || return 1
+      else
+        task_set="$(pick_id \
+          "4/4 · Choose LIBERO task suite" \
+          $'libero_spatial\tlibero_spatial · default' \
+          $'libero_object\tlibero_object' \
+          $'libero_goal\tlibero_goal' \
+          $'libero_10\tlibero_10' \
+          $'libero_90\tlibero_90')" || return 1
+      fi
+    fi
+    if [[ "$mode" == "batch" ]]; then
+      if [[ "$task_id_set" == "0" ]]; then
+        task_id="$(read_value "Task ID to run: " "$task_id")" || return 1
+      fi
+      if [[ "$trials_set" == "0" ]]; then
+        trials="$(read_value "Trials for this task: " "$trials")" || return 1
+      fi
+    fi
+  fi
+
+  backend="${backend:-robocasa}"
+  model="${model:-pi05}"
+  mode="${mode:-interactive}"
+  if [[ -z "$task_set" ]]; then
+    task_set="$( [[ "$backend" == "robocasa" ]] && echo atomic_seen || echo libero_spatial )"
+  fi
+
+  case "$backend/$model" in
+    robocasa/pi05|robocasa/groot-n1.5|libero/pi05) ;;
+    *) die "incompatible profile: backend=$backend model=$model (use --list)" ;;
+  esac
+  [[ "$mode" == "interactive" || "$mode" == "batch" ]] \
+    || die "--mode must be interactive or batch"
+  [[ "$task_id" =~ ^[0-9]+$ ]] || die "--task-id must be a non-negative integer"
+  [[ "$trials" =~ ^[1-9][0-9]*$ ]] || die "--trials must be a positive integer"
+
+  local launcher="$PROJECT_DIR/scripts/run_interactive_showcase.sh"
+  local -a command=(
+    "$launcher"
+    --backend "$backend"
+    --model "$model"
+    --task-set "$task_set"
+    --task-id "$task_id"
+  )
+  if [[ "$mode" == "batch" ]]; then
+    command[0]="$PROJECT_DIR/scripts/run_showcase.sh"
+    command+=(--batch --trials "$trials")
+  fi
+  command+=("${extra_args[@]}")
+
+  local rendered summary
+  rendered="$(shell_command "${command[@]}")"
+  summary="Embodied Policy Lab\nSimulator: $backend\nModel: $model\nMode: $mode\nTasks: $task_set · initial ID $task_id"
+  if [[ "$mode" == "batch" ]]; then summary+=" · $trials trial(s)"; fi
+
+  if [[ "$dry_run" == "1" ]]; then
+    printf '%b\n\n%s\n' "$summary" "$rendered"
+    return 0
+  fi
+  echo "$(printf '%b' "$summary")"
+  echo "Command: $rendered"
+  echo "Launching..."
+  cd "$PROJECT_DIR"
+  exec "${command[@]}"
+}
+
+main "$@"

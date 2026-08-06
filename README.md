@@ -1,27 +1,68 @@
-# π0.5 Sim Lab
+# Embodied Policy Lab
 
-> The same local dashboard and CLI support LIBERO and RoboCasa365 with
-> backend-matched π0.5 checkpoints, observations, actions, horizons, and success
-> predicates. See [the RoboCasa development notes](docs/robocasa-backend.md).
+> A local, publishable workbench for plugging vision-language-action policies
+> into robot simulators with live rollouts, prompt experiments, success scoring,
+> GPU telemetry, and network-audit evidence.
+
+Simulator and model are independent CLI choices. The current compatibility
+matrix is:
+
+| Simulator | `pi05` | `groot-n1.5` |
+|---|---:|---:|
+| LIBERO | ✓ | — |
+| RoboCasa365 | ✓ | ✓ |
+
+The policy adapter boundary is documented in
+[the model-plugin guide](docs/model-plugins.md). RoboCasa implementation and
+validation history remains in [the development notes](docs/robocasa-backend.md),
+with GR00T-specific setup and measured results in
+[the N1.5 notes](docs/groot-n1.5.md).
 
 Quick RoboCasa checks:
 
 ```bash
 ./scripts/run_robocasa_smoke.sh         # simulator only
 ./scripts/run_robocasa_policy_smoke.sh  # one real local π0.5 request
+./scripts/run_groot_policy_smoke.sh     # one real local GR00T N1.5 request
 ```
 
 Interactive and automatic RoboCasa rollouts use the original showcase scripts:
 
 ```bash
 ./scripts/run_interactive_showcase.sh --backend robocasa
+./scripts/run_interactive_showcase.sh --backend robocasa --model groot-n1.5
 ./scripts/run_showcase.sh --backend robocasa --batch --task-id 0 --trials 3
 ```
 
-This folder is a reproducible local deployment of π0.5 in the LIBERO and
-RoboCasa robot-manipulation simulators. It uses pinned OpenPI integrations,
-robosuite, MuJoCo, and the workstation's NVIDIA GPU. Simulation rendering is
-headless through EGL; each rollout is saved as an MP4 for inspection.
+For the simplest every-run workflow, use the terminal picker. RoboCasa + π0.5
+is listed first and used by `--default`; the picker only offers compatible
+model/simulator pairs:
+
+```bash
+./lab                   # fzf arrow-key picker, or numbered fallback
+./lab --default         # immediately launch RoboCasa + π0.5
+./lab --list            # compatibility matrix
+./lab --default --dry-run
+```
+
+Interactive mode opens task 0 immediately; choose another task from the
+dashboard or pass `--task-id ID`. Batch mode asks for a task ID and trial count
+unless those values were supplied as flags.
+
+You can preselect part of the configuration and let the picker fill the rest,
+or bypass it entirely:
+
+```bash
+./lab --backend robocasa --model groot-n1.5
+./lab --backend robocasa --model groot-n1.5 --mode batch \
+  --task-id 2 --trials 3 --default
+```
+
+This repository is a reproducible local deployment of π0.5 and NVIDIA Isaac
+GR00T N1.5 in the LIBERO and RoboCasa robot-manipulation simulators. It uses
+pinned upstream integrations, robosuite, MuJoCo, and the workstation's NVIDIA
+GPU. Simulation rendering is headless through EGL; each rollout is saved as an
+MP4 for inspection.
 
 The project is structured for publication: `upstream-openpi` is a pinned Git
 submodule, while model weights and generated machine-specific artifacts are
@@ -29,29 +70,35 @@ excluded from version control.
 
 ## Status
 
-- Upstream source: `Physical-Intelligence/openpi`
-- Pinned commit: see `UPSTREAM_COMMIT`
-- Models: `pi05_libero` and RoboCasa `pi05_pretrain_human300`
-- Policy runtime: Python 3.11 + JAX/CUDA
-- Simulator runtimes: Python 3.8 LIBERO and isolated Python 3.11 RoboCasa
-- Default backend: LIBERO; select RoboCasa explicitly with `--backend robocasa`
+- Upstream sources: Physical Intelligence OpenPI and RoboCasa's NVIDIA Isaac GR00T fork
+- Pinned revisions: Git submodules plus `UPSTREAM_COMMIT` for the original OpenPI baseline
+- Models: `pi05_libero`, `pi05_pretrain_human300`, and `gr00t_n1.5_robocasa365_120k`
+- Policy runtimes: isolated JAX/CUDA and PyTorch/CUDA environments
+- Simulator runtimes: Python 3.8 LIBERO, Python 3.11 RoboCasa/OpenPI, and Python 3.12 RoboCasa/GR00T
+- Terminal-picker default: RoboCasa + π0.5; the legacy low-level CLI still defaults to LIBERO
 
 Initial LIBERO validation on August 5, 2026 completed all 10/10 smoke-test episodes.
 See `results/README.md` for measured runtime and GPU telemetry.
 
 The first LIBERO run downloads approximately 11.6 GiB into `cache/openpi`.
-RoboCasa setup downloads approximately 10 GB of kitchen assets and 12 GB of
-inference checkpoint data. Later runs reuse both caches.
+RoboCasa assets use approximately 23 GB in the current release. The π0.5
+inference checkpoint is approximately 12 GB; the inference-only GR00T download
+is approximately 7.6 GB. Later runs reuse all caches.
 
 ## Live showcase
 
 The showcase opens a local browser console displaying:
 
+- an active-profile bar with the selected model, simulator, task collection,
+  and local transport;
+- an animated startup banner while policy weights, the simulator, and the scene
+  are loading;
 - live external and wrist-camera simulator views, rendered independently from
   the lower-resolution tensors sent to the model;
 - the active language command and episode progress;
-- the backend-specific action chunk (10×7D LIBERO or 50×12D RoboCasa);
-- cold/JIT and warm inference latency;
+- the profile-specific action chunk (10×7D LIBERO π0.5, 50×12D RoboCasa
+  π0.5, or 16×12D RoboCasa GR00T);
+- cold/startup and warm inference latency;
 - GPU utilization, VRAM, power, and temperature;
 - task success and the local policy endpoint;
 - a syscall-level audit of model and simulator network destinations.
@@ -72,6 +119,17 @@ ROBOCASA_DOWNLOAD_ASSETS=1 ROBOCASA_DOWNLOAD_CHECKPOINT=1 \
   ./scripts/setup_robocasa.sh
 ./scripts/run_interactive_showcase.sh --backend robocasa
 ```
+
+For NVIDIA Isaac GR00T N1.5, use its isolated setup and the same launcher:
+
+```bash
+GROOT_DOWNLOAD_CHECKPOINT=1 ./scripts/setup_groot.sh
+./scripts/run_interactive_showcase.sh \
+  --backend robocasa --model groot-n1.5
+```
+
+The two large policies should be run one at a time on this 24 GB GPU. The
+launcher owns the selected server lifecycle, so ordinary runs already do this.
 
 The browser opens at <http://127.0.0.1:8085>. By default, the showcase runs task
 0 from `libero_spatial`, records one rollout, and audits network syscalls from
@@ -100,6 +158,8 @@ Useful showcase controls:
 | Environment variable | Default | Purpose |
 |---|---:|---|
 | `BACKEND` | `libero` | Select `libero` or `robocasa` |
+| `MODEL` | `pi05` | Select `pi05` or `groot-n1.5` |
+| `POLICY_PORT` | `8000` | Local policy port (`PI05_PORT` remains a legacy alias) |
 | `TASK_SUITE` | backend default | Select a LIBERO suite or RoboCasa task set |
 | `TASK_IDS` | `0` | Comma-separated task IDs, or `all` |
 | `TRIALS_PER_TASK` | `1` | Episodes per selected task |
@@ -114,6 +174,8 @@ Useful showcase controls:
 | `INITIAL_PROMPT` | empty | Initial override in interactive mode |
 | `LOCAL_LLM_URL` | empty | Loopback Ollama or chat-completions endpoint |
 | `LOCAL_LLM_MODEL` | empty | Model served by the local LLM endpoint |
+| `LOCAL_LLM_NUM_GPU` | `0` | Ollama GPU layers; CPU is the safe default while a VLA owns VRAM |
+| `ALLOW_GPU_OVERSUBSCRIPTION` | `0` | Override the safety stop when another GPU compute process is present |
 
 For example, run three tasks and keep the completed dashboard open:
 
@@ -140,7 +202,7 @@ The scripts also expose a flag-based CLI. Run
 
 RoboCasa's browser views default to 960×540 at up to 6 FPS. These are separate
 MuJoCo presentation renders; the official square camera observations and
-224×224 π0.5 inputs remain unchanged. Override the quality/performance balance
+model-side 224×224 transforms remain unchanged. Override the quality/performance balance
 without modifying code:
 
 ```bash
@@ -161,7 +223,7 @@ observed during that run.
 ## Interactive experiment console
 
 Launch a persistent session when you want to reset the simulator, switch tasks,
-edit the π0.5 instruction while it is running, and accumulate success rates:
+edit the selected policy's instruction while it is running, and accumulate success rates:
 
 ```bash
 ./scripts/run_interactive_showcase.sh
@@ -187,7 +249,7 @@ Choose a broader registered RoboCasa collection at launch when useful:
 The browser now waits for you instead of starting automatically. Its workflow is:
 
 1. Choose the **evaluation task**, which sets the scene and success scoring.
-2. Review or edit the **instruction sent to π0.5**.
+2. Review or edit the **instruction sent to the local policy**.
 3. Choose **result handling** and a **rollout budget**. Use Scored only when the
    instruction still means exactly the selected evaluation goal. Standard uses
    the upstream benchmark limit, Extended allows 2× as many actions, and Long
@@ -248,6 +310,11 @@ The generator records and avoids prior outputs from the session. Generated text
 remains a draft until you explicitly start a new rollout or apply it to the
 current rollout.
 
+Ollama prompt generation defaults to CPU (`LOCAL_LLM_NUM_GPU=0`) so a compact
+LLM cannot evict or exhaust the 24 GB GPU while π0.5 or GR00T is resident. This
+is slower than GPU prompt generation but keeps policy inference stable. Override
+the value only on a machine with enough spare VRAM or a separate prompt GPU.
+
 For every synchronous inference request, the client records the exact prompt,
 its SHA-256 digest, the returned action-chunk digest, attempt, step, and latency
 in `inference-audit.jsonl`. The dashboard shows the last acknowledged prompt
@@ -268,7 +335,7 @@ LOCAL_LLM_MODEL=your-model \
 For an OpenAI-compatible local server such as LM Studio, use its local
 `/v1/chat/completions` URL and model name. The launcher rejects non-loopback LLM
 URLs so prompt generation cannot silently become a hosted call. Ollama/LM Studio
-remains optional; the core π0.5 showcase does not require either one.
+remains optional; policy inference does not require either one.
 
 ## Full-suite smoke test
 

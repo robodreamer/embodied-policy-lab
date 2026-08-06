@@ -12,3 +12,7 @@
 	path = upstream-robosuite
 	url = https://github.com/ARISE-Initiative/robosuite.git
 	ignore = untracked
+[submodule "upstream-robocasa-groot"]
+	path = upstream-robocasa-groot
+	url = https://github.com/robocasa-benchmark/Isaac-GR00T.git
+	ignore = untracked

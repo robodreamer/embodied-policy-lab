@@ -1,4 +1,4 @@
-"""Persistent π0.5 + RoboCasa session for the shared local dashboard."""
+"""Persistent model-plugin + RoboCasa session for the local dashboard."""
 
 from __future__ import annotations
 
@@ -12,17 +12,21 @@ import time
 
 import imageio.v2 as imageio
 import numpy as np
-from openpi_client import websocket_client_policy
 import tyro
 
 try:
+    from . import backend_registry
     from . import robocasa_runtime as core
+    from . import robocasa_policy_plugins
 except ImportError:  # Direct script execution adds showcase/ to sys.path.
+    import backend_registry
     import robocasa_runtime as core
+    import robocasa_policy_plugins
 
 
 @dataclasses.dataclass
 class Args:
+    model: str = "pi05"
     host: str = "127.0.0.1"
     port: int = 8000
     resize_size: int = 224
@@ -65,6 +69,8 @@ def _latency_fields(latencies: list[float]) -> dict:
 
 def run(args: Args) -> None:
     np.random.seed(args.seed)
+    _, policy_spec = backend_registry.require_compatible("robocasa", args.model)
+    policy_profile = backend_registry.get_profile("robocasa", policy_spec.key)
     names = core.task_names(args.task_set_name)
     if not 0 <= args.task_id < len(names):
         raise ValueError(f"Initial task ID must be in [0, {len(names)})")
@@ -72,6 +78,11 @@ def run(args: Args) -> None:
         raise ValueError("num_trials_per_task must be positive")
     if args.replan_steps < 1:
         raise ValueError("replan_steps must be positive")
+    if args.replan_steps > policy_profile.action_horizon:
+        raise ValueError(
+            f"replan_steps cannot exceed {policy_spec.display_name}'s "
+            f"{policy_profile.action_horizon}-step action horizon"
+        )
     if args.viewer_width < 1 or args.viewer_height < 1:
         raise ValueError("viewer_width and viewer_height must be positive")
     if args.viewer_fps <= 0:
@@ -98,7 +109,9 @@ def run(args: Args) -> None:
     video_dir.mkdir(parents=True, exist_ok=True)
     session_dir = pathlib.Path(args.session_dir)
     audit_path = session_dir / "inference-audit.jsonl"
-    client = websocket_client_policy.WebsocketClientPolicy(args.host, args.port)
+    policy = robocasa_policy_plugins.create_policy_plugin(
+        policy_spec.key, args.host, args.port, args.resize_size
+    )
     inbox = core.ControlInbox(args.session_dir)
 
     current_task_id = selected_task_ids[0]
@@ -127,9 +140,12 @@ def run(args: Args) -> None:
             "interactive": args.interactive,
             "backend": "robocasa",
             "simulator": "RoboCasa365 / robosuite / MuJoCo",
-            "model": "pi05_pretrain_human300",
-            "runtime": "local JAX/CUDA",
-            "policy_endpoint": f"ws://{args.host}:{args.port}",
+            "model_plugin": policy_spec.key,
+            "model": policy_profile.model_name,
+            "model_display_name": policy_spec.display_name,
+            "runtime": policy_spec.runtime,
+            "policy_transport": policy_spec.transport,
+            "policy_endpoint": policy.endpoint,
             "network_audit": args.network_audit,
             "suite": args.task_set_name,
             "split": args.split,
@@ -139,7 +155,7 @@ def run(args: Args) -> None:
             "dynamic_task_prompts": True,
             "seed": args.seed,
             "replan_steps": args.replan_steps,
-            "action_horizon": 50,
+            "action_horizon": policy_profile.action_horizon,
             "action_dimension": 12,
             "action_labels": [
                 "EEF ΔX",
@@ -476,9 +492,8 @@ def run(args: Args) -> None:
                             )
                             break
 
-                    images, robot_state, model_input = core.prepare_observation(
-                        observation, args.resize_size, active_prompt
-                    )
+                    model_input = policy.prepare(observation, active_prompt)
+                    robot_state = model_input.robot_state
 
                     if not action_plan:
                         if (
@@ -495,7 +510,7 @@ def run(args: Args) -> None:
                         model_request_count += 1
                         attempt_request_count += 1
                         request_id = model_request_count
-                        request_prompt = str(model_input["prompt"])
+                        request_prompt = model_input.prompt
                         prompt_sha256 = hashlib.sha256(
                             request_prompt.encode("utf-8")
                         ).hexdigest()
@@ -507,11 +522,10 @@ def run(args: Args) -> None:
                             model_request_id=request_id,
                         )
                         inference_started = time.perf_counter()
-                        response = client.infer(model_input)
+                        action_chunk = policy.infer(model_input)
                         inference_latency = (
                             time.perf_counter() - inference_started
                         ) * 1000.0
-                        action_chunk = core.validate_action_chunk(response["actions"])
                         if len(action_chunk) < args.replan_steps:
                             raise ValueError(
                                 "Policy returned fewer actions than replan_steps"
@@ -522,6 +536,8 @@ def run(args: Args) -> None:
                         audit_event = {
                             "created_at": core.timestamp(),
                             "backend": "robocasa",
+                            "model_plugin": policy_spec.key,
+                            "model": policy_profile.model_name,
                             "request_id": request_id,
                             "attempt": attempt_number,
                             "task_id": attempt_task_id,

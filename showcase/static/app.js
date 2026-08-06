@@ -195,6 +195,29 @@ function humanPhase(state) {
   return "LOADING";
 }
 
+function updateLoadingStatus(state) {
+  const phase = state.phase || "waiting";
+  const loading = ["waiting", "initializing", "preparing_task"].includes(phase);
+  $("loadingBanner").classList.toggle("hidden", !loading);
+  if (!loading) return;
+
+  const model = state.model_display_name || state.model || "local policy";
+  const simulator = state.simulator || state.backend || "local simulator";
+  if (phase === "preparing_task") {
+    $("loadingTitle").textContent = `PREPARING ${String(simulator).toUpperCase()}`;
+    $("loadingDetail").textContent = state.command_message
+      || "Constructing the selected scene and loading its task definition. This can take several seconds.";
+  } else if (phase === "initializing") {
+    $("loadingTitle").textContent = `LOADING ${String(model).toUpperCase()}`;
+    $("loadingDetail").textContent = state.command_message
+      || `Initializing the policy runtime and connecting it to ${simulator}. The page will become interactive automatically.`;
+  } else {
+    $("loadingTitle").textContent = "CONNECTING TO THE POLICY AND SIMULATOR";
+    $("loadingDetail").textContent = state.message
+      || "Waiting for startup telemetry. This page updates automatically.";
+  }
+}
+
 function updateRunStatus(state) {
   const phase = state.phase;
   const scored = Number(state.episodes) || 0;
@@ -212,7 +235,7 @@ function updateRunStatus(state) {
   } else if (phase === "preparing_task") {
     const task = selectedTask();
     $("runStatus").textContent = `Preparing ${task?.name || "selected task"}`;
-    $("runDetail").textContent = "RoboCasa is constructing the kitchen scene and loading its exact instruction. This normally takes several seconds.";
+    $("runDetail").textContent = "The selected simulator is constructing the scene and loading its exact instruction. This normally takes several seconds.";
     $("frameStatus").innerHTML = "<i></i> PREPARING";
     $("progressLabel").textContent = "SCENE PREPARATION";
     $("progressText").textContent = "Please wait";
@@ -230,7 +253,7 @@ function updateRunStatus(state) {
     $("progressText").textContent = `${successes}/${scored} scored · ${unscored} unscored · ${aborted} aborted`;
   } else {
     $("runStatus").textContent = "Loading local simulator and model";
-    $("runDetail").textContent = "The first inference includes a one-time JAX compile.";
+    $("runDetail").textContent = "The first inference may include model warm-up.";
     $("frameStatus").innerHTML = "<i></i> WAITING";
   }
   $("frameStatus").classList.toggle("paused", phase !== "running");
@@ -280,8 +303,9 @@ async function configureControls() {
   const config = await fetch("/api/config", {cache: "no-store"}).then(r => r.json());
   localLlmEnabled = Boolean(config.local_llm_enabled);
   randomGenerationEnabled = Array.isArray(config.prompt_generation_modes);
+  const generatorRuntime = config.local_llm_execution ? ` · ${config.local_llm_execution}` : "";
   $("llmStatus").textContent = localLlmEnabled && randomGenerationEnabled
-    ? `Local generator ready: ${config.local_llm_model}. Scored variations preserve the goal; exploratory commands are not scored.`
+    ? `Local generator ready: ${config.local_llm_model}${generatorRuntime}. Scored variations preserve the goal; exploratory commands are not scored.`
     : (localLlmEnabled
       ? `Local generator ready: ${config.local_llm_model}. Relaunch this session to enable randomized modes.`
       : "Optional local LLM is not configured. Type a prompt directly, or see README setup instructions.");
@@ -331,7 +355,7 @@ async function configureControls() {
           action: "set_task",
           taskId: Number(task.id),
         };
-        setControlNote("Preparing the selected RoboCasa scene and its exact canonical instruction…");
+        setControlNote("Preparing the selected simulator scene and its exact canonical instruction…");
       } catch (error) { setControlNote(error.message, true); }
     } else {
       setControlNote("Task and its canonical instruction are staged. Press Start when ready.");
@@ -405,7 +429,7 @@ async function configureControls() {
         taskId: Number($("taskSelect").value),
         evaluationMode: selectedEvaluationMode(),
       };
-      setControlNote("Draft sent. π0.5 will replan from the next observation; this attempt is now mixed-prompt.");
+      setControlNote("Draft sent. The policy will replan from the next observation; this attempt is now mixed-prompt.");
       updateControls(lastState);
     } catch (error) { setControlNote(error.message, true); }
   };
@@ -450,6 +474,7 @@ async function updateState() {
   try {
     const state = await fetch("/api/state", {cache: "no-store"}).then(r => r.json());
     lastState = state;
+    updateLoadingStatus(state);
     await configureControls();
     if (pendingCommand && state.command_ack === pendingCommand.id) {
       const canonicalPromptAck = pendingCommand.source === "canonical"
@@ -509,6 +534,23 @@ async function updateState() {
     }
     updateRunStatus(state);
     updateControls(state);
+    const modelDisplayName = state.model_display_name || state.model || "Local policy";
+    const simulatorDisplayName = state.simulator || state.backend || "Local simulator";
+    const backendName = state.backend ? String(state.backend).toUpperCase() : "BACKEND PENDING";
+    const transportName = state.policy_transport ? String(state.policy_transport).toUpperCase() : "LOCAL";
+    const taskPosition = state.task_position && state.total_tasks
+      ? `Task ${state.task_position} of ${state.total_tasks}`
+      : (state.task_id !== undefined ? `Initial task ID ${state.task_id}` : "No task selected");
+    document.title = `${modelDisplayName} × ${simulatorDisplayName} · Embodied Policy Lab`;
+    $("profileModel").textContent = modelDisplayName;
+    $("profileModelDetail").textContent = [state.model, state.runtime].filter(Boolean).join(" · ") || "Local policy";
+    $("profileEnvironment").textContent = simulatorDisplayName;
+    $("profileEnvironmentDetail").textContent = `${backendName} BACKEND`;
+    $("profileTaskSet").textContent = state.suite || "—";
+    $("profileTaskDetail").textContent = taskPosition;
+    $("profileTransport").textContent = `${transportName} · LOOPBACK`;
+    $("profileEndpoint").textContent = state.policy_endpoint || "Waiting for endpoint";
+    $("modelRuntimeName").textContent = `${modelDisplayName} / ${String(state.runtime || "local runtime").replace(/^local /i, "")}`;
     $("prompt").textContent = state.model_ack_prompt || state.prompt || "Waiting for an instruction…";
     $("appliedSource").textContent = String(state.model_ack_prompt_source || state.prompt_source || "—").toUpperCase();
     $("appliedState").textContent = state.model_request_status === "waiting_for_response"
@@ -533,19 +575,22 @@ async function updateState() {
     const unscored = Number(state.unscored_attempts) || 0;
     $("success").textContent = episodes ? `${Math.round(100 * successes / episodes)}%` : "—";
     $("successDetail").textContent = `${successes}/${episodes} scored · ${unscored} exploratory/mixed · ${aborted} aborted`;
-    $("endpoint").textContent = state.policy_endpoint || "ws://127.0.0.1:8000";
+    $("endpoint").textContent = state.policy_endpoint || "Waiting for local policy endpoint";
     const modelWidth = Number(state.model_image_width) || 224;
     const modelHeight = Number(state.model_image_height) || 224;
     const viewerWidth = Number(state.viewer_width) || modelWidth;
     const viewerHeight = Number(state.viewer_height) || modelHeight;
-    const cameraMeta = `${viewerWidth}×${viewerHeight} VIEW · π INPUT ${modelWidth}×${modelHeight}`;
+    const cameraMeta = `${viewerWidth}×${viewerHeight} VIEW · MODEL INPUT ${modelWidth}×${modelHeight}`;
     $("externalCameraMeta").textContent = cameraMeta;
     $("wristCameraMeta").textContent = cameraMeta;
     document.documentElement.style.setProperty("--camera-aspect", `${viewerWidth} / ${viewerHeight}`);
-    $("stateShape").textContent = `${modelWidth}×${modelHeight} · ${state.state_dimension || 8}D proprioception`;
-    $("actionShape").textContent = `${state.action_dimension || 7}D ACTIONS`;
-    $("simulatorLabel").textContent = state.simulator || "MuJoCo / LIBERO";
-    $("actionTitle").textContent = `PREDICTED ${state.action_horizon || 10}-STEP ACTION CHUNK`;
+    const cameraCount = Number(state.camera_count) || 2;
+    $("stateShape").textContent = `${cameraCount} RGB VIEW${cameraCount === 1 ? "" : "S"} · ${modelWidth}×${modelHeight} · ${state.state_dimension || "—"}D STATE`;
+    $("actionShape").textContent = state.action_dimension ? `${state.action_dimension}D ACTIONS` : "POLICY ACTIONS";
+    $("simulatorLabel").textContent = simulatorDisplayName;
+    $("actionTitle").textContent = state.action_horizon
+      ? `PREDICTED ${state.action_horizon}-STEP ACTION CHUNK`
+      : "PREDICTED ACTION CHUNK";
     const actionLabels = Array.isArray(state.action_labels)
       ? state.action_labels
       : Array.from({length: Number(state.action_dimension) || 7}, (_, index) => `ACTION ${index + 1}`);
@@ -572,6 +617,7 @@ async function updateTelemetry() {
     $("gpuUtil").textContent = format(completed ? gpu.max_utilization_pct : gpu.utilization_pct);
     $("vram").textContent = format(completed ? gpu.max_memory_mib : gpu.memory_mib);
     $("power").textContent = format(completed ? gpu.max_power_w : gpu.power_w, 1);
+    if (gpu.gpu) $("modelRuntimeDevice").textContent = gpu.gpu;
   } catch (_) { /* Dashboard remains useful without nvidia-smi. */ }
 }
 

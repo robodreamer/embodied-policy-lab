@@ -6,14 +6,15 @@ PROJECT_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 
 usage() {
   cat <<'EOF'
-Run the local π0.5 simulator showcase.
+Run a local robot-policy simulator showcase.
 
 Usage:
   ./scripts/run_showcase.sh [options]
   ./scripts/run_interactive_showcase.sh [options]
 
-Backend and task options:
-  --backend libero|robocasa       Simulator/model profile (default: libero)
+Backend, model, and task options:
+  --backend libero|robocasa       Simulator backend (default: libero)
+  --model pi05|groot-n1.5         Local policy plugin (default: pi05)
   --task-suite NAME               LIBERO suite or RoboCasa task set
   --task-set NAME                 Alias for --task-suite
   --task-id ID                    Initial task interactively, or one batch task
@@ -21,7 +22,7 @@ Backend and task options:
   --split pretrain|target         RoboCasa scene/object split (default: target)
   --trials COUNT                  Automatic attempts for a batch run
   --seed SEED                     Reproducible simulator seed
-  --replan-steps COUNT            Actions executed before querying π0.5 again
+  --replan-steps COUNT            Actions executed before querying the policy again
   --viewer-width PX               RoboCasa dashboard render width (default: 960)
   --viewer-height PX              RoboCasa dashboard render height (default: 540)
   --viewer-fps FPS                Maximum dashboard render rate (default: 6)
@@ -34,7 +35,7 @@ Session options:
   --batch                         Start automatically and exit after --trials
   --auto-start                    Start the initial interactive rollout immediately
   --realtime-delay-ms MS          Delay after each simulator action
-  --policy-port PORT              Local π0.5 WebSocket port
+  --policy-port PORT              Local policy server port
   --dashboard-port PORT           Browser dashboard port
   --hold-open / --no-hold-open    Keep or close the dashboard after completion
   --open / --no-open              Enable or disable automatic browser opening
@@ -43,6 +44,7 @@ Session options:
 
 Examples:
   ./scripts/run_interactive_showcase.sh --backend robocasa --task-set atomic_seen
+  ./scripts/run_interactive_showcase.sh --backend robocasa --model groot-n1.5
   ./scripts/run_showcase.sh --backend robocasa --batch --task-id 2 --trials 3
   ./scripts/run_showcase.sh --backend libero --task-suite libero_spatial --task-ids 0,1
 
@@ -51,16 +53,17 @@ EOF
 }
 
 BACKEND="${BACKEND:-libero}"
+MODEL="${MODEL:-pi05}"
 TASK_SUITE="${TASK_SUITE:-}"
 TASK_IDS="${TASK_IDS:-}"
 ROBOCASA_SPLIT="${ROBOCASA_SPLIT:-target}"
 TRIALS_PER_TASK="${TRIALS_PER_TASK:-1}"
 SEED="${SEED:-7}"
-REPLAN_STEPS="${REPLAN_STEPS:-5}"
+REPLAN_STEPS="${REPLAN_STEPS:-}"
 VIEWER_WIDTH="${VIEWER_WIDTH:-960}"
 VIEWER_HEIGHT="${VIEWER_HEIGHT:-540}"
 VIEWER_FPS="${VIEWER_FPS:-6}"
-PI05_PORT="${PI05_PORT:-8000}"
+POLICY_PORT="${POLICY_PORT:-${PI05_PORT:-8000}}"
 DASHBOARD_PORT="${DASHBOARD_PORT:-8085}"
 REALTIME_DELAY_MS="${REALTIME_DELAY_MS:-35}"
 NETWORK_AUDIT="${NETWORK_AUDIT:-1}"
@@ -73,11 +76,13 @@ EVALUATION_MODE="${EVALUATION_MODE:-}"
 ROLLOUT_BUDGET_MULTIPLIER="${ROLLOUT_BUDGET_MULTIPLIER:-0}"
 LOCAL_LLM_URL="${LOCAL_LLM_URL:-}"
 LOCAL_LLM_MODEL="${LOCAL_LLM_MODEL:-}"
+LOCAL_LLM_NUM_GPU="${LOCAL_LLM_NUM_GPU:-0}"
 SESSION_DIR="${SESSION_DIR:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --backend) BACKEND="${2:?--backend requires a value}"; shift 2 ;;
+    --model) MODEL="${2:?--model requires a value}"; shift 2 ;;
     --task-suite|--task-set) TASK_SUITE="${2:?$1 requires a value}"; shift 2 ;;
     --task-id|--task-ids) TASK_IDS="${2:?$1 requires a value}"; shift 2 ;;
     --split) ROBOCASA_SPLIT="${2:?--split requires a value}"; shift 2 ;;
@@ -90,7 +95,7 @@ while [[ $# -gt 0 ]]; do
     --prompt) INITIAL_PROMPT="${2:?--prompt requires a value}"; shift 2 ;;
     --evaluation-mode) EVALUATION_MODE="${2:?--evaluation-mode requires a value}"; shift 2 ;;
     --budget) ROLLOUT_BUDGET_MULTIPLIER="${2:?--budget requires a value}"; shift 2 ;;
-    --policy-port) PI05_PORT="${2:?--policy-port requires a value}"; shift 2 ;;
+    --policy-port) POLICY_PORT="${2:?--policy-port requires a value}"; shift 2 ;;
     --dashboard-port) DASHBOARD_PORT="${2:?--dashboard-port requires a value}"; shift 2 ;;
     --realtime-delay-ms) REALTIME_DELAY_MS="${2:?--realtime-delay-ms requires a value}"; shift 2 ;;
     --session-dir) SESSION_DIR="${2:?--session-dir requires a value}"; shift 2 ;;
@@ -109,8 +114,18 @@ while [[ $# -gt 0 ]]; do
 done
 
 BACKEND="${BACKEND,,}"
+MODEL="${MODEL,,}"
+case "$MODEL" in
+  pi|pi0.5|pi-0.5) MODEL="pi05" ;;
+  groot|gr00t|gr00t-n1.5|groot_n1.5|gr00t_n1.5) MODEL="groot-n1.5" ;;
+esac
+
 case "$BACKEND" in
   libero)
+    if [[ "$MODEL" != "pi05" ]]; then
+      echo "Model $MODEL does not support LIBERO in this repository; choose pi05." >&2
+      exit 2
+    fi
     OPENPI_DIR="$PROJECT_DIR/upstream-openpi"
     RUNTIME_PYTHON="$OPENPI_DIR/.venv/bin/python"
     CLIENT_PYTHON="$OPENPI_DIR/examples/libero/.venv/bin/python"
@@ -118,9 +133,22 @@ case "$BACKEND" in
     TASK_IDS="${TASK_IDS:-0}"
     ;;
   robocasa)
-    OPENPI_DIR="$PROJECT_DIR/upstream-robocasa-openpi"
-    RUNTIME_PYTHON="$OPENPI_DIR/.venv/bin/python"
-    CLIENT_PYTHON="$RUNTIME_PYTHON"
+    case "$MODEL" in
+      pi05)
+        OPENPI_DIR="$PROJECT_DIR/upstream-robocasa-openpi"
+        RUNTIME_PYTHON="$OPENPI_DIR/.venv/bin/python"
+        CLIENT_PYTHON="$RUNTIME_PYTHON"
+        ;;
+      groot-n1.5)
+        GROOT_DIR="$PROJECT_DIR/upstream-robocasa-groot"
+        RUNTIME_PYTHON="$GROOT_DIR/.venv/bin/python"
+        CLIENT_PYTHON="$RUNTIME_PYTHON"
+        ;;
+      *)
+        echo "Unsupported model: $MODEL (choose pi05 or groot-n1.5)" >&2
+        exit 2
+        ;;
+    esac
     TASK_SUITE="${TASK_SUITE:-${ROBOCASA_TASK_SET:-atomic_seen}}"
     TASK_IDS="${TASK_IDS:-${ROBOCASA_TASK_ID:-0}}"
     if [[ "$INTERACTIVE" == "1" ]] && [[ ! "$TASK_IDS" =~ ^[0-9]+$ ]]; then
@@ -134,7 +162,21 @@ case "$BACKEND" in
     ;;
 esac
 
-for integer_value in "$TRIALS_PER_TASK" "$SEED" "$REPLAN_STEPS" "$PI05_PORT" \
+if [[ -z "$REPLAN_STEPS" ]]; then
+  if [[ "$MODEL" == "groot-n1.5" ]]; then
+    REPLAN_STEPS=16
+  else
+    REPLAN_STEPS=5
+  fi
+fi
+
+if [[ "$MODEL" == "groot-n1.5" ]]; then
+  # Albumentations otherwise performs an online version check during import,
+  # which would pollute the local-inference network audit.
+  export NO_ALBUMENTATIONS_UPDATE=1
+fi
+
+for integer_value in "$TRIALS_PER_TASK" "$SEED" "$REPLAN_STEPS" "$POLICY_PORT" \
   "$DASHBOARD_PORT" "$REALTIME_DELAY_MS" "$VIEWER_WIDTH" "$VIEWER_HEIGHT"; do
   if [[ ! "$integer_value" =~ ^[0-9]+$ ]]; then
     echo "Expected a non-negative integer, got: $integer_value" >&2
@@ -166,7 +208,29 @@ if [[ "$ROBOCASA_SPLIT" != "pretrain" && "$ROBOCASA_SPLIT" != "target" ]]; then
   exit 2
 fi
 if [[ ! -x "$RUNTIME_PYTHON" ]] || [[ ! -x "$CLIENT_PYTHON" ]]; then
-  echo "$BACKEND runtime is not set up; see the README setup instructions." >&2
+  if [[ "$MODEL" == "groot-n1.5" ]]; then
+    echo "GR00T is not set up. Run ./scripts/setup_groot.sh first." >&2
+  else
+    echo "$BACKEND/$MODEL runtime is not set up; see the README setup instructions." >&2
+  fi
+  exit 1
+fi
+
+if [[ "$LOCAL_LLM_URL" == http://127.0.0.1:11434/* ]] && \
+  [[ -n "$LOCAL_LLM_MODEL" ]] && command -v ollama >/dev/null 2>&1; then
+  echo "Reserving GPU memory for the robot policy before loading the optional prompt model..."
+  ollama stop "$LOCAL_LLM_MODEL" >/dev/null 2>&1 || true
+fi
+
+GPU_COMPUTE_APPS="$(
+  nvidia-smi --query-compute-apps=pid,process_name,used_memory \
+    --format=csv,noheader 2>/dev/null || true
+)"
+if [[ -n "$GPU_COMPUTE_APPS" && "${ALLOW_GPU_OVERSUBSCRIPTION:-0}" != "1" ]]; then
+  echo "The GPU is already occupied by another compute process:" >&2
+  echo "$GPU_COMPUTE_APPS" >&2
+  echo "Local robot policies can use 21–22 GB on this 24 GB GPU." >&2
+  echo "Stop the other workload, or set ALLOW_GPU_OVERSUBSCRIPTION=1 if intentional." >&2
   exit 1
 fi
 
@@ -221,38 +285,84 @@ wait_for_http() {
   return 1
 }
 
-if [[ "$LOCAL_LLM_URL" == http://127.0.0.1:11434/* ]] && \
-  [[ -n "$LOCAL_LLM_MODEL" ]] && command -v ollama >/dev/null 2>&1; then
-  echo "Reserving GPU memory for π0.5 before loading the optional prompt model..."
-  ollama stop "$LOCAL_LLM_MODEL" >/dev/null 2>&1 || true
-fi
-
-echo "Starting local π0.5 server for $BACKEND..."
-if [[ "$NETWORK_AUDIT" == "1" ]]; then
-  setsid strace -f -e trace=network -s 256 -o "$SESSION_DIR/network-server.log" \
-    env BACKEND="$BACKEND" PI05_PORT="$PI05_PORT" "$SCRIPT_DIR/run_server.sh" \
-    > "$SESSION_DIR/server.log" 2>&1 &
-else
-  setsid env BACKEND="$BACKEND" PI05_PORT="$PI05_PORT" "$SCRIPT_DIR/run_server.sh" \
-    > "$SESSION_DIR/server.log" 2>&1 &
-fi
-SERVER_PID=$!
-
-if ! wait_for_http "$PI05_PORT" /healthz "$SERVER_PID"; then
-  echo "Policy server failed. See $SESSION_DIR/server.log" >&2
-  tail -100 "$SESSION_DIR/server.log" >&2
-  exit 1
-fi
-
-echo "timestamp,name,memory.used [MiB],utilization.gpu [%],power.draw [W],temperature.gpu" > "$SESSION_DIR/gpu.csv"
-(
-  while kill -0 "$SERVER_PID" 2>/dev/null; do
-    nvidia-smi --query-gpu=timestamp,name,memory.used,utilization.gpu,power.draw,temperature.gpu \
-      --format=csv,noheader,nounits >> "$SESSION_DIR/gpu.csv"
+wait_for_tcp_listener() {
+  local port="$1"
+  local owner_pid="$2"
+  for _ in $(seq 1 900); do
+    if ! kill -0 "$owner_pid" 2>/dev/null; then
+      return 1
+    fi
+    if ss -ltn "sport = :$port" | awk 'NR > 1 {found=1} END {exit !found}'; then
+      return 0
+    fi
     sleep 1
   done
-) &
-GPU_PID=$!
+  return 1
+}
+
+# Publish the selected profile before starting the heavyweight policy process so
+# the browser can explain what is loading instead of showing an empty dashboard.
+"$RUNTIME_PYTHON" - \
+  "$PROJECT_DIR" "$SESSION_DIR/state.json" "$BACKEND" "$MODEL" "$TASK_SUITE" \
+  "$TASK_IDS" "$POLICY_PORT" "$INTERACTIVE" "$NETWORK_AUDIT" \
+  "$VIEWER_WIDTH" "$VIEWER_HEIGHT" <<'PY'
+import datetime
+import json
+import pathlib
+import sys
+
+project_dir = pathlib.Path(sys.argv[1])
+state_path = pathlib.Path(sys.argv[2])
+backend, model, suite, task_ids = sys.argv[3:7]
+port = int(sys.argv[7])
+interactive = sys.argv[8] == "1"
+network_audit = sys.argv[9] == "1"
+viewer_width, viewer_height = map(int, sys.argv[10:12])
+sys.path.insert(0, str(project_dir))
+
+from showcase import backend_registry
+
+simulator, policy = backend_registry.require_compatible(backend, model)
+profile = backend_registry.get_profile(backend, model)
+now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+transport_scheme = "ws" if policy.transport == "websocket" else "tcp"
+try:
+    task_id = int(task_ids)
+except ValueError:
+    task_id = 0
+
+state = {
+    "phase": "initializing",
+    "message": "Loading the selected local policy and simulator",
+    "command_message": "Loading policy weights into local accelerator memory",
+    "backend": simulator.key,
+    "simulator": simulator.simulator,
+    "model_plugin": policy.key,
+    "model": profile.model_name,
+    "model_display_name": policy.display_name,
+    "runtime": policy.runtime,
+    "policy_transport": policy.transport,
+    "policy_endpoint": f"{transport_scheme}://127.0.0.1:{port}",
+    "suite": suite,
+    "task_ids": task_ids,
+    "task_id": task_id,
+    "interactive": interactive,
+    "network_audit": network_audit,
+    "state_dimension": simulator.state_dimension,
+    "action_dimension": simulator.action_dimension,
+    "action_horizon": profile.action_horizon,
+    "camera_count": len(simulator.cameras),
+    "model_image_width": 224,
+    "model_image_height": 224,
+    "viewer_width": viewer_width,
+    "viewer_height": viewer_height,
+    "episodes": 0,
+    "successes": 0,
+    "started_at": now,
+    "updated_at": now,
+}
+state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+PY
 
 DASHBOARD_COMMAND=(
   "$RUNTIME_PYTHON" "$PROJECT_DIR/showcase/dashboard_server.py"
@@ -268,6 +378,7 @@ if [[ -n "$LOCAL_LLM_URL" || -n "$LOCAL_LLM_MODEL" ]]; then
   DASHBOARD_COMMAND+=(
     --local-llm-url "$LOCAL_LLM_URL"
     --local-llm-model "$LOCAL_LLM_MODEL"
+    --local-llm-num-gpu "$LOCAL_LLM_NUM_GPU"
   )
 fi
 setsid "${DASHBOARD_COMMAND[@]}" > "$SESSION_DIR/dashboard.log" 2>&1 &
@@ -281,13 +392,63 @@ fi
 DASHBOARD_URL="http://127.0.0.1:$DASHBOARD_PORT"
 echo "Dashboard: $DASHBOARD_URL"
 echo "Session: $SESSION_DIR"
-echo "Backend: $BACKEND · Task collection: $TASK_SUITE · Task ID: $TASK_IDS"
+echo "Backend: $BACKEND · Model: $MODEL · Task collection: $TASK_SUITE · Task ID: $TASK_IDS"
+echo "Loading the local policy; startup progress is now visible in the dashboard."
 if [[ "$INTERACTIVE" == "1" ]]; then
   echo "Interactive mode: use the browser to run attempts and end the session."
 fi
 if [[ "$AUTO_OPEN" == "1" ]] && [[ -n "${DISPLAY:-}" ]]; then
   xdg-open "$DASHBOARD_URL" >/dev/null 2>&1 || true
 fi
+
+echo "Starting local $MODEL server for $BACKEND..."
+if [[ "$NETWORK_AUDIT" == "1" ]]; then
+  setsid strace -f -e trace=network -s 256 -o "$SESSION_DIR/network-server.log" \
+    env BACKEND="$BACKEND" MODEL="$MODEL" POLICY_PORT="$POLICY_PORT" "$SCRIPT_DIR/run_server.sh" \
+    > "$SESSION_DIR/server.log" 2>&1 &
+else
+  setsid env BACKEND="$BACKEND" MODEL="$MODEL" POLICY_PORT="$POLICY_PORT" "$SCRIPT_DIR/run_server.sh" \
+    > "$SESSION_DIR/server.log" 2>&1 &
+fi
+SERVER_PID=$!
+
+if [[ "$MODEL" == "groot-n1.5" ]]; then
+  POLICY_READY=0
+  wait_for_tcp_listener "$POLICY_PORT" "$SERVER_PID" || POLICY_READY=$?
+else
+  POLICY_READY=0
+  wait_for_http "$POLICY_PORT" /healthz "$SERVER_PID" || POLICY_READY=$?
+fi
+if [[ "$POLICY_READY" != "0" ]]; then
+  echo "Policy server failed. See $SESSION_DIR/server.log" >&2
+  tail -100 "$SESSION_DIR/server.log" >&2
+  exit 1
+fi
+
+"$RUNTIME_PYTHON" - "$SESSION_DIR/state.json" <<'PY'
+import datetime
+import json
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+state = json.loads(path.read_text(encoding="utf-8"))
+state["command_message"] = "Policy ready; loading the simulator and task catalog"
+state["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+temporary = path.with_suffix(".tmp")
+temporary.write_text(json.dumps(state, indent=2), encoding="utf-8")
+temporary.replace(path)
+PY
+
+echo "timestamp,name,memory.used [MiB],utilization.gpu [%],power.draw [W],temperature.gpu" > "$SESSION_DIR/gpu.csv"
+(
+  while kill -0 "$SERVER_PID" 2>/dev/null; do
+    nvidia-smi --query-gpu=timestamp,name,memory.used,utilization.gpu,power.draw,temperature.gpu \
+      --format=csv,noheader,nounits >> "$SESSION_DIR/gpu.csv"
+    sleep 1
+  done
+) &
+GPU_PID=$!
 
 export MUJOCO_GL="${MUJOCO_GL:-egl}"
 export PYOPENGL_PLATFORM="${PYOPENGL_PLATFORM:-egl}"
@@ -303,7 +464,7 @@ if [[ "$BACKEND" == "libero" ]]; then
     CLIENT_COMMAND=(
       "$CLIENT_PYTHON" "$PROJECT_DIR/showcase/interactive_libero.py"
       --host 127.0.0.1
-      --port "$PI05_PORT"
+      --port "$POLICY_PORT"
       --replan-steps "$REPLAN_STEPS"
       --task-suite-name "$TASK_SUITE"
       --task-id "$TASK_IDS"
@@ -317,7 +478,7 @@ if [[ "$BACKEND" == "libero" ]]; then
     CLIENT_COMMAND=(
       "$CLIENT_PYTHON" "$PROJECT_DIR/showcase/instrumented_libero.py"
       --host 127.0.0.1
-      --port "$PI05_PORT"
+      --port "$POLICY_PORT"
       --replan-steps "$REPLAN_STEPS"
       --task-suite-name "$TASK_SUITE"
       --task-ids "$TASK_IDS"
@@ -331,8 +492,9 @@ if [[ "$BACKEND" == "libero" ]]; then
 else
   CLIENT_COMMAND=(
     "$CLIENT_PYTHON" "$PROJECT_DIR/showcase/interactive_robocasa.py"
+    --model "$MODEL"
     --host 127.0.0.1
-    --port "$PI05_PORT"
+    --port "$POLICY_PORT"
     --replan-steps "$REPLAN_STEPS"
     --viewer-width "$VIEWER_WIDTH"
     --viewer-height "$VIEWER_HEIGHT"

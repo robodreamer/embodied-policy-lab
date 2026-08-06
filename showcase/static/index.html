@@ -3,19 +3,50 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>π0.5 Sim Lab — Local Robotics Console</title>
+    <title>Embodied Policy Lab — Local Robotics Console</title>
     <link rel="stylesheet" href="/style.css">
   </head>
   <body>
     <div class="noise"></div>
     <header>
-      <div>
+      <div class="brand">
         <p class="eyebrow">PHYSICAL AI / LOCAL RUNTIME</p>
-        <h1><span>π0.5</span> Sim Lab</h1>
+        <h1><span>Embodied</span> Policy Lab</h1>
       </div>
+      <section class="profile-bar" aria-label="Active model and simulation profile">
+        <div class="profile-item model-profile">
+          <small>SELECTED MODEL</small>
+          <strong id="profileModel">WAITING FOR POLICY</strong>
+          <span id="profileModelDetail">Runtime metadata has not arrived</span>
+        </div>
+        <div class="profile-item environment-profile">
+          <small>SELECTED ENVIRONMENT</small>
+          <strong id="profileEnvironment">WAITING FOR SIMULATOR</strong>
+          <span id="profileEnvironmentDetail">Backend metadata has not arrived</span>
+        </div>
+        <div class="profile-item">
+          <small>TASK COLLECTION</small>
+          <strong id="profileTaskSet">—</strong>
+          <span id="profileTaskDetail">No task selected</span>
+        </div>
+        <div class="profile-item">
+          <small>LOCAL POLICY LINK</small>
+          <strong id="profileTransport">—</strong>
+          <span id="profileEndpoint">Waiting for endpoint</span>
+        </div>
+      </section>
       <div class="status-cluster">
         <div id="networkBadge" class="badge audit"><i></i> NETWORK AUDIT ACTIVE</div>
         <div id="phaseBadge" class="badge phase">WAITING</div>
+        <section id="loadingBanner" class="loading-banner" role="status" aria-live="polite">
+          <div class="loading-spinner" aria-hidden="true"></div>
+          <div>
+            <small>LOCAL RUNTIME STARTUP</small>
+            <strong id="loadingTitle">CONNECTING</strong>
+            <p id="loadingDetail">Waiting for startup telemetry.</p>
+          </div>
+          <div class="loading-progress" aria-hidden="true"></div>
+        </section>
       </div>
     </header>
 
@@ -24,7 +55,7 @@
         <div class="card-label"><span>01</span> RUN AN EXPERIMENT</div>
         <div class="run-status">
           <div><i id="runDot"></i><strong id="runStatus">Preparing the local model…</strong></div>
-          <span id="runDetail">The first action request includes a one-time JAX compile.</span>
+          <span id="runDetail">The first action request may include model warm-up.</span>
         </div>
         <div class="control-layout">
           <div class="control-field">
@@ -34,8 +65,8 @@
             <div class="success-rule"><small>SUCCESS IS SCORED WHEN</small><span id="successRule">the selected simulator goal is completed</span></div>
           </div>
           <div class="control-field">
-            <label for="promptInput"><span><b>2</b> Instruction sent to π0.5</span><small>CHANGES THE LANGUAGE ONLY</small></label>
-            <textarea id="promptInput" rows="3" placeholder="Type the instruction π0.5 should follow"></textarea>
+            <label for="promptInput"><span><b>2</b> Instruction sent to the policy</span><small>CHANGES THE LANGUAGE ONLY</small></label>
+            <textarea id="promptInput" rows="3" placeholder="Type the instruction the selected policy should follow"></textarea>
             <div class="prompt-tools">
               <span id="draftSource" class="source-chip">CANONICAL DRAFT</span>
               <div class="generator-tools">
@@ -117,7 +148,7 @@
 
       <section class="analysis-grid">
         <article class="chart-card action-card">
-          <div class="card-label"><span>05</span> <b id="actionTitle">PREDICTED 10-STEP ACTION CHUNK</b></div>
+          <div class="card-label"><span>05</span> <b id="actionTitle">PREDICTED ACTION CHUNK</b></div>
           <canvas id="actionChart"></canvas>
           <div id="actionLegend" class="legend">
             <span class="x">ΔX</span><span class="y">ΔY</span><span class="z">ΔZ</span>
@@ -125,7 +156,7 @@
           </div>
         </article>
         <article class="chart-card">
-          <div class="card-label"><span>06</span> WARM INFERENCE LATENCY · STARTUP COMPILE EXCLUDED</div>
+          <div class="card-label"><span>06</span> WARM INFERENCE LATENCY · FIRST REQUEST EXCLUDED</div>
           <canvas id="latencyChart"></canvas>
           <div class="latency-stats">
             <div><small>MEDIAN</small><strong id="medianLatency">—</strong></div>
@@ -137,13 +168,13 @@
         <article class="runtime-card">
           <div class="card-label"><span>07</span> LOCAL RUNTIME PATH</div>
           <div class="flow">
-            <div><b>CAMERAS + STATE</b><small id="stateShape">224×224 · 8D proprioception</small></div>
+            <div><b>OBSERVATIONS</b><small id="stateShape">Waiting for input contract</small></div>
             <em>→</em>
-            <div class="active"><b>π0.5 / JAX</b><small>RTX PRO 5000 Blackwell</small></div>
+            <div class="active"><b id="modelRuntimeName">SELECTED LOCAL POLICY</b><small id="modelRuntimeDevice">Waiting for accelerator telemetry</small></div>
             <em>→</em>
-            <div><b id="actionShape">7D ACTIONS</b><small id="simulatorLabel">MuJoCo / LIBERO</small></div>
+            <div><b id="actionShape">POLICY ACTIONS</b><small id="simulatorLabel">Selected simulator</small></div>
           </div>
-          <code id="endpoint">ws://127.0.0.1:8000</code>
+          <code id="endpoint">Waiting for local policy endpoint</code>
           <p id="runtimeNote">Checkpoint and inference are resident on this workstation.</p>
         </article>
       </section>
@@ -154,7 +185,7 @@
       </section>
     </main>
 
-    <footer><span>π0.5 SIM LAB</span><span id="updated">AWAITING TELEMETRY</span></footer>
+    <footer><span>EMBODIED POLICY LAB</span><span id="updated">AWAITING TELEMETRY</span></footer>
     <script src="/app.js"></script>
   </body>
 </html>
