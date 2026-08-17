@@ -673,12 +673,14 @@ async function updateState() {
     const modelHeight = Number(state.model_image_height) || 224;
     const viewerWidth = Number(state.viewer_width) || modelWidth;
     const viewerHeight = Number(state.viewer_height) || modelHeight;
-    const cameraMeta = `${viewerWidth}×${viewerHeight} VIEW · MODEL INPUT ${modelWidth}×${modelHeight}`;
+    const sourceWidth = Number(state.camera_observation_width) || modelWidth;
+    const sourceHeight = Number(state.camera_observation_height) || modelHeight;
+    const cameraMeta = `${viewerWidth}×${viewerHeight} DISPLAY · SOURCE ${sourceWidth}×${sourceHeight} · MODEL INPUT ${modelWidth}×${modelHeight}`;
     $("externalCameraMeta").textContent = cameraMeta;
     $("wristCameraMeta").textContent = cameraMeta;
     document.documentElement.style.setProperty("--camera-aspect", `${viewerWidth} / ${viewerHeight}`);
     const cameraCount = Number(state.camera_count) || 2;
-    $("stateShape").textContent = `${cameraCount} RGB VIEW${cameraCount === 1 ? "" : "S"} · ${modelWidth}×${modelHeight} · ${state.state_dimension || "—"}D STATE`;
+    $("stateShape").textContent = `${cameraCount} RGB VIEW${cameraCount === 1 ? "" : "S"} · ${sourceWidth}×${sourceHeight} SOURCE · ${state.state_dimension || "—"}D STATE`;
     $("actionShape").textContent = state.action_dimension ? `${state.action_dimension}D ACTIONS` : "POLICY ACTIONS";
     $("simulatorLabel").textContent = simulatorDisplayName;
     $("actionTitle").textContent = state.action_horizon

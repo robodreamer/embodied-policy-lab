@@ -105,8 +105,9 @@ The showcase opens a local browser console displaying:
   and local transport;
 - an animated startup banner while policy weights, the simulator, and the scene
   are loading;
-- live external and wrist-camera simulator views, rendered independently from
-  the lower-resolution tensors sent to the model;
+- live external and wrist-camera simulator views, center-cropped to fill their
+  dashboard windows from the same correctly oriented camera observations used
+  by the policy pipeline;
 - the active language command and episode progress;
 - the profile-specific action chunk (10×7D LIBERO π0.5, 50×12D RoboCasa
   π0.5, or 16×12D RoboCasa GR00T);
@@ -216,10 +217,10 @@ The scripts also expose a flag-based CLI. Run
   --backend libero --task-suite libero_spatial --task-ids 0,1
 ```
 
-RoboCasa's browser views default to 960×540 at up to 6 FPS. These are separate
-MuJoCo presentation renders; the official square camera observations and
-model-side 224×224 transforms remain unchanged. Override the quality/performance balance
-without modifying code:
+RoboCasa's browser views default to a 960×540 display at up to 6 FPS. The
+official square camera observations are upscaled and center-cropped to fill that
+display, while the model-side 224×224 transforms remain unchanged. Override the
+display size without modifying code:
 
 ```bash
 ./scripts/run_interactive_showcase.sh \
@@ -227,8 +228,8 @@ without modifying code:
   --viewer-width 1280 --viewer-height 720 --viewer-fps 8
 ```
 
-The dashboard labels both resolutions so a high-resolution simulator view is
-never mistaken for the exact tensor sent to the policy.
+The dashboard labels the source, display, and model-input resolutions so an
+upscaled display is never mistaken for a higher-resolution sensor tensor.
 
 The network audit produces evidence; it is not a firewall or network namespace.
 Unprivileged network namespaces are disabled on the validation workstation, so

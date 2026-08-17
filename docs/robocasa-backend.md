@@ -74,11 +74,11 @@ BACKEND=robocasa TASK_SUITE=atomic_seen TASK_IDS=0 \
   ./scripts/run_interactive_showcase.sh
 ```
 
-The live viewer uses independent MuJoCo renders at 960×540 and up to 6 FPS by
-default. This keeps the two dashboard cameras sharp and widescreen without
-changing RoboCasa's square 256×256 observations or the 224×224 images delivered
-to π0.5. Use `--viewer-width`, `--viewer-height`, and `--viewer-fps` to tune
-presentation quality or rendering cost.
+The live viewer uses the distinct, correctly oriented RoboCasa camera
+observations and center-crops them into a 960×540 display at up to 6 FPS by
+default. This avoids cross-environment offscreen-renderer contamination while
+leaving the policy's observation contract unchanged. Use `--viewer-width`,
+`--viewer-height`, and `--viewer-fps` to tune display size and update cost.
 
 In interactive mode, task selection prepares the chosen kitchen scene and
 publishes its exact scene-dependent canonical instruction before the local-LLM

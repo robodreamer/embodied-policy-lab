@@ -286,6 +286,11 @@ def run(args: Args) -> None:
         try:
             observation, _ = env.reset()
             canonical = str(observation["annotation.human.task_description"])
+            camera_height, camera_width = observation[core.CAMERA_KEYS[0]].shape[:2]
+            state.update(
+                camera_observation_width=camera_width,
+                camera_observation_height=camera_height,
+            )
             publish_viewer_frames(env, observation, force=True)
         finally:
             env.close()
@@ -511,6 +516,9 @@ def run(args: Args) -> None:
                         env, preview_env, args.seed
                     )
                 canonical_prompt = str(observation["annotation.human.task_description"])
+                camera_height, camera_width = observation[
+                    core.CAMERA_KEYS[0]
+                ].shape[:2]
                 set_catalog_prompt(attempt_task_id, canonical_prompt)
                 active_prompt = prompt_override or canonical_prompt
                 attempt_budget_multiplier = rollout_budget_multiplier
@@ -553,6 +561,8 @@ def run(args: Args) -> None:
                     last_action_chunk=[],
                     current_action=[],
                     inference_latency_ms=None,
+                    camera_observation_width=camera_width,
+                    camera_observation_height=camera_height,
                     compare_world_model=comparison_active,
                     comparison_status="waiting_for_action_chunk"
                     if comparison_active

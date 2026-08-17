@@ -17,7 +17,7 @@ import re
 import gymnasium as gym
 import numpy as np
 import robocasa  # noqa: F401 - importing registers robocasa/* Gym environments
-from PIL import Image
+from PIL import Image, ImageOps
 from robocasa.utils.dataset_registry import TASK_SET_REGISTRY
 from robocasa.utils.dataset_registry_utils import get_task_horizon
 from robocasa.utils.env_utils import convert_action
@@ -28,6 +28,8 @@ CAMERA_KEYS = (
     "video.robot0_eye_in_hand",
     "video.robot0_agentview_right",
 )
+
+
 def timestamp() -> str:
     return datetime.datetime.now(datetime.timezone.utc).astimezone().isoformat()
 
@@ -179,25 +181,22 @@ def observation_from_environment(env) -> dict:
 def render_viewer_frames(
     env, width: int, height: int, *, observation: dict | None = None
 ) -> tuple[np.ndarray, ...]:
-    """Build distinct, correctly oriented dashboard views from mapped cameras.
+    """Fill dashboard frames from RoboCasa's distinct mapped cameras.
 
-    RoboCasa's Gym wrapper already applies the required vertical orientation
-    correction. Reading those mapped observations avoids the shared offscreen
-    render-buffer behavior that can make consecutive direct MuJoCo renders show
-    the same camera.
+    The mapped observations already have the correct orientation and do not
+    share MuJoCo's presentation framebuffer. ``ImageOps.fit`` scales and
+    center-crops each square observation to the requested dashboard aspect ratio
+    instead of letterboxing it into a smaller image.
     """
     if width < 1 or height < 1:
         raise ValueError("Viewer width and height must be positive")
     if observation is None:
         observation = observation_from_environment(env)
-
     frames = []
     for key in CAMERA_KEYS[:2]:
         source = Image.fromarray(np.asarray(observation[key], dtype=np.uint8))
-        source.thumbnail((width, height), Image.Resampling.LANCZOS)
-        canvas = Image.new("RGB", (width, height), (5, 7, 5))
-        canvas.paste(source, ((width - source.width) // 2, (height - source.height) // 2))
-        frames.append(np.asarray(canvas))
+        fitted = ImageOps.fit(source, (width, height), Image.Resampling.LANCZOS)
+        frames.append(np.asarray(fitted))
     return tuple(frames)
 
 
