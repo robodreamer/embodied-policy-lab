@@ -10,6 +10,8 @@ grep -F "robocasa  groot-n1.5    ready" <<<"$list_output" >/dev/null
 default_output="$($PROJECT_DIR/lab --default --dry-run)"
 grep -F "Simulator: robocasa" <<<"$default_output" >/dev/null
 grep -F "Model: pi05" <<<"$default_output" >/dev/null
+grep -F "Predictor: none" <<<"$default_output" >/dev/null
+grep -F -- "--world-model none" <<<"$default_output" >/dev/null
 grep -F -- "--task-set atomic_seen --task-id 0" <<<"$default_output" >/dev/null
 
 groot_output="$($PROJECT_DIR/lab \

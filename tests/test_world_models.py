@@ -14,6 +14,9 @@ def test_registry_keeps_world_model_choice_independent_from_policy():
     simulator = world_model_registry.require_world_model("robocasa", "simulator")
     assert simulator.key == "robocasa-sim"
     assert simulator.action_schema == "robocasa-panda-omron-12d-v1"
+    assert simulator.prediction_kind == "simulator_oracle"
+    assert "not a learned world model" in simulator.description.lower()
+    assert not simulator.is_learned
 
     learned = world_model_registry.get_world_model("dino-wm")
     assert learned.action_schema == "robocasa-panda-manip-7d-v1"
@@ -101,8 +104,8 @@ def test_simulator_preview_steps_only_the_branch(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(
         world_model_plugins.imageio,
         "mimwrite",
-        lambda path, frames, fps: written.update(
-            path=Path(path), frame_count=len(frames), fps=fps
+        lambda path, frames, fps, **kwargs: written.update(
+            path=Path(path), frame_count=len(frames), fps=fps, options=kwargs
         ),
     )
     plugin = world_model_plugins.SimulatorCounterfactualPlugin(
@@ -145,7 +148,52 @@ def test_simulator_preview_steps_only_the_branch(monkeypatch, tmp_path: Path):
         "path": tmp_path / "preview.mp4",
         "frame_count": 3,
         "fps": 4,
+        "options": {"macro_block_size": 1},
     }
     assert renderer_lifecycle == ["resume", "suspend", "restore_source"]
     plugin.close()
     assert branches[0].closed
+
+
+def test_predictor_failure_is_returned_instead_of_raised(tmp_path: Path):
+    class BrokenPredictor:
+        def preview(self, request):
+            raise RuntimeError("diagnostic branch failed")
+
+    result, error = world_model_plugins.try_preview(
+        BrokenPredictor(),
+        world_model_plugins.PreviewRequest(
+            source_env=object(),
+            task_name="FakeTask",
+            split="target",
+            seed=7,
+            action_chunk=np.zeros((2, 12), dtype=np.float32),
+            preview_steps=2,
+            width=8,
+            height=6,
+            fps=4,
+            artifact_path=tmp_path / "never-written.mp4",
+        ),
+    )
+
+    assert result is None
+    assert isinstance(error, RuntimeError)
+    assert str(error) == "diagnostic branch failed"
+
+
+def test_action_contract_diagnostics_separate_base_and_control_mode():
+    actions = np.zeros((3, 12), dtype=np.float32)
+    actions[:, 11] = -1.0
+    diagnostics = world_model_plugins.action_contract_diagnostics(actions)
+
+    assert diagnostics["base_motion_max_abs"] == 0.0
+    assert diagnostics["base_motion_within_tolerance"]
+    assert diagnostics["control_mode_min"] == -1.0
+    assert diagnostics["control_mode_max"] == -1.0
+    assert "nonzero_base_motion" not in diagnostics["blocked_reasons"]
+    assert not diagnostics["learned_projection_validated"]
+
+    actions[0, 7] = 0.01
+    diagnostics = world_model_plugins.action_contract_diagnostics(actions)
+    assert not diagnostics["base_motion_within_tolerance"]
+    assert "nonzero_base_motion" in diagnostics["blocked_reasons"]

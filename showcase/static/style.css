@@ -80,6 +80,7 @@ main { max-width: 1800px; margin: auto; }
 .comparison-toggle input { width: 15px; height: 15px; margin: 0; accent-color: var(--amber); }
 .comparison-toggle:has(input:disabled) { color: #59625c; cursor: default; }
 #comparisonHelp { color: var(--amber); }
+#comparisonHelp.error { color: var(--red); }
 .control-actions { display: grid; grid-template-columns: 1.35fr 1fr .8fr; gap: 7px; padding: 13px 18px; border-top: 1px solid var(--line); }
 .action-item { min-width: 0; }
 .control-actions button { width: 100%; min-height: 43px; padding: 9px 11px; font: 600 10px "IBM Plex Mono", monospace; letter-spacing: .025em; cursor: pointer; }

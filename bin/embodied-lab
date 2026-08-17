@@ -21,7 +21,7 @@ Usage:
 Options:
   --backend NAME       robocasa (default) or libero
   --model NAME         pi05 (default) or groot-n1.5
-  --world-model NAME   robocasa-sim (default) or none
+  --world-model NAME   none (default) or robocasa-sim oracle baseline
   --mode MODE          interactive (default) or batch
   --task-set NAME      task collection (backend default when omitted)
   --task-id ID         initial/batch task (interactive default: 0, no prompt)
@@ -51,9 +51,9 @@ robocasa  groot-n1.5    ready
 libero    pi05          ready
 libero    groot-n1.5    incompatible
 
-WORLD MODEL       BACKEND    STATUS
-robocasa-sim      robocasa   ready / default
-none              any        ready / direct execution
+PREDICTOR / BASELINE  BACKEND    STATUS
+none                  any        ready / default direct execution
+robocasa-sim          robocasa   ready / deterministic oracle baseline
 dino-wm-droid     robocasa   adapter validation required
 jepa-wm-droid     robocasa   adapter validation required
 EOF
@@ -157,9 +157,9 @@ main() {
     if [[ -z "$world_model" ]]; then
       if [[ "$backend" == "robocasa" ]]; then
         world_model="$(pick_id \
-          "3/5 · Choose how to preview proposed actions" \
-          $'robocasa-sim\tRoboCasa simulator branch · inspect before execution · recommended' \
-          $'none\tDirect execution · no counterfactual preview')" || return 1
+          "3/5 · Choose an optional predictor or baseline" \
+          $'none\tDirect execution · no prediction comparison · default' \
+          $'robocasa-sim\tRoboCasa simulator oracle · deterministic diagnostic baseline')" || return 1
       else
         world_model="none"
       fi
@@ -199,7 +199,7 @@ main() {
 
   backend="${backend:-robocasa}"
   model="${model:-pi05}"
-  world_model="${world_model:-$( [[ "$backend" == "robocasa" ]] && echo robocasa-sim || echo none )}"
+  world_model="${world_model:-none}"
   mode="${mode:-interactive}"
   if [[ -z "$task_set" ]]; then
     task_set="$( [[ "$backend" == "robocasa" ]] && echo atomic_seen || echo libero_spatial )"
@@ -235,7 +235,7 @@ main() {
 
   local rendered summary
   rendered="$(shell_command "${command[@]}")"
-  summary="Embodied Policy Lab\nSimulator: $backend\nPolicy Model: $model\nWorld model: $world_model\nMode: $mode\nTasks: $task_set · initial ID $task_id"
+  summary="Embodied Policy Lab\nSimulator: $backend\nPolicy Model: $model\nPredictor: $world_model\nMode: $mode\nTasks: $task_set · initial ID $task_id"
   if [[ "$mode" == "batch" ]]; then summary+=" · $trials trial(s)"; fi
 
   if [[ "$dry_run" == "1" ]]; then

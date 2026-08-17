@@ -25,9 +25,9 @@
           <span id="profileEnvironmentDetail">Backend metadata has not arrived</span>
         </div>
         <div class="profile-item world-model-profile">
-          <small>WORLD MODEL</small>
-          <strong id="profileWorldModel">WAITING FOR PREVIEW MODEL</strong>
-          <span id="profileWorldModelDetail">Consequence preview metadata has not arrived</span>
+          <small>PREDICTOR / BASELINE</small>
+          <strong id="profileWorldModel">WAITING FOR PREDICTOR</strong>
+          <span id="profileWorldModelDetail">Prediction metadata has not arrived</span>
         </div>
         <div class="profile-item">
           <small>TASK COLLECTION</small>
@@ -104,12 +104,12 @@
             <p id="budgetHelp">Extended attempts get twice as many simulator actions. A scored rollout still ends early when the selected simulator detects success.</p>
           </div>
           <div id="worldModelSetting" class="rollout-setting">
-            <label for="worldModelSelect"><span><b>3C</b> World-model comparison</span><small>INDEPENDENT FROM THE SELECTED POLICY</small></label>
+            <label for="worldModelSelect"><span><b>3C</b> Prediction comparison</span><small>INDEPENDENT FROM THE SELECTED POLICY</small></label>
             <select id="worldModelSelect"></select>
             <p id="worldModelHelp">Loading compatible world-model options…</p>
             <label class="comparison-toggle" for="compareWorldModel">
               <input id="compareWorldModel" type="checkbox">
-              <span>Compare prediction after real execution</span>
+              <span>Compare predictor output after real execution</span>
             </label>
             <p id="comparisonHelp">Off by default. The policy executes normally; a prediction is shown only after the matching real action prefix finishes.</p>
           </div>
@@ -123,7 +123,7 @@
       </section>
 
       <section id="previewCard" class="preview-card hidden" aria-live="polite">
-        <div class="card-label"><span>02</span> WORLD-MODEL PREDICTION VS COMPLETED EXECUTION</div>
+        <div id="previewCardLabel" class="card-label"><span>02</span> PREDICTOR OUTPUT VS COMPLETED EXECUTION</div>
         <div class="preview-layout">
           <div class="comparison-media-grid">
             <figure class="comparison-video">
@@ -131,12 +131,12 @@
               <video id="actualVideo" controls muted playsinline preload="metadata"></video>
             </figure>
             <figure class="comparison-video predicted">
-              <figcaption>WORLD-MODEL PREDICTION</figcaption>
+              <figcaption id="predictedVideoLabel">PREDICTOR OUTPUT</figcaption>
               <video id="previewVideo" controls muted playsinline preload="metadata"></video>
             </figure>
           </div>
           <div class="preview-decision">
-            <small id="previewKind">SELECTED WORLD MODEL</small>
+            <small id="previewKind">SELECTED PREDICTOR</small>
             <strong id="previewTitle">Completed action-prefix comparison</strong>
             <p id="previewDescription">Both clips start from the same simulator state and use the same actions. This card is revealed only after the real prefix completes.</p>
             <code id="previewEvidence">No completed comparison recorded yet</code>

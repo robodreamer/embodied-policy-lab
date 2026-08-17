@@ -86,12 +86,18 @@ def main() -> None:
                 actions_12d = np.asarray(body["actions"], dtype=np.float32)
                 if actions_12d.ndim != 2 or actions_12d.shape[1] != 12:
                     raise ValueError("actions must have shape [T, 12]")
-                base_magnitude = float(np.abs(actions_12d[:, 7:]).max(initial=0.0))
+                # DROID consumes only the 7D arm/gripper prefix. RoboCasa's
+                # trailing fields are four physical base/torso values plus one
+                # binary controller-mode value; the latter is not base motion.
+                base_magnitude = float(
+                    np.abs(actions_12d[:, 7:11]).max(initial=0.0)
+                )
+                control_mode = actions_12d[:, 11]
                 tolerance = float(body.get("base_action_tolerance", 1e-6))
                 if base_magnitude > tolerance:
                     raise ValueError(
                         "DROID checkpoint accepts 7D arm actions only; this chunk "
-                        f"contains base/control magnitude {base_magnitude:.6g}"
+                        f"contains base-motion magnitude {base_magnitude:.6g}"
                     )
                 context = read_image(str(body["context_image_path"]))
                 actions = torch.from_numpy(actions_12d[:, :7])[:, None].to(
@@ -117,6 +123,9 @@ def main() -> None:
                         "predicted_steps": len(actions),
                         "latent_displacement_rms": latent_displacement,
                         "simulator_outcome_latent_mse": actual_error,
+                        "discarded_base_motion_max_abs": base_magnitude,
+                        "observed_control_mode_min": float(control_mode.min()),
+                        "observed_control_mode_max": float(control_mode.max()),
                         "inference_duration_ms": round(
                             (time.perf_counter() - inference_started) * 1000.0, 2
                         ),

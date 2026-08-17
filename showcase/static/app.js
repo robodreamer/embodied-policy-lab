@@ -162,7 +162,7 @@ function populateWorldModels(models, selected) {
   select.value = desired;
   const selectedOption = select.selectedOptions[0];
   $("worldModelHelp").textContent = selectedOption?.dataset.description
-    || "Choose the model used for optional post-execution prediction comparisons.";
+    || "Choose a learned predictor or an explicitly labeled simulator baseline.";
 }
 
 function isRateEligible(item) {
@@ -256,9 +256,9 @@ function updateRunStatus(state) {
       ? `Step ${Number(state.step) || 0} of ${state.max_steps || "—"}; custom experiments run the full budget unless stopped.`
       : `Step ${Number(state.step) || 0} of at most ${state.max_steps || "—"}; it ends early only when the selected goal succeeds.`;
     const comparisonDetail = state.comparison_status === "predicting"
-      ? " Computing a hidden world-model prediction before executing the same action prefix."
+      ? " Computing hidden predictor output before executing the same action prefix."
       : (state.comparison_status === "executing_actual"
-        ? " Executing the real prefix; its hidden prediction will be revealed afterward."
+        ? " Executing the real prefix; its hidden comparison will be revealed afterward."
         : "");
     $("runDetail").textContent = rolloutDetail + comparisonDetail;
     $("frameStatus").innerHTML = "<i></i> LIVE";
@@ -307,8 +307,8 @@ function updateControls(state) {
   $("rolloutBudget").disabled = stopped || loading || commandPending;
   $("evaluationMode").disabled = stopped || loading || commandPending;
   $("worldModelSelect").disabled = stopped || loading || state.phase !== "awaiting_command" || commandPending;
-  const hasWorldModel = Boolean(state.world_model && state.world_model !== "none");
-  $("compareWorldModel").disabled = stopped || loading || state.phase !== "awaiting_command" || commandPending || !hasWorldModel;
+  const hasPredictor = Boolean(state.world_model && state.world_model !== "none");
+  $("compareWorldModel").disabled = stopped || loading || state.phase !== "awaiting_command" || commandPending || !hasPredictor;
   const exploratory = selectedEvaluationMode() === "exploratory";
   const rolloutType = exploratory ? "CUSTOM UNSCORED" : "SCORED";
   $("startRun").textContent = stopped
@@ -330,11 +330,14 @@ function updateControls(state) {
     : (running
       ? "Available now. Keeps the scene and replans; the mixed-prompt attempt is excluded from per-prompt rates."
       : "Disabled until a rollout is running. Starting a rollout already applies the draft above.");
-  $("comparisonHelp").textContent = !hasWorldModel
-    ? "Select an available world model to enable comparison. Direct policy execution remains active."
+  $("comparisonHelp").classList.toggle("error", state.comparison_status === "error");
+  $("comparisonHelp").textContent = state.comparison_status === "error"
+    ? `Predictor error: ${state.comparison_error || "unknown failure"}. The policy rollout continued without comparison.`
+    : (!hasPredictor
+    ? "Select an available predictor or simulator oracle to enable comparison. Direct policy execution remains active."
     : (state.compare_world_model
-      ? "On for the next rollout. Policy execution is not gated; each prediction is revealed only after its matching real prefix completes."
-      : "Off. The policy executes normally without creating counterfactual comparison artifacts.");
+      ? "On for the next rollout. Policy execution is never gated; output appears only after its matching real prefix completes."
+      : "Off. The policy executes normally without creating comparison artifacts."));
 }
 
 async function configureControls() {
@@ -436,7 +439,7 @@ async function configureControls() {
         world_model: requested,
       });
       pendingCommand = {id: result.command.id, action: "set_world_model", worldModel: requested};
-      setControlNote("Switching the consequence-preview model. Policy selection is unchanged.");
+      setControlNote("Switching the predictor/baseline. Policy selection is unchanged.");
       updateControls(lastState);
     } catch (error) { setControlNote(error.message, true); }
   });
@@ -623,7 +626,7 @@ async function updateState() {
     updateControls(state);
     const modelDisplayName = state.model_display_name || state.model || "Local policy";
     const simulatorDisplayName = state.simulator || state.backend || "Local simulator";
-    const worldModelDisplayName = state.world_model_display_name || state.world_model || "No preview";
+    const worldModelDisplayName = state.world_model_display_name || state.world_model || "No predictor";
     const backendName = state.backend ? String(state.backend).toUpperCase() : "BACKEND PENDING";
     const transportName = state.policy_transport ? String(state.policy_transport).toUpperCase() : "LOCAL";
     const taskPosition = state.task_position && state.total_tasks
@@ -638,7 +641,8 @@ async function updateState() {
     $("profileWorldModelDetail").textContent = [
       state.world_model_runtime,
       state.compare_world_model ? "comparison on" : "comparison off",
-    ].filter(Boolean).join(" · ") || "World-model comparison";
+      state.world_model_prediction_kind === "simulator_oracle" ? "oracle baseline" : null,
+    ].filter(Boolean).join(" · ") || "Prediction comparison";
     $("profileTaskSet").textContent = state.suite || "—";
     $("profileTaskDetail").textContent = taskPosition;
     $("profileTransport").textContent = `${transportName} · LOOPBACK`;
@@ -695,6 +699,7 @@ async function updateState() {
       return item;
     }));
     const preview = state.preview_result || {};
+    const isSimulatorOracle = state.world_model_prediction_kind === "simulator_oracle";
     const comparisonReady = Boolean(
       state.compare_world_model
       && state.comparison_status === "ready"
@@ -702,8 +707,14 @@ async function updateState() {
       && state.actual_video_url
     );
     $("previewCard").classList.toggle("hidden", !comparisonReady);
+    $("previewCardLabel").innerHTML = isSimulatorOracle
+      ? '<span>02</span> SIMULATOR ORACLE REPLAY VS COMPLETED EXECUTION'
+      : '<span>02</span> LEARNED PREDICTION VS COMPLETED EXECUTION';
+    $("predictedVideoLabel").textContent = isSimulatorOracle
+      ? "SIMULATOR ORACLE REPLAY"
+      : "LEARNED PREDICTION";
     $("previewKind").textContent = `${worldModelDisplayName} · ${String(state.world_model_prediction_kind || "preview").replaceAll("_", " ").toUpperCase()}`;
-    $("previewTitle").textContent = `${preview.previewed_steps || state.replan_steps || "—"}-step prediction and execution`;
+    $("previewTitle").textContent = `${preview.previewed_steps || state.replan_steps || "—"}-step ${isSimulatorOracle ? "oracle replay" : "prediction"} and execution`;
     $("previewDescription").textContent = preview.caveat
       ? `${preview.caveat} Both clips were revealed after actual execution completed.`
       : "Both clips start from the same pre-action state, use the same action prefix, and are revealed only after actual execution completes.";

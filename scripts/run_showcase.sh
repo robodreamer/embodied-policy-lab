@@ -15,7 +15,7 @@ Usage:
 Backend, model, and task options:
   --backend libero|robocasa       Simulator backend (default: libero)
   --model pi05|groot-n1.5         Local policy plugin (default: pi05)
-  --world-model NAME              none or robocasa-sim (RoboCasa default)
+  --world-model NAME              none (default) or robocasa-sim oracle baseline
   --preview-steps COUNT           Legacy option; comparison follows --replan-steps
   --compare-world-model           Compare prediction after each real action prefix
   --no-compare-world-model        Run normally without comparison (default)
@@ -176,7 +176,7 @@ case "$BACKEND" in
     esac
     TASK_SUITE="${TASK_SUITE:-${ROBOCASA_TASK_SET:-atomic_seen}}"
     TASK_IDS="${TASK_IDS:-${ROBOCASA_TASK_ID:-0}}"
-    WORLD_MODEL="${WORLD_MODEL:-robocasa-sim}"
+    WORLD_MODEL="${WORLD_MODEL:-none}"
     if [[ "$INTERACTIVE" == "1" ]] && [[ ! "$TASK_IDS" =~ ^[0-9]+$ ]]; then
       echo "Interactive RoboCasa mode requires one numeric --task-id." >&2
       exit 2
@@ -274,6 +274,30 @@ if [[ "$LOCAL_LLM_URL" == http://127.0.0.1:11434/* ]] && \
   ollama stop "$LOCAL_LLM_MODEL" >/dev/null 2>&1 || true
 fi
 
+# One heavyweight session at a time is the safe default on a 24 GB GPU. This
+# lock is independent from ALLOW_GPU_OVERSUBSCRIPTION so that flag cannot
+# accidentally start a second copy of this lab and exhaust cuBLAS resources.
+mkdir -p "$PROJECT_DIR/showcase-runs"
+LAB_LOCK_PATH="$PROJECT_DIR/showcase-runs/.active-session.lock"
+if [[ "${ALLOW_CONCURRENT_LAB_RUNS:-0}" != "1" ]]; then
+  if ! command -v flock >/dev/null 2>&1; then
+    echo "flock is required for the single-session safety guard." >&2
+    exit 1
+  fi
+  exec {LAB_LOCK_FD}>"$LAB_LOCK_PATH"
+  if ! flock -n "$LAB_LOCK_FD"; then
+    echo "Another Embodied Policy Lab session is already active:" >&2
+    sed -n '1,4p' "$LAB_LOCK_PATH" >&2 2>/dev/null || true
+    echo "Finish that session before launching another one." >&2
+    echo "Expert override: ALLOW_CONCURRENT_LAB_RUNS=1 (requires separate ports and sufficient VRAM)." >&2
+    exit 1
+  fi
+  printf 'pid=%s\nstarted=%s\nbackend=%s\nmodel=%s\n' \
+    "$$" "$(date --iso-8601=seconds)" "$BACKEND" "$MODEL" > "$LAB_LOCK_PATH"
+else
+  echo "Warning: concurrent lab session guard explicitly disabled." >&2
+fi
+
 GPU_COMPUTE_APPS="$(
   nvidia-smi --query-compute-apps=pid,process_name,used_memory \
     --format=csv,noheader 2>/dev/null || true
@@ -359,7 +383,7 @@ wait_for_tcp_listener() {
   "$PROJECT_DIR" "$SESSION_DIR/state.json" "$BACKEND" "$MODEL" "$TASK_SUITE" \
   "$TASK_IDS" "$POLICY_PORT" "$INTERACTIVE" "$NETWORK_AUDIT" \
   "$VIEWER_WIDTH" "$VIEWER_HEIGHT" "$WORLD_MODEL" "$PREVIEW_STEPS" \
-  "$PREVIEW_APPROVAL" "$COMPARE_WORLD_MODEL" <<'PY'
+  "$PREVIEW_APPROVAL" "$COMPARE_WORLD_MODEL" "$REPLAN_STEPS" <<'PY'
 import datetime
 import json
 import pathlib
@@ -376,6 +400,7 @@ world_model_key = sys.argv[12]
 preview_steps = int(sys.argv[13])
 preview_approval = sys.argv[14]
 compare_world_model = sys.argv[15] == "1"
+replan_steps = int(sys.argv[16])
 sys.path.insert(0, str(project_dir))
 
 from showcase import backend_registry
@@ -409,7 +434,8 @@ state = {
     "world_model_prediction_kind": world_model.prediction_kind,
     "world_model_description": world_model.description,
     "available_world_models": world_model_registry.catalog(backend),
-    "preview_steps": preview_steps,
+    "preview_steps": replan_steps,
+    "configured_preview_steps": preview_steps,
     "preview_approval": preview_approval,
     "compare_world_model": compare_world_model,
     "comparison_status": "initializing" if compare_world_model else "disabled",
@@ -462,7 +488,7 @@ fi
 DASHBOARD_URL="http://127.0.0.1:$DASHBOARD_PORT"
 echo "Dashboard: $DASHBOARD_URL"
 echo "Session: $SESSION_DIR"
-echo "Backend: $BACKEND · Policy: $MODEL · World model: $WORLD_MODEL · Task collection: $TASK_SUITE · Task ID: $TASK_IDS"
+echo "Backend: $BACKEND · Policy: $MODEL · Predictor: $WORLD_MODEL · Task collection: $TASK_SUITE · Task ID: $TASK_IDS"
 echo "Loading the local policy; startup progress is now visible in the dashboard."
 if [[ "$INTERACTIVE" == "1" ]]; then
   echo "Interactive mode: use the browser to run attempts and end the session."
@@ -617,6 +643,46 @@ else
   CLIENT_STATUS=${PIPESTATUS[0]}
 fi
 set -e
+
+# If the client was interrupted outside its normal shutdown path, do not leave
+# the browser/report claiming that a dead rollout is still running.
+"$RUNTIME_PYTHON" - "$SESSION_DIR/state.json" "$CLIENT_STATUS" <<'PY'
+import datetime
+import json
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+status = int(sys.argv[2])
+state = json.loads(path.read_text(encoding="utf-8"))
+if state.get("phase") in {"waiting", "initializing", "preparing_task", "running"}:
+    interrupted = status in {130, 143}
+    clean_exit = status == 0
+    state["phase"] = "stopped" if interrupted or clean_exit else "error"
+    state["stop_reason"] = (
+        "interrupted"
+        if interrupted
+        else ("client_exit_without_finalize" if clean_exit else "client_exit")
+    )
+    state["command_message"] = (
+        "Session interrupted; partial artifacts were saved"
+        if interrupted
+        else (
+            "Simulator client ended; partial artifacts were saved"
+            if clean_exit
+            else f"Simulator client exited with status {status}"
+        )
+    )
+    if not interrupted and not clean_exit:
+        state["error"] = f"Simulator client exited with status {status}"
+    state["finished_at"] = datetime.datetime.now(
+        datetime.timezone.utc
+    ).astimezone().isoformat()
+    state["updated_at"] = state["finished_at"]
+    temporary = path.with_suffix(".json.tmp")
+    temporary.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    temporary.replace(path)
+PY
 
 kill -- "-$SERVER_PID" 2>/dev/null || true
 wait "$SERVER_PID" 2>/dev/null || true

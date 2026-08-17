@@ -12,14 +12,16 @@ matrix is:
 | LIBERO | ✓ | — |
 | RoboCasa365 | ✓ | ✓ |
 
-RoboCasa also has an independent world-model selector. The default
-`robocasa-sim` model can compare each real action prefix with a prediction from
-a matching cloned MuJoCo environment. Comparison is off by default and never
-gates execution; when enabled, the paired clips appear only after the real
-prefix finishes. Use `--world-model none` for direct-only execution. The DINO-WM and
+RoboCasa also has an independent predictor selector. Direct execution
+(`--world-model none`) is the default. The optional `robocasa-sim` choice is a
+deterministic simulator-oracle baseline: it replays each action prefix in a
+matching cloned MuJoCo environment and compares that replay with the live
+execution. It is not a learned world model. Comparison is opt-in, never gates
+execution, and fails open if the diagnostic branch has a problem. DINO-WM and
 JEPA-WM DROID/RoboCasa checkpoints are pinned as diagnostic candidates, but are
-not offered as execution gates until their 7D arm-action and temporal contracts
-are validated against this lab's 12D mobile-manipulator actions. See
+not offered as runnable predictors until their 7D arm-action, camera, and
+temporal contracts are validated against this lab's 12D mobile-manipulator
+actions. See
 [the world-model guide](docs/world-model-plugins.md).
 
 The policy adapter boundary is documented in
@@ -192,6 +194,7 @@ Useful showcase controls:
 | `LOCAL_LLM_MODEL` | empty | Model served by the local LLM endpoint |
 | `LOCAL_LLM_NUM_GPU` | `0` | Ollama GPU layers; CPU is the safe default while a VLA owns VRAM |
 | `ALLOW_GPU_OVERSUBSCRIPTION` | `0` | Override the safety stop when another GPU compute process is present |
+| `ALLOW_CONCURRENT_LAB_RUNS` | `0` | Expert-only override of the independent single-session lock; separate ports and enough VRAM are still required |
 
 For example, run three tasks and keep the completed dashboard open:
 

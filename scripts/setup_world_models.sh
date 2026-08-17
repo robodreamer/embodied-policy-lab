@@ -15,6 +15,7 @@ esac
 git -C "$PROJECT_DIR" submodule update --init upstream-jepa-wms
 uv venv --python 3.10 "$UPSTREAM_DIR/.venv"
 uv pip install --python "$RUNTIME_PYTHON" -e "$UPSTREAM_DIR"
+uv pip install --python "$RUNTIME_PYTHON" "huggingface_hub>=0.20.0"
 
 if [[ "${JEPA_DOWNLOAD_WEIGHTS:-0}" == "1" ]]; then
   echo "Downloading $MODEL into the authenticated Hugging Face cache..."

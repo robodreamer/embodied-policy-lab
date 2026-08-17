@@ -1,9 +1,34 @@
 # 2026-08-17 — Robot VLA consequence-preview and world-model roadmap
 
-## Implemented baseline
+## Implementation review and correction
+
+The first implementation called the paired MuJoCo branch a world model. That
+overstated the capability: it is a deterministic simulator oracle, so exact
+predicted/actual MuJoCo-state matches are expected. It also allowed preview and
+media failures to abort the real policy rollout, and an interrupted process
+could leave the dashboard marked as running.
+
+The corrected behavior:
+
+- defaults to direct policy execution and labels the optional branch as a
+  simulator-oracle diagnostic baseline;
+- records prediction setup/inference/finalization failures in
+  `preview-audit.jsonl` while continuing the policy rollout;
+- distinguishes completed comparisons from failed diagnostic events;
+- reconciles interrupted client state and prevents accidental concurrent lab
+  sessions independently of the GPU-oversubscription switch;
+- writes action-contract diagnostics for every policy response.
+
+Recent π0.5 evidence showed nonzero base-motion values (maximum absolute value
+approximately `1.8e-3`) and a binary control-mode channel near `-1`. The old
+diagnostic worker treated all five trailing dimensions as base motion, so it
+would reject every observed chunk. A learned 7D adapter must separate those
+semantics and validate rotation and temporal conventions before activation.
+
+## Implemented simulator-oracle baseline
 
 - Keep policy and world-model selection independent.
-- Use a paired RoboCasa environment as a non-destructive counterfactual branch.
+- Use a paired RoboCasa environment as a non-destructive deterministic oracle.
 - Keep comparison opt-in and never make it an execution gate.
 - Execute the real action prefix normally, then reveal the matching prediction
   and actual clips side by side.

@@ -46,7 +46,9 @@ def test_dashboard_reveals_opt_in_comparison_after_actual_execution():
     assert "LIVE SIMULATOR STATE" in html
     assert 'action: "set_world_model_comparison"' in javascript
     assert "ACTUAL POLICY EXECUTION" in html
-    assert "WORLD-MODEL PREDICTION" in html
+    assert "PREDICTOR OUTPUT" in html
+    assert "SIMULATOR ORACLE REPLAY" in javascript
+    assert "policy rollout continued without comparison" in javascript
     assert "loop playsinline" not in html
     assert 'action: "approve_preview"' not in javascript
     assert 'action: "reject_preview"' not in javascript
@@ -60,6 +62,15 @@ def test_dashboard_opens_before_heavy_policy_startup():
     assert dashboard_start < policy_start
     assert '"phase": "initializing"' in launcher
     assert "Loading policy weights into local accelerator memory" in launcher
+
+
+def test_launcher_has_independent_concurrency_and_state_reconciliation_guards():
+    launcher = (ROOT / "scripts" / "run_showcase.sh").read_text(encoding="utf-8")
+
+    assert "ALLOW_CONCURRENT_LAB_RUNS" in launcher
+    assert "flock -n" in launcher
+    assert 'state["stop_reason"]' in launcher
+    assert "client_exit_without_finalize" in launcher
 
 
 def test_dashboard_static_copy_is_policy_and_simulator_agnostic():

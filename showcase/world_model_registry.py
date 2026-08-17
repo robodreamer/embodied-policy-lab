@@ -1,9 +1,9 @@
-"""Dependency-free world-model metadata and compatibility checks.
+"""Dependency-free predictor metadata and compatibility checks.
 
-Policies propose actions. World models preview consequences. Keeping those axes
+Policies propose actions. Predictors preview consequences. Keeping those axes
 independent lets the same preview implementation inspect action chunks from
-either π0.5 or GR00T without pretending that a world model is a policy or a
-safety authority.
+either π0.5 or GR00T without pretending that a deterministic simulator oracle
+is a learned world model or a safety authority.
 """
 
 from __future__ import annotations
@@ -27,6 +27,10 @@ class WorldModelSpec:
     description: str
     unavailable_reason: str | None = None
 
+    @property
+    def is_learned(self) -> bool:
+        return self.prediction_kind.startswith("learned_")
+
 
 WORLD_MODELS = {
     "none": WorldModelSpec(
@@ -41,16 +45,16 @@ WORLD_MODELS = {
     ),
     "robocasa-sim": WorldModelSpec(
         key="robocasa-sim",
-        display_name="RoboCasa simulator branch",
-        runtime="local MuJoCo branch",
-        prediction_kind="simulator_counterfactual",
+        display_name="RoboCasa simulator oracle (baseline)",
+        runtime="local MuJoCo oracle branch",
+        prediction_kind="simulator_oracle",
         compatible_backends=("robocasa",),
         action_schema=ROBOCASA_ACTION_SCHEMA,
         available=True,
         description=(
-            "Clone the current MuJoCo state, execute the proposed prefix in the "
-            "clone, execute the same prefix in the live episode, then reveal a "
-            "side-by-side prediction comparison."
+            "Deterministically replay the proposed prefix in a matching MuJoCo "
+            "clone, then compare it with the live execution. This is an oracle "
+            "sanity-check baseline, not a learned world model."
         ),
     ),
     "dino-wm-droid": WorldModelSpec(

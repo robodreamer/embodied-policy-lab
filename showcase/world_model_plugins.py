@@ -59,6 +59,43 @@ class WorldModelPlugin(Protocol):
     def preview(self, request: PreviewRequest) -> PreviewResult: ...
 
 
+def try_preview(
+    plugin: WorldModelPlugin, request: PreviewRequest
+) -> tuple[PreviewResult | None, Exception | None]:
+    """Run a diagnostic predictor without letting it abort policy execution."""
+    try:
+        return plugin.preview(request), None
+    except Exception as error:  # Predictors are observability, never policy gates.
+        return None, error
+
+
+def action_contract_diagnostics(actions: np.ndarray, *, tolerance: float = 1e-6) -> dict:
+    """Expose why a 12D mobile action cannot yet be projected into DROID 7D."""
+    action_chunk = np.asarray(actions)
+    if action_chunk.ndim != 2 or action_chunk.shape[1] != 12:
+        raise ValueError(
+            f"Action diagnostics require [horizon, 12] actions; got {action_chunk.shape}"
+        )
+    base_motion = action_chunk[:, 7:11]
+    control_mode = action_chunk[:, 11]
+    base_magnitude = float(np.abs(base_motion).max(initial=0.0))
+    return {
+        "source_schema": world_model_registry.ROBOCASA_ACTION_SCHEMA,
+        "candidate_projection_schema": world_model_registry.ROBOCASA_MANIP_ACTION_SCHEMA,
+        "base_motion_max_abs": base_magnitude,
+        "base_motion_tolerance": tolerance,
+        "base_motion_within_tolerance": base_magnitude <= tolerance,
+        "control_mode_min": float(control_mode.min()),
+        "control_mode_max": float(control_mode.max()),
+        "learned_projection_validated": False,
+        "blocked_reasons": [
+            *([] if base_magnitude <= tolerance else ["nonzero_base_motion"]),
+            "rotation_convention_unvalidated",
+            "temporal_mapping_unvalidated",
+        ],
+    }
+
+
 def state_sha256(state: Any) -> str:
     digest = hashlib.sha256()
     digest.update(np.asarray(state.time, dtype=np.float64).tobytes())
@@ -102,7 +139,7 @@ def compare_states(predicted: Any, actual: Any, *, atol: float = 1e-9) -> dict:
 
 
 class SimulatorCounterfactualPlugin:
-    """Preview an action prefix in a separate RoboCasa environment.
+    """Replay an action prefix in a separate RoboCasa simulator oracle.
 
     Only MuJoCo state is copied into the branch. The live environment is never
     stepped or restored, which makes the non-mutation check useful evidence and
@@ -258,10 +295,15 @@ class SimulatorCounterfactualPlugin:
             self._suspend_environment(branch)
             self._restore_source_environment(request.source_env)
             request.artifact_path.parent.mkdir(parents=True, exist_ok=True)
-            imageio.mimwrite(request.artifact_path, frames, fps=request.fps)
+            imageio.mimwrite(
+                request.artifact_path,
+                frames,
+                fps=request.fps,
+                macro_block_size=1,
+            )
             result = PreviewResult(
                 model_key=self.key,
-                prediction_kind="simulator_counterfactual",
+                prediction_kind="simulator_oracle",
                 action_schema=world_model_registry.ROBOCASA_ACTION_SCHEMA,
                 previewed_steps=len(frames) - 1,
                 duration_ms=round((time.perf_counter() - started) * 1000.0, 2),
@@ -273,8 +315,9 @@ class SimulatorCounterfactualPlugin:
                 branch_success=branch_success,
                 branch_terminated=branch_terminated,
                 caveat=(
-                    "Ground-truth MuJoCo branch for this simulator state and action "
-                    "prefix; it is a consequence preview, not a safety certificate."
+                    "Deterministic ground-truth MuJoCo replay for this state and "
+                    "action prefix. It is an oracle baseline, not a learned world "
+                    "model or safety certificate."
                 ),
             )
             return result
