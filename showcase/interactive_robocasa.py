@@ -8,6 +8,7 @@ import hashlib
 import json
 import logging
 import pathlib
+import shutil
 import time
 
 import imageio.v2 as imageio
@@ -18,15 +19,22 @@ try:
     from . import backend_registry
     from . import robocasa_runtime as core
     from . import robocasa_policy_plugins
+    from . import world_model_plugins
+    from . import world_model_registry
 except ImportError:  # Direct script execution adds showcase/ to sys.path.
     import backend_registry
     import robocasa_runtime as core
     import robocasa_policy_plugins
+    import world_model_plugins
+    import world_model_registry
 
 
 @dataclasses.dataclass
 class Args:
     model: str = "pi05"
+    world_model: str = "robocasa-sim"
+    preview_steps: int = 5
+    preview_approval: str = "manual"
     host: str = "127.0.0.1"
     port: int = 8000
     resize_size: int = 224
@@ -71,6 +79,9 @@ def run(args: Args) -> None:
     np.random.seed(args.seed)
     _, policy_spec = backend_registry.require_compatible("robocasa", args.model)
     policy_profile = backend_registry.get_profile("robocasa", policy_spec.key)
+    initial_world_model = world_model_registry.require_world_model(
+        "robocasa", args.world_model
+    )
     names = core.task_names(args.task_set_name)
     if not 0 <= args.task_id < len(names):
         raise ValueError(f"Initial task ID must be in [0, {len(names)})")
@@ -83,6 +94,12 @@ def run(args: Args) -> None:
             f"replan_steps cannot exceed {policy_spec.display_name}'s "
             f"{policy_profile.action_horizon}-step action horizon"
         )
+    if args.preview_steps < 1:
+        raise ValueError("preview_steps must be positive")
+    if args.preview_approval not in ("manual", "auto"):
+        raise ValueError("preview_approval must be manual or auto")
+    if not args.interactive and args.preview_approval == "manual":
+        args.preview_approval = "auto"
     if args.viewer_width < 1 or args.viewer_height < 1:
         raise ValueError("viewer_width and viewer_height must be positive")
     if args.viewer_fps <= 0:
@@ -109,10 +126,42 @@ def run(args: Args) -> None:
     video_dir.mkdir(parents=True, exist_ok=True)
     session_dir = pathlib.Path(args.session_dir)
     audit_path = session_dir / "inference-audit.jsonl"
+    preview_audit_path = session_dir / "preview-audit.jsonl"
+    preview_dir = session_dir / "previews"
+    preview_dir.mkdir(parents=True, exist_ok=True)
     policy = robocasa_policy_plugins.create_policy_plugin(
         policy_spec.key, args.host, args.port, args.resize_size
     )
     inbox = core.ControlInbox(args.session_dir)
+    active_world_model = initial_world_model
+    world_model = world_model_plugins.create_world_model_plugin(
+        active_world_model.key,
+        create_environment=core.create_environment,
+        render_frames=core.render_viewer_frames,
+        step_environment=core.step_environment,
+    )
+
+    def execution_prefix_steps() -> int:
+        return (
+            args.replan_steps
+            if world_model is None
+            else min(args.replan_steps, args.preview_steps)
+        )
+
+    def select_world_model(key: str) -> None:
+        nonlocal active_world_model, world_model
+        selected = world_model_registry.require_world_model("robocasa", key)
+        if selected.key == active_world_model.key:
+            return
+        if world_model is not None and hasattr(world_model, "close"):
+            world_model.close()
+        active_world_model = selected
+        world_model = world_model_plugins.create_world_model_plugin(
+            selected.key,
+            create_environment=core.create_environment,
+            render_frames=core.render_viewer_frames,
+            step_environment=core.step_environment,
+        )
 
     current_task_id = selected_task_ids[0]
     prompt_override = args.initial_prompt.strip() or None
@@ -146,6 +195,18 @@ def run(args: Args) -> None:
             "runtime": policy_spec.runtime,
             "policy_transport": policy_spec.transport,
             "policy_endpoint": policy.endpoint,
+            "world_model": active_world_model.key,
+            "world_model_display_name": active_world_model.display_name,
+            "world_model_runtime": active_world_model.runtime,
+            "world_model_prediction_kind": active_world_model.prediction_kind,
+            "world_model_description": active_world_model.description,
+            "available_world_models": world_model_registry.catalog("robocasa"),
+            "preview_steps": args.preview_steps,
+            "preview_approval": args.preview_approval,
+            "preview_status": "disabled"
+            if world_model is None
+            else "waiting_for_action_chunk",
+            "preview_count": 0,
             "network_audit": args.network_audit,
             "suite": args.task_set_name,
             "split": args.split,
@@ -154,7 +215,8 @@ def run(args: Args) -> None:
             "total_tasks": len(names),
             "dynamic_task_prompts": True,
             "seed": args.seed,
-            "replan_steps": args.replan_steps,
+            "configured_replan_steps": args.replan_steps,
+            "replan_steps": execution_prefix_steps(),
             "action_horizon": policy_profile.action_horizon,
             "action_dimension": 12,
             "action_labels": [
@@ -270,6 +332,25 @@ def run(args: Args) -> None:
             raise ValueError("Evaluation mode must be scored or exploratory")
         evaluation_mode = requested_evaluation
 
+    def apply_world_model(command: dict) -> None:
+        select_world_model(str(command.get("world_model", "")))
+        state.update(
+            world_model=active_world_model.key,
+            world_model_display_name=active_world_model.display_name,
+            world_model_runtime=active_world_model.runtime,
+            world_model_prediction_kind=active_world_model.prediction_kind,
+            world_model_description=active_world_model.description,
+            preview_status="disabled"
+            if world_model is None
+            else "waiting_for_action_chunk",
+            preview_result=None,
+            preview_video_url=None,
+            replan_steps=execution_prefix_steps(),
+            command_ack=command.get("id"),
+            command_message=f"World model switched to {active_world_model.display_name}",
+            control_error=None,
+        )
+
     try:
         if args.interactive:
             initial_canonical = preview_task(current_task_id)
@@ -352,6 +433,11 @@ def run(args: Args) -> None:
                         evaluation_mode=evaluation_mode,
                         command_ack=command.get("id"),
                     )
+                elif action == "set_world_model":
+                    try:
+                        apply_world_model(command)
+                    except ValueError as error:
+                        state.update(control_error=str(error))
                 elif action in ("start", "reset", "start_rollout"):
                     if action == "start_rollout":
                         try:
@@ -368,7 +454,18 @@ def run(args: Args) -> None:
         while not should_stop:
             attempt_task_id = current_task_id
             task_name = names[attempt_task_id]
-            env = core.create_environment(task_name, args.split, args.seed)
+            if world_model is None:
+                env = core.create_environment(task_name, args.split, args.seed)
+            else:
+                env, preview_env = core.create_environment_pair(
+                    task_name, args.split, args.seed
+                )
+                world_model.attach_branch(
+                    preview_env,
+                    task_name=task_name,
+                    split=args.split,
+                    seed=args.seed,
+                )
             try:
                 observation, _ = env.reset()
                 canonical_prompt = str(observation["annotation.human.task_description"])
@@ -381,6 +478,8 @@ def run(args: Args) -> None:
                 action_plan = collections.deque()
                 replay_images = [np.ascontiguousarray(env.render())]
                 prompt_timeline: list[dict] = []
+                preview_history: list[dict] = []
+                attempt_preview_count = 0
                 attempt_request_count = 0
                 first_action_chunk_sha256 = None
                 selected_goal_reached = False
@@ -411,6 +510,11 @@ def run(args: Args) -> None:
                     last_action_chunk=[],
                     current_action=[],
                     inference_latency_ms=None,
+                    preview_status="disabled"
+                    if world_model is None
+                    else "waiting_for_action_chunk",
+                    preview_result=None,
+                    preview_video_url=None,
                     command_message=f"Running attempt {attempt_number}",
                     control_error=None,
                 )
@@ -456,6 +560,14 @@ def run(args: Args) -> None:
                                 evaluation_mode=evaluation_mode,
                                 command_ack=command.get("id"),
                                 command_message="Instruction applied; replanning",
+                            )
+                        elif action == "set_world_model":
+                            state.update(
+                                command_ack=command.get("id"),
+                                control_error=(
+                                    "Pause between rollouts to switch the world model; "
+                                    "the current live/preview environment pair is fixed."
+                                ),
                             )
                         elif action in ("reset", "set_task", "start_rollout"):
                             if action == "start_rollout":
@@ -526,9 +638,10 @@ def run(args: Args) -> None:
                         inference_latency = (
                             time.perf_counter() - inference_started
                         ) * 1000.0
-                        if len(action_chunk) < args.replan_steps:
+                        approved_prefix_steps = execution_prefix_steps()
+                        if len(action_chunk) < approved_prefix_steps:
                             raise ValueError(
-                                "Policy returned fewer actions than replan_steps"
+                                "Policy returned fewer actions than the execution prefix"
                             )
                         action_hash = hashlib.sha256(action_chunk.tobytes()).hexdigest()
                         if first_action_chunk_sha256 is None:
@@ -551,11 +664,11 @@ def run(args: Args) -> None:
                             "action_chunk_sha256": action_hash,
                             "inference_latency_ms": round(inference_latency, 2),
                             "max_steps": attempt_max_steps,
+                            "execution_prefix_steps": approved_prefix_steps,
                         }
                         with audit_path.open("a", encoding="utf-8") as stream:
                             stream.write(json.dumps(audit_event) + "\n")
                         latencies.append(inference_latency)
-                        action_plan.extend(action_chunk[: args.replan_steps])
                         state.update(
                             last_action_chunk=np.round(action_chunk, 5).tolist(),
                             inference_latency_ms=round(inference_latency, 2),
@@ -569,6 +682,124 @@ def run(args: Args) -> None:
                             model_ack_prompt_sha256=prompt_sha256,
                             last_inference_audit=audit_event,
                         )
+
+                        if world_model is not None:
+                            attempt_preview_count += 1
+                            preview_number = len(preview_history) + 1
+                            preview_path = preview_dir / (
+                                f"attempt_{attempt_number:03d}_step_{step:05d}_"
+                                f"preview_{preview_number:03d}.mp4"
+                            )
+                            state.update(
+                                phase="predicting_preview",
+                                preview_status="predicting",
+                                command_message=(
+                                    f"Previewing {min(args.preview_steps, len(action_chunk))} "
+                                    f"actions with {active_world_model.display_name}"
+                                ),
+                            )
+                            preview_result = world_model.preview(
+                                world_model_plugins.PreviewRequest(
+                                    source_env=env,
+                                    task_name=task_name,
+                                    split=args.split,
+                                    seed=args.seed,
+                                    action_chunk=action_chunk,
+                                    preview_steps=args.preview_steps,
+                                    width=args.viewer_width,
+                                    height=args.viewer_height,
+                                    fps=args.viewer_fps,
+                                    artifact_path=preview_path,
+                                )
+                            )
+                            latest_preview = preview_dir / "latest.mp4"
+                            shutil.copyfile(preview_path, latest_preview)
+                            preview_event = {
+                                "created_at": core.timestamp(),
+                                "attempt": attempt_number,
+                                "step": step,
+                                "request_id": request_id,
+                                "action_chunk_sha256": action_hash,
+                                "execution_prefix_steps": approved_prefix_steps,
+                                **preview_result.as_dict(),
+                            }
+                            preview_history.append(preview_event)
+                            with preview_audit_path.open("a", encoding="utf-8") as stream:
+                                stream.write(json.dumps(preview_event) + "\n")
+                            manual_approval = (
+                                args.interactive and args.preview_approval == "manual"
+                            )
+                            state.update(
+                                phase="awaiting_preview_approval"
+                                if manual_approval
+                                else "running",
+                                preview_status="awaiting_approval"
+                                if manual_approval
+                                else "auto_approved",
+                                preview_result=preview_event,
+                                preview_history=preview_history,
+                                preview_count=sum(
+                                    len(item.get("preview_history", []))
+                                    for item in history
+                                )
+                                + len(preview_history),
+                                preview_video_url=(
+                                    f"/previews/latest.mp4?v={attempt_number}-{preview_number}"
+                                ),
+                                command_message=(
+                                    "Preview ready — inspect it, then execute or reject"
+                                    if manual_approval
+                                    else "Preview recorded; executing the proposed prefix"
+                                ),
+                            )
+
+                            if manual_approval:
+                                while not aborted:
+                                    preview_command = inbox.read()
+                                    if not preview_command:
+                                        time.sleep(0.1)
+                                        continue
+                                    preview_action = preview_command.get("action")
+                                    if preview_action == "approve_preview":
+                                        state.update(
+                                            phase="running",
+                                            preview_status="approved",
+                                            command_ack=preview_command.get("id"),
+                                            command_message=(
+                                                f"Executing {approved_prefix_steps} approved actions"
+                                            ),
+                                        )
+                                        break
+                                    if preview_action == "reject_preview":
+                                        aborted = True
+                                        abort_reason = "preview_rejected"
+                                        state.update(
+                                            preview_status="rejected",
+                                            command_ack=preview_command.get("id"),
+                                            command_message=(
+                                                "Preview rejected; live scene was not advanced"
+                                            ),
+                                        )
+                                        break
+                                    if preview_action == "stop":
+                                        should_stop = True
+                                        aborted = True
+                                        abort_reason = "stopped"
+                                        state.update(
+                                            command_ack=preview_command.get("id")
+                                        )
+                                        break
+                                    state.update(
+                                        command_ack=preview_command.get("id"),
+                                        control_error=(
+                                            "A preview is pending. Execute or reject it before "
+                                            "changing the rollout."
+                                        ),
+                                    )
+                            if aborted:
+                                break
+
+                        action_plan.extend(action_chunk[:approved_prefix_steps])
 
                     current_action = np.asarray(action_plan.popleft())
                     state.update(
@@ -641,6 +872,9 @@ def run(args: Args) -> None:
                     "evaluation_mode": attempt_evaluation_mode,
                     "selected_goal_reached": selected_goal_reached,
                     "model_request_count": attempt_request_count,
+                    "world_model": active_world_model.key,
+                    "preview_count": attempt_preview_count,
+                    "preview_history": preview_history,
                     "first_action_chunk_sha256": first_action_chunk_sha256,
                     "status": status,
                     "abort_reason": abort_reason,
@@ -750,6 +984,11 @@ def run(args: Args) -> None:
                         command_ack=command.get("id"),
                         command_message="Instruction staged for the next rollout",
                     )
+                elif action == "set_world_model":
+                    try:
+                        apply_world_model(command)
+                    except ValueError as error:
+                        state.update(control_error=str(error))
                 elif action == "start_rollout":
                     try:
                         apply_rollout_settings(command)
@@ -768,6 +1007,8 @@ def run(args: Args) -> None:
                     )
                     break
 
+        if world_model is not None and hasattr(world_model, "close"):
+            world_model.close()
         state.update(
             phase="stopped",
             finished_at=core.timestamp(),
@@ -775,6 +1016,8 @@ def run(args: Args) -> None:
             **_latency_fields(latencies),
         )
     except Exception as error:
+        if world_model is not None and hasattr(world_model, "close"):
+            world_model.close()
         state.update(
             phase="error",
             error=f"{type(error).__name__}: {error}",

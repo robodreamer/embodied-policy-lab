@@ -95,6 +95,31 @@ def create_environment(task_name: str, split: str, seed: int):
     )
 
 
+def create_environment_pair(task_name: str, split: str, seed: int):
+    """Construct matching live and counterfactual environments.
+
+    RoboCasa chooses fixtures and objects while constructing an environment.
+    Replaying the same NumPy RNG state is therefore required before a MuJoCo
+    state can be copied safely between the two models.
+    """
+    construction_state = np.random.get_state()
+    live_env = None
+    try:
+        np.random.seed(seed)
+        live_env = create_environment(task_name, split, seed)
+        live_post_construction = np.random.get_state()
+        np.random.set_state(construction_state)
+        np.random.seed(seed)
+        branch_env = create_environment(task_name, split, seed)
+        np.random.set_state(live_post_construction)
+        return live_env, branch_env
+    except Exception:
+        if live_env is not None:
+            live_env.close()
+        np.random.set_state(construction_state)
+        raise
+
+
 def robot_state_from_observation(observation: dict) -> np.ndarray:
     robot_state = np.concatenate(
         (

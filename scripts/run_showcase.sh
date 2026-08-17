@@ -15,6 +15,9 @@ Usage:
 Backend, model, and task options:
   --backend libero|robocasa       Simulator backend (default: libero)
   --model pi05|groot-n1.5         Local policy plugin (default: pi05)
+  --world-model NAME              none or robocasa-sim (RoboCasa default)
+  --preview-steps COUNT           Proposed actions shown in each preview (default: 5)
+  --preview-approval MODE         manual or auto (default: manual interactively)
   --task-suite NAME               LIBERO suite or RoboCasa task set
   --task-set NAME                 Alias for --task-suite
   --task-id ID                    Initial task interactively, or one batch task
@@ -54,6 +57,9 @@ EOF
 
 BACKEND="${BACKEND:-libero}"
 MODEL="${MODEL:-pi05}"
+WORLD_MODEL="${WORLD_MODEL:-}"
+PREVIEW_STEPS="${PREVIEW_STEPS:-5}"
+PREVIEW_APPROVAL="${PREVIEW_APPROVAL:-manual}"
 TASK_SUITE="${TASK_SUITE:-}"
 TASK_IDS="${TASK_IDS:-}"
 ROBOCASA_SPLIT="${ROBOCASA_SPLIT:-target}"
@@ -83,6 +89,9 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --backend) BACKEND="${2:?--backend requires a value}"; shift 2 ;;
     --model) MODEL="${2:?--model requires a value}"; shift 2 ;;
+    --world-model) WORLD_MODEL="${2:?--world-model requires a value}"; shift 2 ;;
+    --preview-steps) PREVIEW_STEPS="${2:?--preview-steps requires a value}"; shift 2 ;;
+    --preview-approval) PREVIEW_APPROVAL="${2:?--preview-approval requires a value}"; shift 2 ;;
     --task-suite|--task-set) TASK_SUITE="${2:?$1 requires a value}"; shift 2 ;;
     --task-id|--task-ids) TASK_IDS="${2:?$1 requires a value}"; shift 2 ;;
     --split) ROBOCASA_SPLIT="${2:?--split requires a value}"; shift 2 ;;
@@ -115,9 +124,16 @@ done
 
 BACKEND="${BACKEND,,}"
 MODEL="${MODEL,,}"
+WORLD_MODEL="${WORLD_MODEL,,}"
 case "$MODEL" in
   pi|pi0.5|pi-0.5) MODEL="pi05" ;;
   groot|gr00t|gr00t-n1.5|groot_n1.5|gr00t_n1.5) MODEL="groot-n1.5" ;;
+esac
+case "$WORLD_MODEL" in
+  off|direct) WORLD_MODEL="none" ;;
+  sim|simulator|simulator-oracle) WORLD_MODEL="robocasa-sim" ;;
+  dino|dino-wm) WORLD_MODEL="dino-wm-droid" ;;
+  jepa|jepa-wm) WORLD_MODEL="jepa-wm-droid" ;;
 esac
 
 case "$BACKEND" in
@@ -131,6 +147,11 @@ case "$BACKEND" in
     CLIENT_PYTHON="$OPENPI_DIR/examples/libero/.venv/bin/python"
     TASK_SUITE="${TASK_SUITE:-libero_spatial}"
     TASK_IDS="${TASK_IDS:-0}"
+    WORLD_MODEL="${WORLD_MODEL:-none}"
+    if [[ "$WORLD_MODEL" != "none" ]]; then
+      echo "LIBERO currently supports only --world-model none." >&2
+      exit 2
+    fi
     ;;
   robocasa)
     case "$MODEL" in
@@ -151,6 +172,7 @@ case "$BACKEND" in
     esac
     TASK_SUITE="${TASK_SUITE:-${ROBOCASA_TASK_SET:-atomic_seen}}"
     TASK_IDS="${TASK_IDS:-${ROBOCASA_TASK_ID:-0}}"
+    WORLD_MODEL="${WORLD_MODEL:-robocasa-sim}"
     if [[ "$INTERACTIVE" == "1" ]] && [[ ! "$TASK_IDS" =~ ^[0-9]+$ ]]; then
       echo "Interactive RoboCasa mode requires one numeric --task-id." >&2
       exit 2
@@ -177,15 +199,24 @@ if [[ "$MODEL" == "groot-n1.5" ]]; then
 fi
 
 for integer_value in "$TRIALS_PER_TASK" "$SEED" "$REPLAN_STEPS" "$POLICY_PORT" \
-  "$DASHBOARD_PORT" "$REALTIME_DELAY_MS" "$VIEWER_WIDTH" "$VIEWER_HEIGHT"; do
+  "$DASHBOARD_PORT" "$REALTIME_DELAY_MS" "$VIEWER_WIDTH" "$VIEWER_HEIGHT" \
+  "$PREVIEW_STEPS"; do
   if [[ ! "$integer_value" =~ ^[0-9]+$ ]]; then
     echo "Expected a non-negative integer, got: $integer_value" >&2
     exit 2
   fi
 done
-if [[ "$TRIALS_PER_TASK" == "0" ]] || [[ "$REPLAN_STEPS" == "0" ]]; then
-  echo "--trials and --replan-steps must be positive." >&2
+if [[ "$TRIALS_PER_TASK" == "0" ]] || [[ "$REPLAN_STEPS" == "0" ]] || \
+  [[ "$PREVIEW_STEPS" == "0" ]]; then
+  echo "--trials, --replan-steps, and --preview-steps must be positive." >&2
   exit 2
+fi
+if [[ "$PREVIEW_APPROVAL" != "manual" && "$PREVIEW_APPROVAL" != "auto" ]]; then
+  echo "--preview-approval must be manual or auto." >&2
+  exit 2
+fi
+if [[ "$INTERACTIVE" != "1" ]]; then
+  PREVIEW_APPROVAL="auto"
 fi
 if [[ "$VIEWER_WIDTH" == "0" ]] || [[ "$VIEWER_HEIGHT" == "0" ]] || \
   [[ ! "$VIEWER_FPS" =~ ^[0-9]+([.][0-9]+)?$ ]] || \
@@ -207,6 +238,18 @@ if [[ "$ROBOCASA_SPLIT" != "pretrain" && "$ROBOCASA_SPLIT" != "target" ]]; then
   echo "--split must be pretrain or target." >&2
   exit 2
 fi
+case "$BACKEND/$WORLD_MODEL" in
+  libero/none|robocasa/none|robocasa/robocasa-sim) ;;
+  robocasa/dino-wm-droid|robocasa/jepa-wm-droid)
+    echo "$WORLD_MODEL is installed as a diagnostic candidate but is not an execution preview yet." >&2
+    echo "See docs/world-model-plugins.md for the required 7D/12D validation." >&2
+    exit 2
+    ;;
+  *)
+    echo "World model $WORLD_MODEL does not support backend $BACKEND." >&2
+    exit 2
+    ;;
+esac
 if [[ ! -x "$RUNTIME_PYTHON" ]] || [[ ! -x "$CLIENT_PYTHON" ]]; then
   if [[ "$MODEL" == "groot-n1.5" ]]; then
     echo "GR00T is not set up. Run ./scripts/setup_groot.sh first." >&2
@@ -236,7 +279,8 @@ fi
 
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 SESSION_DIR="${SESSION_DIR:-$PROJECT_DIR/showcase-runs/$TIMESTAMP}"
-mkdir -p "$SESSION_DIR/frames" "$SESSION_DIR/videos" "$PROJECT_DIR/showcase-runs"
+mkdir -p "$SESSION_DIR/frames" "$SESSION_DIR/videos" "$SESSION_DIR/previews" \
+  "$PROJECT_DIR/showcase-runs"
 ln -sfn "$SESSION_DIR" "$PROJECT_DIR/showcase-runs/latest"
 
 cleanup() {
@@ -305,7 +349,8 @@ wait_for_tcp_listener() {
 "$RUNTIME_PYTHON" - \
   "$PROJECT_DIR" "$SESSION_DIR/state.json" "$BACKEND" "$MODEL" "$TASK_SUITE" \
   "$TASK_IDS" "$POLICY_PORT" "$INTERACTIVE" "$NETWORK_AUDIT" \
-  "$VIEWER_WIDTH" "$VIEWER_HEIGHT" <<'PY'
+  "$VIEWER_WIDTH" "$VIEWER_HEIGHT" "$WORLD_MODEL" "$PREVIEW_STEPS" \
+  "$PREVIEW_APPROVAL" <<'PY'
 import datetime
 import json
 import pathlib
@@ -318,12 +363,17 @@ port = int(sys.argv[7])
 interactive = sys.argv[8] == "1"
 network_audit = sys.argv[9] == "1"
 viewer_width, viewer_height = map(int, sys.argv[10:12])
+world_model_key = sys.argv[12]
+preview_steps = int(sys.argv[13])
+preview_approval = sys.argv[14]
 sys.path.insert(0, str(project_dir))
 
 from showcase import backend_registry
+from showcase import world_model_registry
 
 simulator, policy = backend_registry.require_compatible(backend, model)
 profile = backend_registry.get_profile(backend, model)
+world_model = world_model_registry.require_world_model(backend, world_model_key)
 now = datetime.datetime.now(datetime.timezone.utc).isoformat()
 transport_scheme = "ws" if policy.transport == "websocket" else "tcp"
 try:
@@ -343,6 +393,14 @@ state = {
     "runtime": policy.runtime,
     "policy_transport": policy.transport,
     "policy_endpoint": f"{transport_scheme}://127.0.0.1:{port}",
+    "world_model": world_model.key,
+    "world_model_display_name": world_model.display_name,
+    "world_model_runtime": world_model.runtime,
+    "world_model_prediction_kind": world_model.prediction_kind,
+    "world_model_description": world_model.description,
+    "available_world_models": world_model_registry.catalog(backend),
+    "preview_steps": preview_steps,
+    "preview_approval": preview_approval,
     "suite": suite,
     "task_ids": task_ids,
     "task_id": task_id,
@@ -392,7 +450,7 @@ fi
 DASHBOARD_URL="http://127.0.0.1:$DASHBOARD_PORT"
 echo "Dashboard: $DASHBOARD_URL"
 echo "Session: $SESSION_DIR"
-echo "Backend: $BACKEND · Model: $MODEL · Task collection: $TASK_SUITE · Task ID: $TASK_IDS"
+echo "Backend: $BACKEND · Policy: $MODEL · World model: $WORLD_MODEL · Task collection: $TASK_SUITE · Task ID: $TASK_IDS"
 echo "Loading the local policy; startup progress is now visible in the dashboard."
 if [[ "$INTERACTIVE" == "1" ]]; then
   echo "Interactive mode: use the browser to run attempts and end the session."
@@ -493,6 +551,9 @@ else
   CLIENT_COMMAND=(
     "$CLIENT_PYTHON" "$PROJECT_DIR/showcase/interactive_robocasa.py"
     --model "$MODEL"
+    --world-model "$WORLD_MODEL"
+    --preview-steps "$PREVIEW_STEPS"
+    --preview-approval "$PREVIEW_APPROVAL"
     --host 127.0.0.1
     --port "$POLICY_PORT"
     --replan-steps "$REPLAN_STEPS"

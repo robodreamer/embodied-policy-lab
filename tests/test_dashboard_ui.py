@@ -31,6 +31,23 @@ def test_dashboard_has_explicit_startup_indicator():
     assert '["waiting", "initializing", "preparing_task"]' in javascript
 
 
+def test_dashboard_separates_live_state_from_counterfactual_preview():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    javascript = (STATIC / "app.js").read_text(encoding="utf-8")
+
+    for element_id in (
+        "worldModelSelect",
+        "previewVideo",
+        "approvePreview",
+        "rejectPreview",
+    ):
+        assert f'id="{element_id}"' in html
+        assert f'$("{element_id}")' in javascript
+    assert "LIVE SIMULATOR STATE" in html
+    assert 'action: "approve_preview"' in javascript
+    assert 'action: "reject_preview"' in javascript
+
+
 def test_dashboard_opens_before_heavy_policy_startup():
     launcher = (ROOT / "scripts" / "run_showcase.sh").read_text(encoding="utf-8")
 

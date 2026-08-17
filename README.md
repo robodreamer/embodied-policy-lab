@@ -12,6 +12,15 @@ matrix is:
 | LIBERO | ✓ | — |
 | RoboCasa365 | ✓ | ✓ |
 
+RoboCasa also has an independent world-model selector. The default
+`robocasa-sim` mode previews each proposed action prefix in a matching cloned
+MuJoCo environment and waits for **Execute** or **Reject** without advancing the
+live episode. Use `--world-model none` for direct execution. The DINO-WM and
+JEPA-WM DROID/RoboCasa checkpoints are pinned as diagnostic candidates, but are
+not offered as execution gates until their 7D arm-action and temporal contracts
+are validated against this lab's 12D mobile-manipulator actions. See
+[the world-model guide](docs/world-model-plugins.md).
+
 The policy adapter boundary is documented in
 [the model-plugin guide](docs/model-plugins.md). RoboCasa implementation and
 validation history remains in [the development notes](docs/robocasa-backend.md),
@@ -31,6 +40,8 @@ Interactive and automatic RoboCasa rollouts use the original showcase scripts:
 ```bash
 ./scripts/run_interactive_showcase.sh --backend robocasa
 ./scripts/run_interactive_showcase.sh --backend robocasa --model groot-n1.5
+./scripts/run_interactive_showcase.sh --backend robocasa \
+  --world-model robocasa-sim --preview-steps 5 --preview-approval manual
 ./scripts/run_showcase.sh --backend robocasa --batch --task-id 0 --trials 3
 ```
 
@@ -101,6 +112,8 @@ The showcase opens a local browser console displaying:
 - cold/startup and warm inference latency;
 - GPU utilization, VRAM, power, and temperature;
 - task success and the local policy endpoint;
+- counterfactual action-prefix videos with explicit Execute/Reject controls and
+  before/after live-state hashes;
 - a syscall-level audit of model and simulator network destinations.
 
 Set up once, then launch:
@@ -144,6 +157,8 @@ Every run is retained under a timestamped `showcase-runs/` directory, and
 - `gpu.csv`: one-second NVIDIA telemetry;
 - `network-*`: raw `strace` network syscall evidence;
 - `videos/*.mp4`: simulator rollouts;
+- `previews/*.mp4` and `preview-audit.jsonl`: counterfactual outcomes and
+  non-mutation evidence;
 - `client.log`, `server.log`, and `dashboard.log`: runtime trails.
 
 Review the last session or build an MP4 reel with:

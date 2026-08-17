@@ -10,6 +10,8 @@ let randomGenerationEnabled = false;
 let budgetDirty = false;
 let evaluationDirty = false;
 let pendingCommand = null;
+let worldModelDirty = false;
+let lastPreviewUrl = "";
 
 function format(value, digits = 0) {
   return value !== null && value !== "" && Number.isFinite(Number(value))
@@ -139,6 +141,28 @@ function populateTasks(tasks, selected) {
   syncTaskExplanation();
 }
 
+function populateWorldModels(models, selected) {
+  const select = $("worldModelSelect");
+  const available = Array.isArray(models) && models.length > 0;
+  $("worldModelSetting").classList.toggle("hidden", !available);
+  if (!available) return;
+  const desired = worldModelDirty ? select.value : String(selected || "none");
+  select.replaceChildren(...models.map(model => {
+    const option = document.createElement("option");
+    option.value = model.key;
+    option.disabled = !model.available;
+    option.textContent = `${model.display_name}${model.available ? "" : " · setup/adapter required"}`;
+    option.dataset.description = model.available
+      ? model.description
+      : `${model.description} Unavailable: ${model.unavailable_reason}`;
+    return option;
+  }));
+  select.value = desired;
+  const selectedOption = select.selectedOptions[0];
+  $("worldModelHelp").textContent = selectedOption?.dataset.description
+    || "Choose whether proposed actions are previewed before execution.";
+}
+
 function isRateEligible(item) {
   if (typeof item.rate_eligible === "boolean") return item.rate_eligible;
   return ["success", "failure"].includes(item.status)
@@ -188,6 +212,8 @@ function renderHistory(history) {
 
 function humanPhase(state) {
   if (state.phase === "running") return "RUNNING";
+  if (state.phase === "predicting_preview") return "PREDICTING";
+  if (state.phase === "awaiting_preview_approval") return "REVIEW PREVIEW";
   if (state.phase === "preparing_task") return "PREPARING";
   if (state.phase === "awaiting_command") return "READY";
   if (state.phase === "stopped") return "SAVED";
@@ -232,6 +258,18 @@ function updateRunStatus(state) {
     $("frameStatus").innerHTML = "<i></i> LIVE";
     $("progressLabel").textContent = "CURRENT ROLLOUT";
     $("progressText").textContent = `Step ${Number(state.step) || 0} / ${state.max_steps || "—"}`;
+  } else if (phase === "predicting_preview") {
+    $("runStatus").textContent = "Predicting the proposed action consequences";
+    $("runDetail").textContent = "The live episode is paused while the selected world model evaluates a cloned state.";
+    $("frameStatus").innerHTML = "<i></i> LIVE STATE PAUSED";
+    $("progressLabel").textContent = "WORLD-MODEL PREVIEW";
+    $("progressText").textContent = "Predicting";
+  } else if (phase === "awaiting_preview_approval") {
+    $("runStatus").textContent = "Preview ready — operator decision required";
+    $("runDetail").textContent = "The camera cards show the unchanged live state. The preview card shows the branched consequence.";
+    $("frameStatus").innerHTML = "<i></i> LIVE STATE PAUSED";
+    $("progressLabel").textContent = "PROPOSE → PREVIEW → EXECUTE";
+    $("progressText").textContent = "Awaiting approval";
   } else if (phase === "preparing_task") {
     const task = selectedTask();
     $("runStatus").textContent = `Preparing ${task?.name || "selected task"}`;
@@ -257,15 +295,17 @@ function updateRunStatus(state) {
     $("frameStatus").innerHTML = "<i></i> WAITING";
   }
   $("frameStatus").classList.toggle("paused", phase !== "running");
-  $("runDot").className = phase === "running" ? "active" : phase === "stopped" ? "saved" : "";
+  $("runDot").className = ["running", "predicting_preview"].includes(phase) ? "active" : phase === "stopped" ? "saved" : "";
 }
 
 function updateControls(state) {
   const stopped = ["stopped", "complete"].includes(state.phase);
   const running = state.phase === "running";
+  const awaitingPreview = state.phase === "awaiting_preview_approval";
+  const predictingPreview = state.phase === "predicting_preview";
   const loading = !state.interactive || ["initializing", "preparing_task"].includes(state.phase);
   const commandPending = Boolean(pendingCommand);
-  $("startRun").disabled = stopped || loading || commandPending;
+  $("startRun").disabled = stopped || loading || awaitingPreview || predictingPreview || commandPending;
   $("applyPrompt").disabled = stopped || !running || !draftDirty || commandPending;
   $("finishRun").disabled = stopped || loading;
   $("generatePrompt").disabled = stopped || !localLlmEnabled || commandPending;
@@ -274,6 +314,9 @@ function updateControls(state) {
   $("promptInput").disabled = stopped || loading || commandPending;
   $("rolloutBudget").disabled = stopped || loading || commandPending;
   $("evaluationMode").disabled = stopped || loading || commandPending;
+  $("worldModelSelect").disabled = stopped || loading || state.phase !== "awaiting_command" || commandPending;
+  $("approvePreview").disabled = !awaitingPreview || commandPending;
+  $("rejectPreview").disabled = !awaitingPreview || commandPending;
   const exploratory = selectedEvaluationMode() === "exploratory";
   const rolloutType = exploratory ? "CUSTOM UNSCORED" : "SCORED";
   $("startRun").textContent = stopped
@@ -295,6 +338,11 @@ function updateControls(state) {
     : (running
       ? "Available now. Keeps the scene and replans; the mixed-prompt attempt is excluded from per-prompt rates."
       : "Disabled until a rollout is running. Starting a rollout already applies the draft above.");
+  $("previewHelp").textContent = awaitingPreview
+    ? `The live state is unchanged. Execute the approved ${state.replan_steps || "selected"}-step prefix, or reject and end this attempt.`
+    : (state.world_model === "none"
+      ? "Direct mode is selected, so policy chunks execute without a counterfactual preview."
+      : "Approval buttons activate after the selected world model finishes a preview.");
 }
 
 async function configureControls() {
@@ -384,6 +432,21 @@ async function configureControls() {
     setControlNote(`Staged a ${selectedBudgetSteps()}-step budget for the next fresh rollout.`);
     updateControls(lastState);
   });
+  $("worldModelSelect").addEventListener("change", async () => {
+    worldModelDirty = true;
+    const option = $("worldModelSelect").selectedOptions[0];
+    $("worldModelHelp").textContent = option?.dataset.description || "";
+    try {
+      const requested = $("worldModelSelect").value;
+      const result = await postJson("/api/control", {
+        action: "set_world_model",
+        world_model: requested,
+      });
+      pendingCommand = {id: result.command.id, action: "set_world_model", worldModel: requested};
+      setControlNote("Switching the consequence-preview model. Policy selection is unchanged.");
+      updateControls(lastState);
+    } catch (error) { setControlNote(error.message, true); }
+  });
   updateEvaluationHelp();
   updateBudgetHelp();
   $("startRun").onclick = async () => {
@@ -439,6 +502,22 @@ async function configureControls() {
       const result = await postJson("/api/control", {action: "stop"});
       pendingCommand = {id: result.command.id, action: "stop"};
       setControlNote("Finishing the simulator and saving the report. This dashboard will remain open for review.");
+    } catch (error) { setControlNote(error.message, true); }
+  };
+  $("approvePreview").onclick = async () => {
+    try {
+      const result = await postJson("/api/control", {action: "approve_preview"});
+      pendingCommand = {id: result.command.id, action: "approve_preview"};
+      setControlNote("Execution approved. The live simulator will now receive the previewed action prefix.");
+      updateControls(lastState);
+    } catch (error) { setControlNote(error.message, true); }
+  };
+  $("rejectPreview").onclick = async () => {
+    try {
+      const result = await postJson("/api/control", {action: "reject_preview"});
+      pendingCommand = {id: result.command.id, action: "reject_preview"};
+      setControlNote("Preview rejected. Ending this attempt without executing the proposed prefix.");
+      updateControls(lastState);
     } catch (error) { setControlNote(error.message, true); }
   };
   $("generatePrompt").onclick = async () => {
@@ -501,6 +580,8 @@ async function updateState() {
           taskDirty = false;
           budgetDirty = false;
           evaluationDirty = false;
+        } else if (pendingCommand.action === "set_world_model") {
+          worldModelDirty = false;
         }
         pendingCommand = null;
       }
@@ -516,6 +597,7 @@ async function updateState() {
     $("phaseBadge").textContent = humanPhase(state);
     $("interactiveControls").classList.toggle("hidden", !state.interactive);
     populateTasks(state.available_tasks, state.task_id);
+    populateWorldModels(state.available_world_models, state.world_model);
     if (!budgetDirty && !pendingCommand && state.rollout_budget_multiplier) {
       $("rolloutBudget").value = String(state.rollout_budget_multiplier);
       updateBudgetHelp();
@@ -536,6 +618,7 @@ async function updateState() {
     updateControls(state);
     const modelDisplayName = state.model_display_name || state.model || "Local policy";
     const simulatorDisplayName = state.simulator || state.backend || "Local simulator";
+    const worldModelDisplayName = state.world_model_display_name || state.world_model || "No preview";
     const backendName = state.backend ? String(state.backend).toUpperCase() : "BACKEND PENDING";
     const transportName = state.policy_transport ? String(state.policy_transport).toUpperCase() : "LOCAL";
     const taskPosition = state.task_position && state.total_tasks
@@ -546,6 +629,8 @@ async function updateState() {
     $("profileModelDetail").textContent = [state.model, state.runtime].filter(Boolean).join(" · ") || "Local policy";
     $("profileEnvironment").textContent = simulatorDisplayName;
     $("profileEnvironmentDetail").textContent = `${backendName} BACKEND`;
+    $("profileWorldModel").textContent = worldModelDisplayName;
+    $("profileWorldModelDetail").textContent = [state.world_model_runtime, state.preview_approval ? `${state.preview_approval} approval` : ""].filter(Boolean).join(" · ") || "Consequence preview";
     $("profileTaskSet").textContent = state.suite || "—";
     $("profileTaskDetail").textContent = taskPosition;
     $("profileTransport").textContent = `${transportName} · LOOPBACK`;
@@ -599,7 +684,26 @@ async function updateState() {
       item.textContent = label;
       return item;
     }));
-    const runningProgress = state.phase === "running" ? Math.max(0, Math.min(1, Number(state.progress) || 0)) : 0;
+    const hasPreviewModel = state.world_model && state.world_model !== "none";
+    $("previewCard").classList.toggle("hidden", !hasPreviewModel);
+    const preview = state.preview_result || {};
+    $("previewKind").textContent = `${worldModelDisplayName} · ${String(state.world_model_prediction_kind || "preview").replaceAll("_", " ").toUpperCase()}`;
+    $("previewTitle").textContent = state.preview_status === "awaiting_approval"
+      ? `${preview.previewed_steps || state.preview_steps || "—"} predicted actions ready`
+      : (state.preview_status === "predicting" ? "Generating counterfactual preview…" : "Waiting for the next policy proposal");
+    $("previewDescription").textContent = preview.caveat || state.world_model_description || "The selected world model previews consequences independently from the policy.";
+    $("previewEvidence").textContent = preview.live_state_unchanged
+      ? `LIVE STATE UNCHANGED · SHA-256 ${preview.live_state_sha256_after} · ${format(preview.duration_ms, 1)} ms`
+      : "No non-mutation evidence recorded yet";
+    const previewUrl = state.preview_video_url || "";
+    if (previewUrl && previewUrl !== lastPreviewUrl) {
+      lastPreviewUrl = previewUrl;
+      $("previewVideo").src = previewUrl;
+      $("previewVideo").play().catch(() => {});
+    }
+    $("previewVideo").classList.toggle("hidden", !previewUrl);
+    $("previewPlaceholder").classList.toggle("hidden", Boolean(previewUrl));
+    const runningProgress = ["running", "predicting_preview", "awaiting_preview_approval"].includes(state.phase) ? Math.max(0, Math.min(1, Number(state.progress) || 0)) : 0;
     $("progressBar").style.transform = `scaleX(${runningProgress})`;
     $("updated").textContent = state.updated_at ? `UPDATED ${new Date(state.updated_at).toLocaleTimeString()}` : "AWAITING TELEMETRY";
     if (state.control_error) setControlNote(state.control_error, true);

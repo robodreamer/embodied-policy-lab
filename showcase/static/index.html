@@ -24,6 +24,11 @@
           <strong id="profileEnvironment">WAITING FOR SIMULATOR</strong>
           <span id="profileEnvironmentDetail">Backend metadata has not arrived</span>
         </div>
+        <div class="profile-item world-model-profile">
+          <small>WORLD MODEL</small>
+          <strong id="profileWorldModel">WAITING FOR PREVIEW MODEL</strong>
+          <span id="profileWorldModelDetail">Consequence preview metadata has not arrived</span>
+        </div>
         <div class="profile-item">
           <small>TASK COLLECTION</small>
           <strong id="profileTaskSet">—</strong>
@@ -98,6 +103,11 @@
             </select>
             <p id="budgetHelp">Extended attempts get twice as many simulator actions. A scored rollout still ends early when the selected simulator detects success.</p>
           </div>
+          <div id="worldModelSetting" class="rollout-setting">
+            <label for="worldModelSelect"><span><b>3C</b> Consequence preview</span><small>INDEPENDENT FROM THE SELECTED POLICY</small></label>
+            <select id="worldModelSelect"></select>
+            <p id="worldModelHelp">Loading compatible world-model options…</p>
+          </div>
         </div>
         <div class="control-actions">
           <div class="action-item"><button id="startRun" class="primary-action">4 · START A FRESH SCORED ROLLOUT</button><small id="startHelp">Resets the scene, uses the task and draft above, and counts the result.</small></div>
@@ -107,9 +117,30 @@
         <p id="controlNote">Choose a task and instruction, then start. Aborted and mixed-prompt attempts are excluded from per-prompt rates.</p>
       </section>
 
+      <section id="previewCard" class="preview-card hidden" aria-live="polite">
+        <div class="card-label"><span>02</span> COUNTERFACTUAL ACTION PREVIEW · LIVE EPISODE REMAINS PAUSED</div>
+        <div class="preview-layout">
+          <div class="preview-media">
+            <video id="previewVideo" controls muted loop playsinline></video>
+            <div id="previewPlaceholder">A preview appears after the policy proposes its next action chunk.</div>
+          </div>
+          <div class="preview-decision">
+            <small id="previewKind">SELECTED WORLD MODEL</small>
+            <strong id="previewTitle">Waiting for a policy proposal</strong>
+            <p id="previewDescription">The world model predicts a consequence; the simulator still owns task success and the operator decides whether to execute.</p>
+            <code id="previewEvidence">No preview evidence recorded yet</code>
+            <div class="preview-actions">
+              <button id="approvePreview" class="primary-action">EXECUTE PREVIEWED PREFIX</button>
+              <button id="rejectPreview" class="danger">REJECT · KEEP LIVE STATE</button>
+            </div>
+            <p id="previewHelp">Both buttons become available after a manual preview completes.</p>
+          </div>
+        </div>
+      </section>
+
       <section class="hero-grid">
         <article class="camera-card primary">
-          <div class="card-label"><span>02</span> EXTERNAL CAMERA · SIMULATOR VIEW <small id="externalCameraMeta" class="camera-quality">—</small></div>
+          <div class="card-label"><span>03</span> EXTERNAL CAMERA · LIVE SIMULATOR STATE <small id="externalCameraMeta" class="camera-quality">—</small></div>
           <div class="camera-frame">
             <img id="externalFrame" alt="External camera feed">
             <div class="reticle"></div>
@@ -117,14 +148,14 @@
           </div>
         </article>
         <article class="camera-card">
-          <div class="card-label"><span>03</span> WRIST CAMERA · SIMULATOR VIEW <small id="wristCameraMeta" class="camera-quality">—</small></div>
+          <div class="card-label"><span>04</span> WRIST CAMERA · LIVE SIMULATOR STATE <small id="wristCameraMeta" class="camera-quality">—</small></div>
           <div class="camera-frame wrist">
             <img id="wristFrame" alt="Wrist camera feed">
             <div class="reticle"></div>
           </div>
         </article>
         <article class="command-card">
-          <div class="card-label"><span>04</span> APPLIED INSTRUCTION</div>
+          <div class="card-label"><span>05</span> APPLIED INSTRUCTION</div>
           <blockquote id="prompt">Waiting for an instruction…</blockquote>
           <div class="applied-meta"><span id="appliedSource" class="source-chip">—</span><span id="appliedState">Not yet sent</span></div>
           <code id="promptProof" class="prompt-proof">No synchronous model request recorded yet</code>
@@ -148,7 +179,7 @@
 
       <section class="analysis-grid">
         <article class="chart-card action-card">
-          <div class="card-label"><span>05</span> <b id="actionTitle">PREDICTED ACTION CHUNK</b></div>
+          <div class="card-label"><span>06</span> <b id="actionTitle">PREDICTED ACTION CHUNK</b></div>
           <canvas id="actionChart"></canvas>
           <div id="actionLegend" class="legend">
             <span class="x">ΔX</span><span class="y">ΔY</span><span class="z">ΔZ</span>
@@ -156,7 +187,7 @@
           </div>
         </article>
         <article class="chart-card">
-          <div class="card-label"><span>06</span> WARM INFERENCE LATENCY · FIRST REQUEST EXCLUDED</div>
+          <div class="card-label"><span>07</span> WARM INFERENCE LATENCY · FIRST REQUEST EXCLUDED</div>
           <canvas id="latencyChart"></canvas>
           <div class="latency-stats">
             <div><small>MEDIAN</small><strong id="medianLatency">—</strong></div>
@@ -166,7 +197,7 @@
           </div>
         </article>
         <article class="runtime-card">
-          <div class="card-label"><span>07</span> LOCAL RUNTIME PATH</div>
+          <div class="card-label"><span>08</span> LOCAL RUNTIME PATH</div>
           <div class="flow">
             <div><b>OBSERVATIONS</b><small id="stateShape">Waiting for input contract</small></div>
             <em>→</em>
@@ -179,7 +210,7 @@
         </article>
       </section>
       <section id="historyCard" class="history-card hidden">
-        <div class="card-label"><span>08</span> ATTEMPT HISTORY · PER-PROMPT SUCCESS</div>
+        <div class="card-label"><span>09</span> ATTEMPT HISTORY · PER-PROMPT SUCCESS</div>
         <div class="history-scroll"><table><thead><tr><th>ATTEMPT</th><th>TASK</th><th>INSTRUCTION</th><th>SOURCE</th><th>BUDGET</th><th>RESULT</th><th>RATE FOR TASK + PROMPT + BUDGET</th><th>DURATION</th></tr></thead><tbody id="historyBody"></tbody></table></div>
         <p class="sample-note">Success rates describe only this session. Small samples are functional checks, not benchmark accuracy.</p>
       </section>

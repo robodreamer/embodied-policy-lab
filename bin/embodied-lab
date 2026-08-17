@@ -21,6 +21,7 @@ Usage:
 Options:
   --backend NAME       robocasa (default) or libero
   --model NAME         pi05 (default) or groot-n1.5
+  --world-model NAME   robocasa-sim (default) or none
   --mode MODE          interactive (default) or batch
   --task-set NAME      task collection (backend default when omitted)
   --task-id ID         initial/batch task (interactive default: 0, no prompt)
@@ -49,6 +50,12 @@ robocasa  pi05          ready / default
 robocasa  groot-n1.5    ready
 libero    pi05          ready
 libero    groot-n1.5    incompatible
+
+WORLD MODEL       BACKEND    STATUS
+robocasa-sim      robocasa   ready / default
+none              any        ready / direct execution
+dino-wm-droid     robocasa   adapter validation required
+jepa-wm-droid     robocasa   adapter validation required
 EOF
 }
 
@@ -102,7 +109,7 @@ shell_command() {
 }
 
 main() {
-  local backend="" model="" mode="" task_set="" task_id="0" trials="1"
+  local backend="" model="" world_model="" mode="" task_set="" task_id="0" trials="1"
   local use_defaults=0 dry_run=0 list_only=0 task_id_set=0 trials_set=0
   local -a extra_args=()
 
@@ -110,6 +117,7 @@ main() {
     case "$1" in
       --backend) backend="${2:?--backend requires a value}"; shift 2 ;;
       --model) model="${2:?--model requires a value}"; shift 2 ;;
+      --world-model) world_model="${2:?--world-model requires a value}"; shift 2 ;;
       --mode) mode="${2:?--mode requires a value}"; shift 2 ;;
       --task-set|--task-suite) task_set="${2:?$1 requires a value}"; shift 2 ;;
       --task-id) task_id="${2:?--task-id requires a value}"; task_id_set=1; shift 2 ;;
@@ -130,14 +138,14 @@ main() {
 
   if [[ "$use_defaults" == "0" ]]; then
     backend="${backend:-$(pick_id \
-      "1/4 · Choose simulator (recommended first)" \
+      "1/5 · Choose simulator (recommended first)" \
       $'robocasa\tRoboCasa365 · mobile kitchen manipulation · recommended' \
       $'libero\tLIBERO · fixed-arm tabletop benchmark')}" || return 1
 
     if [[ -z "$model" ]]; then
       if [[ "$backend" == "robocasa" ]]; then
         model="$(pick_id \
-          "2/4 · Choose a compatible local policy (default first)" \
+          "2/5 · Choose a compatible local policy (default first)" \
           $'pi05\tPhysical Intelligence π0.5 · default' \
           $'groot-n1.5\tNVIDIA Isaac GR00T N1.5')" || return 1
       else
@@ -146,21 +154,32 @@ main() {
       fi
     fi
 
+    if [[ -z "$world_model" ]]; then
+      if [[ "$backend" == "robocasa" ]]; then
+        world_model="$(pick_id \
+          "3/5 · Choose how to preview proposed actions" \
+          $'robocasa-sim\tRoboCasa simulator branch · inspect before execution · recommended' \
+          $'none\tDirect execution · no counterfactual preview')" || return 1
+      else
+        world_model="none"
+      fi
+    fi
+
     mode="${mode:-$(pick_id \
-      "3/4 · Choose run mode" \
+      "4/5 · Choose run mode" \
       $'interactive\tInteractive dashboard · change task/prompt and repeat' \
       $'batch\tAutomatic batch · run selected task and exit')}" || return 1
 
     if [[ -z "$task_set" ]]; then
       if [[ "$backend" == "robocasa" ]]; then
         task_set="$(pick_id \
-          "4/4 · Choose RoboCasa task collection" \
+          "5/5 · Choose RoboCasa task collection" \
           $'atomic_seen\tatomic_seen · 18 tasks · recommended' \
           $'composite_seen\tcomposite_seen · 16 multi-step tasks' \
           $'all_atomic_tasks\tall_atomic_tasks · 65 tasks')" || return 1
       else
         task_set="$(pick_id \
-          "4/4 · Choose LIBERO task suite" \
+          "5/5 · Choose LIBERO task suite" \
           $'libero_spatial\tlibero_spatial · default' \
           $'libero_object\tlibero_object' \
           $'libero_goal\tlibero_goal' \
@@ -180,6 +199,7 @@ main() {
 
   backend="${backend:-robocasa}"
   model="${model:-pi05}"
+  world_model="${world_model:-$( [[ "$backend" == "robocasa" ]] && echo robocasa-sim || echo none )}"
   mode="${mode:-interactive}"
   if [[ -z "$task_set" ]]; then
     task_set="$( [[ "$backend" == "robocasa" ]] && echo atomic_seen || echo libero_spatial )"
@@ -188,6 +208,10 @@ main() {
   case "$backend/$model" in
     robocasa/pi05|robocasa/groot-n1.5|libero/pi05) ;;
     *) die "incompatible profile: backend=$backend model=$model (use --list)" ;;
+  esac
+  case "$backend/$world_model" in
+    robocasa/robocasa-sim|robocasa/none|libero/none) ;;
+    *) die "incompatible world model: backend=$backend world_model=$world_model (use --list)" ;;
   esac
   [[ "$mode" == "interactive" || "$mode" == "batch" ]] \
     || die "--mode must be interactive or batch"
@@ -199,6 +223,7 @@ main() {
     "$launcher"
     --backend "$backend"
     --model "$model"
+    --world-model "$world_model"
     --task-set "$task_set"
     --task-id "$task_id"
   )
@@ -210,7 +235,7 @@ main() {
 
   local rendered summary
   rendered="$(shell_command "${command[@]}")"
-  summary="Embodied Policy Lab\nSimulator: $backend\nModel: $model\nMode: $mode\nTasks: $task_set · initial ID $task_id"
+  summary="Embodied Policy Lab\nSimulator: $backend\nPolicy Model: $model\nWorld model: $world_model\nMode: $mode\nTasks: $task_set · initial ID $task_id"
   if [[ "$mode" == "batch" ]]; then summary+=" · $trials trial(s)"; fi
 
   if [[ "$dry_run" == "1" ]]; then

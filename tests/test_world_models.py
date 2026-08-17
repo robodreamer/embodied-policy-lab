@@ -1,0 +1,121 @@
+from __future__ import annotations
+
+import dataclasses
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+from showcase import world_model_plugins
+from showcase import world_model_registry
+
+
+def test_registry_keeps_world_model_choice_independent_from_policy():
+    simulator = world_model_registry.require_world_model("robocasa", "simulator")
+    assert simulator.key == "robocasa-sim"
+    assert simulator.action_schema == "robocasa-panda-omron-12d-v1"
+
+    learned = world_model_registry.get_world_model("dino-wm")
+    assert learned.action_schema == "robocasa-panda-manip-7d-v1"
+    assert not learned.available
+    with pytest.raises(ValueError, match="12D mobile-manipulator"):
+        world_model_registry.require_world_model("robocasa", learned.key)
+
+
+@dataclasses.dataclass
+class FakeState:
+    time: float
+    qpos: np.ndarray
+    qvel: np.ndarray
+
+
+class FakeSim:
+    def __init__(self, position=0.0):
+        self.state = FakeState(0.0, np.array([position]), np.array([0.0]))
+
+    def get_state(self):
+        return FakeState(
+            self.state.time, self.state.qpos.copy(), self.state.qvel.copy()
+        )
+
+    def set_state(self, state):
+        self.state = FakeState(state.time, state.qpos.copy(), state.qvel.copy())
+
+    def forward(self):
+        pass
+
+
+class FakeInner:
+    def __init__(self, position=0.0):
+        self.sim = FakeSim(position)
+
+
+class FakeEnv:
+    def __init__(self, position=0.0):
+        self.unwrapped = self
+        self.env = FakeInner(position)
+        self.closed = False
+
+    def reset(self):
+        self.env.sim = FakeSim()
+        return {}, {}
+
+    def close(self):
+        self.closed = True
+
+
+def test_simulator_preview_steps_only_the_branch(monkeypatch, tmp_path: Path):
+    live = FakeEnv(position=3.0)
+    branches = []
+
+    def create_environment(task_name, split, seed):
+        branch = FakeEnv()
+        branches.append(branch)
+        return branch
+
+    def render_frames(env, *, width, height):
+        value = int(env.env.sim.state.qpos[0])
+        return (np.full((height, width, 3), value, dtype=np.uint8),)
+
+    def step_environment(env, action):
+        env.env.sim.state.qpos[0] += float(action[0])
+        env.env.sim.state.time += 1.0
+        return {}, 0.0, False, False, {"success": False}
+
+    written = {}
+    monkeypatch.setattr(
+        world_model_plugins.imageio,
+        "mimwrite",
+        lambda path, frames, fps: written.update(
+            path=Path(path), frame_count=len(frames), fps=fps
+        ),
+    )
+    plugin = world_model_plugins.SimulatorCounterfactualPlugin(
+        create_environment, render_frames, step_environment
+    )
+    result = plugin.preview(
+        world_model_plugins.PreviewRequest(
+            source_env=live,
+            task_name="FakeTask",
+            split="target",
+            seed=7,
+            action_chunk=np.ones((4, 12), dtype=np.float32),
+            preview_steps=2,
+            width=8,
+            height=6,
+            fps=4,
+            artifact_path=tmp_path / "preview.mp4",
+        )
+    )
+
+    assert live.env.sim.state.qpos.tolist() == [3.0]
+    assert branches[0].env.sim.state.qpos.tolist() == [5.0]
+    assert result.live_state_unchanged
+    assert result.previewed_steps == 2
+    assert written == {
+        "path": tmp_path / "preview.mp4",
+        "frame_count": 3,
+        "fps": 4,
+    }
+    plugin.close()
+    assert branches[0].closed

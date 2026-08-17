@@ -502,6 +502,8 @@ def main():
                 self._file(session_dir / "frames" / "external.jpg", "image/jpeg")
             elif route == "/frames/wrist.jpg":
                 self._file(session_dir / "frames" / "wrist.jpg", "image/jpeg")
+            elif route == "/previews/latest.mp4":
+                self._file(session_dir / "previews" / "latest.mp4", "video/mp4")
             else:
                 super().do_GET()
 
@@ -521,6 +523,9 @@ def main():
                         "stop",
                         "set_prompt",
                         "set_task",
+                        "set_world_model",
+                        "approve_preview",
+                        "reject_preview",
                     }
                     if body.get("action") not in allowed:
                         self._json({"error": "Unsupported control action"}, 400)

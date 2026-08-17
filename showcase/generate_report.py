@@ -105,14 +105,22 @@ def main():
     )
     duration = (finished - started).total_seconds()
     videos = sorted((session_dir / "videos").glob("*.mp4"))
+    previews = sorted(
+        path
+        for path in (session_dir / "previews").glob("*.mp4")
+        if path.name != "latest.mp4"
+    )
     llm_events = local_llm_events(session_dir / "llm-generations.jsonl")
     inference_events = local_llm_events(session_dir / "inference-audit.jsonl")
+    preview_events = local_llm_events(session_dir / "preview-audit.jsonl")
 
     summary = {
         "backend": state.get("backend", "libero"),
         "simulator": state.get("simulator", "LIBERO / robosuite / MuJoCo"),
         "model": state.get("model"),
         "runtime": state.get("runtime"),
+        "world_model": state.get("world_model", "none"),
+        "world_model_runtime": state.get("world_model_runtime", "disabled"),
         "suite": state.get("suite"),
         "interactive": state.get("interactive", False),
         "task_ids": state.get("task_ids"),
@@ -132,10 +140,12 @@ def main():
         "gpu": gpu,
         "network": network,
         "videos": [video.name for video in videos],
+        "previews": [preview.name for preview in previews],
         "attempt_history": state.get("attempt_history", []),
         "prompt_stats": state.get("prompt_stats", {}),
         "local_llm_generations": llm_events,
         "inference_audit_events": len(inference_events),
+        "preview_audit_events": len(preview_events),
     }
     (session_dir / "summary.json").write_text(
         json.dumps(summary, indent=2), encoding="utf-8"
@@ -153,6 +163,7 @@ def main():
 | Simulator | {simulator} |
 | Model | `{model}` |
 | Runtime | {runtime} |
+| World model | `{world_model}` ({world_model_runtime}) |
 | Task collection / IDs | `{suite}` / `{task_ids}` |
 | Episodes successful | **{successes}/{episodes}** |
 | Unscored exploratory / mixed attempts | {unscored_attempts} |
@@ -168,6 +179,7 @@ def main():
 | Peak GPU temperature | {temperature:.0f} °C |
 | Local prompt generations | {llm_generation_count} |
 | Audited policy requests | {inference_audit_count} |
+| Counterfactual previews | {preview_audit_count} |
 
 ## Local-inference network audit
 
@@ -188,13 +200,17 @@ with the local policy server over loopback.
 - `network-*`: raw network system-call traces
 - `client.log` and `server.log`: runtime logs
 - `videos/`: rollout MP4 files ({video_count})
+- `previews/`: counterfactual action-prefix MP4 files ({preview_count})
 - `llm-generations.jsonl`: local prompt-generation provenance ({llm_generation_count})
 - `inference-audit.jsonl`: prompt and action hashes for synchronous policy requests ({inference_audit_count})
+- `preview-audit.jsonl`: consequence metadata and live-state non-mutation hashes ({preview_audit_count})
 """.format(
         backend=summary["backend"],
         simulator=summary["simulator"],
         model=summary["model"],
         runtime=summary["runtime"],
+        world_model=summary["world_model"],
+        world_model_runtime=summary["world_model_runtime"],
         suite=summary["suite"],
         task_ids=summary["task_ids"],
         successes=summary["successes"],
@@ -212,10 +228,12 @@ with the local policy server over loopback.
         temperature=gpu["max_temperature_c"],
         llm_generation_count=len(llm_events),
         inference_audit_count=len(inference_events),
+        preview_audit_count=len(preview_events),
         verdict=network["verdict"],
         loopback=loopback_text,
         remote=remote_text,
         video_count=len(videos),
+        preview_count=len(previews),
     )
     (session_dir / "report.md").write_text(report, encoding="utf-8")
 
