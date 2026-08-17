@@ -97,6 +97,7 @@ def test_simulator_preview_steps_only_the_branch(monkeypatch, tmp_path: Path):
         return observation, 0.0, False, False, {"success": False}
 
     written = {}
+    renderer_lifecycle = []
     monkeypatch.setattr(
         world_model_plugins.imageio,
         "mimwrite",
@@ -105,7 +106,14 @@ def test_simulator_preview_steps_only_the_branch(monkeypatch, tmp_path: Path):
         ),
     )
     plugin = world_model_plugins.SimulatorCounterfactualPlugin(
-        create_environment, render_frames, step_environment
+        create_environment,
+        render_frames,
+        step_environment,
+        resume_environment=lambda env: renderer_lifecycle.append("resume"),
+        suspend_environment=lambda env: renderer_lifecycle.append("suspend"),
+        restore_source_environment=lambda env: renderer_lifecycle.append(
+            "restore_source"
+        ),
     )
     result = plugin.preview(
         world_model_plugins.PreviewRequest(
@@ -138,5 +146,6 @@ def test_simulator_preview_steps_only_the_branch(monkeypatch, tmp_path: Path):
         "frame_count": 3,
         "fps": 4,
     }
+    assert renderer_lifecycle == ["resume", "suspend", "restore_source"]
     plugin.close()
     assert branches[0].closed

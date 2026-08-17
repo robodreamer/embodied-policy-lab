@@ -675,7 +675,7 @@ async function updateState() {
     const viewerHeight = Number(state.viewer_height) || modelHeight;
     const sourceWidth = Number(state.camera_observation_width) || modelWidth;
     const sourceHeight = Number(state.camera_observation_height) || modelHeight;
-    const cameraMeta = `${viewerWidth}×${viewerHeight} DISPLAY · SOURCE ${sourceWidth}×${sourceHeight} · MODEL INPUT ${modelWidth}×${modelHeight}`;
+    const cameraMeta = `${viewerWidth}×${viewerHeight} MUJOCO VIEW · POLICY CAMERA ${sourceWidth}×${sourceHeight} · MODEL INPUT ${modelWidth}×${modelHeight}`;
     $("externalCameraMeta").textContent = cameraMeta;
     $("wristCameraMeta").textContent = cameraMeta;
     document.documentElement.style.setProperty("--camera-aspect", `${viewerWidth} / ${viewerHeight}`);

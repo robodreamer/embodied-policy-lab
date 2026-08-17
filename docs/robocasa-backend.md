@@ -74,11 +74,18 @@ BACKEND=robocasa TASK_SUITE=atomic_seen TASK_IDS=0 \
   ./scripts/run_interactive_showcase.sh
 ```
 
-The live viewer uses the distinct, correctly oriented RoboCasa camera
-observations and center-crops them into a 960×540 display at up to 6 FPS by
-default. This avoids cross-environment offscreen-renderer contamination while
-leaving the policy's observation contract unchanged. Use `--viewer-width`,
-`--viewer-height`, and `--viewer-fps` to tune display size and update cost.
+The RoboCasa π0.5 server reserves 70% of GPU memory by default, leaving room for
+EGL and first-inference cuBLAS initialization. Override
+`XLA_PYTHON_CLIENT_MEM_FRACTION` only after checking available VRAM. A
+`Failed to initialize BLAS support` error normally means the GPU was full during
+the first request; stop other GPU workloads and relaunch the showcase.
+
+The live viewer uses independent MuJoCo renders at 960×540 and up to 6 FPS by
+default. Counterfactual EGL contexts are suspended outside prediction windows,
+which prevents the branch renderer from changing the live camera, colors, or
+policy observations. RoboCasa's square policy observations and the 224×224
+model inputs remain unchanged. Use `--viewer-width`, `--viewer-height`, and
+`--viewer-fps` to tune presentation quality or rendering cost.
 
 In interactive mode, task selection prepares the chosen kitchen scene and
 publishes its exact scene-dependent canonical instruction before the local-LLM

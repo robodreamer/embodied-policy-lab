@@ -116,10 +116,18 @@ class SimulatorCounterfactualPlugin:
         create_environment: Callable[[str, str, int], Any],
         render_frames: Callable[..., tuple[np.ndarray, ...]],
         step_environment: Callable[[Any, np.ndarray], tuple],
+        resume_environment: Callable[[Any], None] | None = None,
+        suspend_environment: Callable[[Any], None] | None = None,
+        restore_source_environment: Callable[[Any], None] | None = None,
     ):
         self._create_environment = create_environment
         self._render_frames = render_frames
         self._step_environment = step_environment
+        self._resume_environment = resume_environment or (lambda env: None)
+        self._suspend_environment = suspend_environment or (lambda env: None)
+        self._restore_source_environment = restore_source_environment or (
+            lambda env: None
+        )
         self._branch = None
         self._branch_identity: tuple[str, str, int] | None = None
         self._last_predicted_state = None
@@ -169,6 +177,15 @@ class SimulatorCounterfactualPlugin:
         live_state = copy.deepcopy(live_sim.get_state())
         live_hash_before = state_sha256(live_state)
         branch = self._get_branch(request)
+        try:
+            self._resume_environment(branch)
+        except Exception as error:
+            self.close()
+            try:
+                self._restore_source_environment(request.source_env)
+            except Exception as restore_error:
+                raise restore_error from error
+            raise
         frames: list[np.ndarray] = []
         branch_success = False
         branch_terminated = False
@@ -212,10 +229,14 @@ class SimulatorCounterfactualPlugin:
                 branch_terminated = bool(terminated or truncated)
                 if branch_terminated:
                     break
-        except Exception:
+        except Exception as error:
             # A failed branch may retain partially stepped controller state. Rebuild
             # it before the next preview instead of reusing uncertain state.
             self.close()
+            try:
+                self._restore_source_environment(request.source_env)
+            except Exception as restore_error:
+                raise restore_error from error
             raise
 
         self._last_predicted_state = copy.deepcopy(branch.unwrapped.env.sim.get_state())
@@ -223,28 +244,43 @@ class SimulatorCounterfactualPlugin:
         live_hash_after = state_sha256(live_sim.get_state())
         unchanged = live_hash_before == live_hash_after
         if not unchanged:
-            raise RuntimeError("Counterfactual preview changed the live MuJoCo state")
+            self.close()
+            mutation_error = RuntimeError(
+                "Counterfactual preview changed the live MuJoCo state"
+            )
+            try:
+                self._restore_source_environment(request.source_env)
+            except Exception as restore_error:
+                raise restore_error from mutation_error
+            raise mutation_error
 
-        request.artifact_path.parent.mkdir(parents=True, exist_ok=True)
-        imageio.mimwrite(request.artifact_path, frames, fps=request.fps)
-        return PreviewResult(
-            model_key=self.key,
-            prediction_kind="simulator_counterfactual",
-            action_schema=world_model_registry.ROBOCASA_ACTION_SCHEMA,
-            previewed_steps=len(frames) - 1,
-            duration_ms=round((time.perf_counter() - started) * 1000.0, 2),
-            artifact_path=str(request.artifact_path),
-            live_state_sha256_before=live_hash_before,
-            live_state_sha256_after=live_hash_after,
-            live_state_unchanged=unchanged,
-            predicted_state_sha256=predicted_hash,
-            branch_success=branch_success,
-            branch_terminated=branch_terminated,
-            caveat=(
-                "Ground-truth MuJoCo branch for this simulator state and action prefix; "
-                "it is a consequence preview, not a safety certificate."
-            ),
-        )
+        try:
+            self._suspend_environment(branch)
+            self._restore_source_environment(request.source_env)
+            request.artifact_path.parent.mkdir(parents=True, exist_ok=True)
+            imageio.mimwrite(request.artifact_path, frames, fps=request.fps)
+            result = PreviewResult(
+                model_key=self.key,
+                prediction_kind="simulator_counterfactual",
+                action_schema=world_model_registry.ROBOCASA_ACTION_SCHEMA,
+                previewed_steps=len(frames) - 1,
+                duration_ms=round((time.perf_counter() - started) * 1000.0, 2),
+                artifact_path=str(request.artifact_path),
+                live_state_sha256_before=live_hash_before,
+                live_state_sha256_after=live_hash_after,
+                live_state_unchanged=unchanged,
+                predicted_state_sha256=predicted_hash,
+                branch_success=branch_success,
+                branch_terminated=branch_terminated,
+                caveat=(
+                    "Ground-truth MuJoCo branch for this simulator state and action "
+                    "prefix; it is a consequence preview, not a safety certificate."
+                ),
+            )
+            return result
+        except Exception:
+            self.close()
+            raise
 
     @staticmethod
     def _branch_observation(branch: Any) -> dict:
@@ -259,6 +295,9 @@ def create_world_model_plugin(
     create_environment: Callable[[str, str, int], Any],
     render_frames: Callable[..., tuple[np.ndarray, ...]],
     step_environment: Callable[[Any, np.ndarray], tuple],
+    resume_environment: Callable[[Any], None] | None = None,
+    suspend_environment: Callable[[Any], None] | None = None,
+    restore_source_environment: Callable[[Any], None] | None = None,
 ) -> WorldModelPlugin | None:
     spec = world_model_registry.require_world_model("robocasa", key)
     if spec.key == "none":
@@ -268,5 +307,8 @@ def create_world_model_plugin(
             create_environment=create_environment,
             render_frames=render_frames,
             step_environment=step_environment,
+            resume_environment=resume_environment,
+            suspend_environment=suspend_environment,
+            restore_source_environment=restore_source_environment,
         )
     raise ValueError(f"No runtime plugin is implemented for {spec.key!r}")

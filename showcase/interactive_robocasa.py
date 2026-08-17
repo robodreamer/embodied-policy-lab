@@ -138,6 +138,9 @@ def run(args: Args) -> None:
         create_environment=core.create_environment,
         render_frames=core.render_viewer_frames,
         step_environment=core.step_environment,
+        resume_environment=core.resume_environment_renderer,
+        suspend_environment=core.suspend_environment_renderer,
+        restore_source_environment=core.restore_environment_renderer,
     )
     compare_world_model = bool(args.compare_world_model and world_model is not None)
 
@@ -157,6 +160,9 @@ def run(args: Args) -> None:
             create_environment=core.create_environment,
             render_frames=core.render_viewer_frames,
             step_environment=core.step_environment,
+            resume_environment=core.resume_environment_renderer,
+            suspend_environment=core.suspend_environment_renderer,
+            restore_source_environment=core.restore_environment_renderer,
         )
 
     current_task_id = selected_task_ids[0]
@@ -515,6 +521,8 @@ def run(args: Args) -> None:
                     observation, _ = core.reset_environment_pair(
                         env, preview_env, args.seed
                     )
+                    core.suspend_environment_renderer(preview_env)
+                    core.restore_environment_renderer(env)
                 canonical_prompt = str(observation["annotation.human.task_description"])
                 camera_height, camera_width = observation[
                     core.CAMERA_KEYS[0]

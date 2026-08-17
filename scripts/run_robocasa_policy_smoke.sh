@@ -61,7 +61,7 @@ fi
 echo "Starting local RoboCasa π0.5 policy server..."
 setsid env \
   OPENPI_DATA_HOME="$PROJECT_DIR/cache/robocasa-openpi" \
-  XLA_PYTHON_CLIENT_MEM_FRACTION="${XLA_PYTHON_CLIENT_MEM_FRACTION:-0.75}" \
+  XLA_PYTHON_CLIENT_MEM_FRACTION="${XLA_PYTHON_CLIENT_MEM_FRACTION:-0.70}" \
   "$PYTHON" "$PROJECT_DIR/showcase/serve_robocasa_policy.py" \
   --port "$PORT" \
   --config "$CONFIG" \

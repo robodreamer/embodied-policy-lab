@@ -7,7 +7,15 @@ BACKEND="${BACKEND:-libero}"
 MODEL="${MODEL:-pi05}"
 PORT="${POLICY_PORT:-${PI05_PORT:-8000}}"
 
-export XLA_PYTHON_CLIENT_MEM_FRACTION="${XLA_PYTHON_CLIENT_MEM_FRACTION:-0.75}"
+if [[ "$BACKEND/$MODEL" == "robocasa/pi05" ]]; then
+  # Leave headroom for RoboCasa's EGL presentation context and cuBLAS startup.
+  # JAX's former 0.75 default could leave the 24 GB validation GPU effectively
+  # full before the first jitted inference initialized its BLAS handle.
+  DEFAULT_XLA_MEM_FRACTION=0.70
+else
+  DEFAULT_XLA_MEM_FRACTION=0.75
+fi
+export XLA_PYTHON_CLIENT_MEM_FRACTION="${XLA_PYTHON_CLIENT_MEM_FRACTION:-$DEFAULT_XLA_MEM_FRACTION}"
 
 case "$BACKEND" in
   libero)

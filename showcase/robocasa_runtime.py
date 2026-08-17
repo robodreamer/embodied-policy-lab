@@ -8,6 +8,7 @@ repository.
 from __future__ import annotations
 
 import datetime
+import gc
 import json
 import os
 import pathlib
@@ -17,10 +18,11 @@ import re
 import gymnasium as gym
 import numpy as np
 import robocasa  # noqa: F401 - importing registers robocasa/* Gym environments
-from PIL import Image, ImageOps
+from PIL import Image
 from robocasa.utils.dataset_registry import TASK_SET_REGISTRY
 from robocasa.utils.dataset_registry_utils import get_task_horizon
 from robocasa.utils.env_utils import convert_action
+from robosuite.utils.binding_utils import MjRenderContextOffscreen
 
 
 CAMERA_KEYS = (
@@ -84,6 +86,10 @@ def parse_task_ids(raw: str, count: int) -> list[int]:
 def create_environment(task_name: str, split: str, seed: int):
     if split not in ("pretrain", "target"):
         raise ValueError("RoboCasa split must be 'pretrain' or 'target'")
+    # RoboCasa samples fixtures, layouts, and textures during construction using
+    # process-global NumPy and Python RNGs before Gym's reset seed takes effect.
+    np.random.seed(seed)
+    random.seed(seed)
     return gym.make(
         f"robocasa/{task_name}",
         split=split,
@@ -178,26 +184,65 @@ def observation_from_environment(env) -> dict:
     return wrapper.get_observation(raw)
 
 
+def suspend_environment_renderer(env) -> None:
+    """Release a branch EGL context so it cannot contaminate live rendering."""
+    sim = env.unwrapped.env.sim
+    context = sim._render_context_offscreen
+    if context is None:
+        return
+    sim._render_context_offscreen = None
+    del context
+    gc.collect()
+
+
+def resume_environment_renderer(env) -> None:
+    """Recreate an offscreen context immediately before branch prediction."""
+    inner = env.unwrapped.env
+    if inner.sim._render_context_offscreen is None:
+        MjRenderContextOffscreen(
+            inner.sim,
+            device_id=inner.render_gpu_device_id,
+        )
+
+
+def restore_environment_renderer(env) -> None:
+    """Rebuild the live context after another MuJoCo model used EGL.
+
+    RoboSuite's per-simulation render contexts share one process-level EGL
+    display. Creating or destroying the branch context can leave the existing
+    live context with stale framebuffer resources, producing duplicate cameras
+    or corrupted colors even though the correct context is made current.
+    """
+    suspend_environment_renderer(env)
+    resume_environment_renderer(env)
+
+
 def render_viewer_frames(
     env, width: int, height: int, *, observation: dict | None = None
 ) -> tuple[np.ndarray, ...]:
-    """Fill dashboard frames from RoboCasa's distinct mapped cameras.
+    """Render full-resolution, correctly oriented dashboard cameras.
 
-    The mapped observations already have the correct orientation and do not
-    share MuJoCo's presentation framebuffer. ``ImageOps.fit`` scales and
-    center-crops each square observation to the requested dashboard aspect ratio
-    instead of letterboxing it into a smaller image.
+    Results are copied immediately because MuJoCo reuses the offscreen buffer.
+    Counterfactual render contexts are suspended outside their prediction
+    window, so these live renders retain the correct camera and color state.
     """
+    del observation  # Kept in the signature for branch/live call-site symmetry.
     if width < 1 or height < 1:
         raise ValueError("Viewer width and height must be positive")
-    if observation is None:
-        observation = observation_from_environment(env)
-    frames = []
-    for key in CAMERA_KEYS[:2]:
-        source = Image.fromarray(np.asarray(observation[key], dtype=np.uint8))
-        fitted = ImageOps.fit(source, (width, height), Image.Resampling.LANCZOS)
-        frames.append(np.asarray(fitted))
-    return tuple(frames)
+    sim = env.unwrapped.env.sim
+    return tuple(
+        np.ascontiguousarray(
+            np.array(
+                sim.render(camera_name=camera_name, width=width, height=height),
+                dtype=np.uint8,
+                copy=True,
+            )[::-1]
+        )
+        for camera_name in (
+            "robot0_agentview_left",
+            "robot0_eye_in_hand",
+        )
+    )
 
 
 def validate_action_chunk(value) -> np.ndarray:
