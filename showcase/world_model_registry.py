@@ -49,7 +49,8 @@ WORLD_MODELS = {
         available=True,
         description=(
             "Clone the current MuJoCo state, execute the proposed prefix in the "
-            "clone, and leave the live episode untouched until approval."
+            "clone, execute the same prefix in the live episode, then reveal a "
+            "side-by-side prediction comparison."
         ),
     ),
     "dino-wm-droid": WorldModelSpec(

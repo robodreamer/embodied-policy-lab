@@ -4,9 +4,11 @@
 
 - Keep policy and world-model selection independent.
 - Use a paired RoboCasa environment as a non-destructive counterfactual branch.
-- Pause before execution, show the predicted prefix, and require explicit
-  approval in interactive mode.
-- Save separate policy, preview, and executed-rollout evidence.
+- Keep comparison opt-in and never make it an execution gate.
+- Execute the real action prefix normally, then reveal the matching prediction
+  and actual clips side by side.
+- Save separate policy, prediction, actual-prefix, and rollout evidence with
+  predicted/actual final-state hashes.
 - Preserve π0.5 and GR00T N1.5 behind their existing policy plugins.
 
 ## Learned-model sequence

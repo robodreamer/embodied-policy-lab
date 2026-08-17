@@ -34,7 +34,8 @@ class Args:
     model: str = "pi05"
     world_model: str = "robocasa-sim"
     preview_steps: int = 5
-    preview_approval: str = "manual"
+    preview_approval: str = "auto"  # Legacy CLI field; comparisons never gate execution.
+    compare_world_model: bool = False
     host: str = "127.0.0.1"
     port: int = 8000
     resize_size: int = 224
@@ -98,8 +99,6 @@ def run(args: Args) -> None:
         raise ValueError("preview_steps must be positive")
     if args.preview_approval not in ("manual", "auto"):
         raise ValueError("preview_approval must be manual or auto")
-    if not args.interactive and args.preview_approval == "manual":
-        args.preview_approval = "auto"
     if args.viewer_width < 1 or args.viewer_height < 1:
         raise ValueError("viewer_width and viewer_height must be positive")
     if args.viewer_fps <= 0:
@@ -140,13 +139,10 @@ def run(args: Args) -> None:
         render_frames=core.render_viewer_frames,
         step_environment=core.step_environment,
     )
+    compare_world_model = bool(args.compare_world_model and world_model is not None)
 
     def execution_prefix_steps() -> int:
-        return (
-            args.replan_steps
-            if world_model is None
-            else min(args.replan_steps, args.preview_steps)
-        )
+        return args.replan_steps
 
     def select_world_model(key: str) -> None:
         nonlocal active_world_model, world_model
@@ -202,10 +198,12 @@ def run(args: Args) -> None:
             "world_model_description": active_world_model.description,
             "available_world_models": world_model_registry.catalog("robocasa"),
             "preview_steps": args.preview_steps,
-            "preview_approval": args.preview_approval,
-            "preview_status": "disabled"
-            if world_model is None
-            else "waiting_for_action_chunk",
+            "preview_approval": "post_execution_comparison",
+            "compare_world_model": compare_world_model,
+            "comparison_status": "waiting_for_action_chunk"
+            if compare_world_model
+            else "disabled",
+            "preview_status": "disabled",
             "preview_count": 0,
             "network_audit": args.network_audit,
             "suite": args.task_set_name,
@@ -266,7 +264,9 @@ def run(args: Args) -> None:
 
     last_viewer_frame_at = 0.0
 
-    def publish_viewer_frames(env, *, force: bool = False) -> None:
+    def publish_viewer_frames(
+        env, observation: dict, *, force: bool = False
+    ) -> None:
         nonlocal last_viewer_frame_at
         now = time.perf_counter()
         if not force and now - last_viewer_frame_at < 1.0 / args.viewer_fps:
@@ -275,6 +275,7 @@ def run(args: Args) -> None:
             env,
             width=args.viewer_width,
             height=args.viewer_height,
+            observation=observation,
         )
         state.frames(external, wrist)
         last_viewer_frame_at = now
@@ -285,7 +286,7 @@ def run(args: Args) -> None:
         try:
             observation, _ = env.reset()
             canonical = str(observation["annotation.human.task_description"])
-            publish_viewer_frames(env, force=True)
+            publish_viewer_frames(env, observation, force=True)
         finally:
             env.close()
         set_catalog_prompt(task_id, canonical)
@@ -333,21 +334,50 @@ def run(args: Args) -> None:
         evaluation_mode = requested_evaluation
 
     def apply_world_model(command: dict) -> None:
+        nonlocal compare_world_model
         select_world_model(str(command.get("world_model", "")))
+        if world_model is None:
+            compare_world_model = False
         state.update(
             world_model=active_world_model.key,
             world_model_display_name=active_world_model.display_name,
             world_model_runtime=active_world_model.runtime,
             world_model_prediction_kind=active_world_model.prediction_kind,
             world_model_description=active_world_model.description,
-            preview_status="disabled"
-            if world_model is None
-            else "waiting_for_action_chunk",
+            compare_world_model=compare_world_model,
+            comparison_status="waiting_for_action_chunk"
+            if compare_world_model
+            else "disabled",
+            preview_status="disabled",
             preview_result=None,
             preview_video_url=None,
+            actual_video_url=None,
             replan_steps=execution_prefix_steps(),
             command_ack=command.get("id"),
             command_message=f"World model switched to {active_world_model.display_name}",
+            control_error=None,
+        )
+
+    def apply_world_model_comparison(command: dict) -> None:
+        nonlocal compare_world_model
+        enabled = bool(command.get("enabled", False))
+        if enabled and world_model is None:
+            raise ValueError("Select a world model before enabling comparison")
+        compare_world_model = enabled
+        state.update(
+            compare_world_model=compare_world_model,
+            comparison_status="waiting_for_action_chunk"
+            if compare_world_model
+            else "disabled",
+            preview_result=None,
+            preview_video_url=None,
+            actual_video_url=None,
+            command_ack=command.get("id"),
+            command_message=(
+                "World-model comparison enabled for the next rollout"
+                if compare_world_model
+                else "World-model comparison disabled; policy will execute normally"
+            ),
             control_error=None,
         )
 
@@ -438,6 +468,11 @@ def run(args: Args) -> None:
                         apply_world_model(command)
                     except ValueError as error:
                         state.update(control_error=str(error))
+                elif action == "set_world_model_comparison":
+                    try:
+                        apply_world_model_comparison(command)
+                    except ValueError as error:
+                        state.update(control_error=str(error))
                 elif action in ("start", "reset", "start_rollout"):
                     if action == "start_rollout":
                         try:
@@ -454,7 +489,9 @@ def run(args: Args) -> None:
         while not should_stop:
             attempt_task_id = current_task_id
             task_name = names[attempt_task_id]
-            if world_model is None:
+            comparison_active = compare_world_model and world_model is not None
+            preview_env = None
+            if not comparison_active:
                 env = core.create_environment(task_name, args.split, args.seed)
             else:
                 env, preview_env = core.create_environment_pair(
@@ -467,7 +504,12 @@ def run(args: Args) -> None:
                     seed=args.seed,
                 )
             try:
-                observation, _ = env.reset()
+                if preview_env is None:
+                    observation, _ = env.reset(seed=args.seed)
+                else:
+                    observation, _ = core.reset_environment_pair(
+                        env, preview_env, args.seed
+                    )
                 canonical_prompt = str(observation["annotation.human.task_description"])
                 set_catalog_prompt(attempt_task_id, canonical_prompt)
                 active_prompt = prompt_override or canonical_prompt
@@ -479,6 +521,7 @@ def run(args: Args) -> None:
                 replay_images = [np.ascontiguousarray(env.render())]
                 prompt_timeline: list[dict] = []
                 preview_history: list[dict] = []
+                pending_comparison = None
                 attempt_preview_count = 0
                 attempt_request_count = 0
                 first_action_chunk_sha256 = None
@@ -489,7 +532,7 @@ def run(args: Args) -> None:
                 step = 0
                 attempt_number += 1
                 attempt_started = time.perf_counter()
-                publish_viewer_frames(env, force=True)
+                publish_viewer_frames(env, observation, force=True)
 
                 state.update(
                     phase="running",
@@ -510,11 +553,14 @@ def run(args: Args) -> None:
                     last_action_chunk=[],
                     current_action=[],
                     inference_latency_ms=None,
-                    preview_status="disabled"
-                    if world_model is None
-                    else "waiting_for_action_chunk",
+                    compare_world_model=comparison_active,
+                    comparison_status="waiting_for_action_chunk"
+                    if comparison_active
+                    else "disabled",
+                    preview_status="disabled",
                     preview_result=None,
                     preview_video_url=None,
+                    actual_video_url=None,
                     command_message=f"Running attempt {attempt_number}",
                     control_error=None,
                 )
@@ -553,6 +599,15 @@ def run(args: Args) -> None:
                                 state.update(control_error="Invalid evaluation mode")
                                 continue
                             evaluation_mode = requested_evaluation
+                            if pending_comparison is not None:
+                                pending_comparison = None
+                                state.update(
+                                    comparison_status="waiting_for_action_chunk",
+                                    preview_status="discarded_after_replan",
+                                    preview_result=None,
+                                    preview_video_url=None,
+                                    actual_video_url=None,
+                                )
                             action_plan.clear()
                             state.update(
                                 prompt=active_prompt,
@@ -567,6 +622,14 @@ def run(args: Args) -> None:
                                 control_error=(
                                     "Pause between rollouts to switch the world model; "
                                     "the current live/preview environment pair is fixed."
+                                ),
+                            )
+                        elif action == "set_world_model_comparison":
+                            state.update(
+                                command_ack=command.get("id"),
+                                control_error=(
+                                    "Change world-model comparison between rollouts; "
+                                    "the current environment configuration is fixed."
                                 ),
                             )
                         elif action in ("reset", "set_task", "start_rollout"):
@@ -683,19 +746,19 @@ def run(args: Args) -> None:
                             last_inference_audit=audit_event,
                         )
 
-                        if world_model is not None:
+                        if comparison_active:
                             attempt_preview_count += 1
                             preview_number = len(preview_history) + 1
                             preview_path = preview_dir / (
                                 f"attempt_{attempt_number:03d}_step_{step:05d}_"
-                                f"preview_{preview_number:03d}.mp4"
+                                f"prediction_{preview_number:03d}.mp4"
                             )
                             state.update(
-                                phase="predicting_preview",
-                                preview_status="predicting",
+                                comparison_status="predicting",
                                 command_message=(
-                                    f"Previewing {min(args.preview_steps, len(action_chunk))} "
-                                    f"actions with {active_world_model.display_name}"
+                                    f"Computing a hidden {approved_prefix_steps}-step "
+                                    f"prediction with {active_world_model.display_name}; "
+                                    "the policy will execute immediately afterward"
                                 ),
                             )
                             preview_result = world_model.preview(
@@ -705,15 +768,13 @@ def run(args: Args) -> None:
                                     split=args.split,
                                     seed=args.seed,
                                     action_chunk=action_chunk,
-                                    preview_steps=args.preview_steps,
+                                    preview_steps=approved_prefix_steps,
                                     width=args.viewer_width,
                                     height=args.viewer_height,
                                     fps=args.viewer_fps,
                                     artifact_path=preview_path,
                                 )
                             )
-                            latest_preview = preview_dir / "latest.mp4"
-                            shutil.copyfile(preview_path, latest_preview)
                             preview_event = {
                                 "created_at": core.timestamp(),
                                 "attempt": attempt_number,
@@ -723,81 +784,36 @@ def run(args: Args) -> None:
                                 "execution_prefix_steps": approved_prefix_steps,
                                 **preview_result.as_dict(),
                             }
-                            preview_history.append(preview_event)
-                            with preview_audit_path.open("a", encoding="utf-8") as stream:
-                                stream.write(json.dumps(preview_event) + "\n")
-                            manual_approval = (
-                                args.interactive and args.preview_approval == "manual"
-                            )
+                            actual_start = core.render_viewer_frames(
+                                env,
+                                width=args.viewer_width,
+                                height=args.viewer_height,
+                                observation=observation,
+                            )[0]
+                            pending_comparison = {
+                                "number": preview_number,
+                                "prediction_path": preview_path,
+                                "actual_path": preview_dir
+                                / (
+                                    f"attempt_{attempt_number:03d}_step_{step:05d}_"
+                                    f"actual_{preview_number:03d}.mp4"
+                                ),
+                                "event": preview_event,
+                                "predicted_state": world_model.predicted_state(),
+                                "actual_frames": [actual_start],
+                                "actual_started": time.perf_counter(),
+                            }
                             state.update(
-                                phase="awaiting_preview_approval"
-                                if manual_approval
-                                else "running",
-                                preview_status="awaiting_approval"
-                                if manual_approval
-                                else "auto_approved",
-                                preview_result=preview_event,
-                                preview_history=preview_history,
-                                preview_count=sum(
-                                    len(item.get("preview_history", []))
-                                    for item in history
-                                )
-                                + len(preview_history),
-                                preview_video_url=(
-                                    f"/previews/latest.mp4?v={attempt_number}-{preview_number}"
-                                ),
+                                comparison_status="executing_actual",
+                                preview_status="hidden_until_actual_complete",
+                                preview_result=None,
+                                preview_video_url=None,
+                                actual_video_url=None,
                                 command_message=(
-                                    "Preview ready — inspect it, then execute or reject"
-                                    if manual_approval
-                                    else "Preview recorded; executing the proposed prefix"
+                                    f"Prediction captured; executing the real "
+                                    f"{approved_prefix_steps}-step policy prefix"
                                 ),
                             )
-
-                            if manual_approval:
-                                while not aborted:
-                                    preview_command = inbox.read()
-                                    if not preview_command:
-                                        time.sleep(0.1)
-                                        continue
-                                    preview_action = preview_command.get("action")
-                                    if preview_action == "approve_preview":
-                                        state.update(
-                                            phase="running",
-                                            preview_status="approved",
-                                            command_ack=preview_command.get("id"),
-                                            command_message=(
-                                                f"Executing {approved_prefix_steps} approved actions"
-                                            ),
-                                        )
-                                        break
-                                    if preview_action == "reject_preview":
-                                        aborted = True
-                                        abort_reason = "preview_rejected"
-                                        state.update(
-                                            preview_status="rejected",
-                                            command_ack=preview_command.get("id"),
-                                            command_message=(
-                                                "Preview rejected; live scene was not advanced"
-                                            ),
-                                        )
-                                        break
-                                    if preview_action == "stop":
-                                        should_stop = True
-                                        aborted = True
-                                        abort_reason = "stopped"
-                                        state.update(
-                                            command_ack=preview_command.get("id")
-                                        )
-                                        break
-                                    state.update(
-                                        command_ack=preview_command.get("id"),
-                                        control_error=(
-                                            "A preview is pending. Execute or reject it before "
-                                            "changing the rollout."
-                                        ),
-                                    )
-                            if aborted:
-                                break
 
                         action_plan.extend(action_chunk[:approved_prefix_steps])
 
@@ -811,7 +827,80 @@ def run(args: Args) -> None:
                     observation, _, _, _, info = core.step_environment(
                         env, current_action
                     )
-                    publish_viewer_frames(env)
+                    publish_viewer_frames(env, observation)
+                    if pending_comparison is not None:
+                        actual_frame = core.render_viewer_frames(
+                            env,
+                            width=args.viewer_width,
+                            height=args.viewer_height,
+                            observation=observation,
+                        )[0]
+                        pending_comparison["actual_frames"].append(actual_frame)
+                        if not action_plan:
+                            actual_path = pending_comparison["actual_path"]
+                            imageio.mimwrite(
+                                actual_path,
+                                pending_comparison["actual_frames"],
+                                fps=args.viewer_fps,
+                            )
+                            latest_prediction = preview_dir / "latest_prediction.mp4"
+                            latest_actual = preview_dir / "latest_actual.mp4"
+                            shutil.copyfile(
+                                pending_comparison["prediction_path"], latest_prediction
+                            )
+                            shutil.copyfile(actual_path, latest_actual)
+                            comparison_event = dict(pending_comparison["event"])
+                            actual_state = env.unwrapped.env.sim.get_state()
+                            actual_hash = world_model_plugins.state_sha256(actual_state)
+                            state_comparison = world_model_plugins.compare_states(
+                                pending_comparison["predicted_state"], actual_state
+                            )
+                            comparison_event.update(
+                                actual_artifact_path=str(actual_path),
+                                actual_state_sha256=actual_hash,
+                                predicted_matches_actual=state_comparison[
+                                    "within_tolerance"
+                                ],
+                                state_comparison=state_comparison,
+                                actual_execution_duration_ms=round(
+                                    (
+                                        time.perf_counter()
+                                        - pending_comparison["actual_started"]
+                                    )
+                                    * 1000.0,
+                                    2,
+                                ),
+                                revealed_at=core.timestamp(),
+                            )
+                            preview_history.append(comparison_event)
+                            with preview_audit_path.open(
+                                "a", encoding="utf-8"
+                            ) as stream:
+                                stream.write(json.dumps(comparison_event) + "\n")
+                            comparison_number = pending_comparison["number"]
+                            state.update(
+                                comparison_status="ready",
+                                preview_status="revealed_after_actual_execution",
+                                preview_result=comparison_event,
+                                preview_history=preview_history,
+                                preview_count=sum(
+                                    len(item.get("preview_history", []))
+                                    for item in history
+                                )
+                                + len(preview_history),
+                                preview_video_url=(
+                                    "/previews/latest_prediction.mp4"
+                                    f"?v={attempt_number}-{comparison_number}"
+                                ),
+                                actual_video_url=(
+                                    "/previews/latest_actual.mp4"
+                                    f"?v={attempt_number}-{comparison_number}"
+                                ),
+                                command_message=(
+                                    "Actual prefix complete; comparison is now visible"
+                                ),
+                            )
+                            pending_comparison = None
                     selected_goal_reached = selected_goal_reached or bool(
                         info.get("success", False)
                     )
@@ -821,7 +910,7 @@ def run(args: Args) -> None:
                     if args.realtime_delay_ms > 0:
                         time.sleep(args.realtime_delay_ms / 1000.0)
                     if selected_goal_reached and attempt_evaluation_mode == "scored":
-                        publish_viewer_frames(env, force=True)
+                        publish_viewer_frames(env, observation, force=True)
                         break
             finally:
                 env.close()
@@ -882,6 +971,17 @@ def run(args: Args) -> None:
                     "video": str(output_video) if replay_images else None,
                 }
             )
+            final_state_values = {}
+            if pending_comparison is not None:
+                final_state_values = {
+                    "comparison_status": "waiting_for_action_chunk"
+                    if comparison_active
+                    else "disabled",
+                    "preview_status": "incomplete_actual_prefix_discarded",
+                    "preview_result": None,
+                    "preview_video_url": None,
+                    "actual_video_url": None,
+                }
             state.update(
                 phase="stopped" if should_stop else "awaiting_command",
                 task_success=selected_goal_reached
@@ -909,6 +1009,7 @@ def run(args: Args) -> None:
                     else "Ready to start another rollout"
                 ),
                 **_latency_fields(latencies),
+                **final_state_values,
             )
 
             if should_stop:
@@ -987,6 +1088,11 @@ def run(args: Args) -> None:
                 elif action == "set_world_model":
                     try:
                         apply_world_model(command)
+                    except ValueError as error:
+                        state.update(control_error=str(error))
+                elif action == "set_world_model_comparison":
+                    try:
+                        apply_world_model_comparison(command)
                     except ValueError as error:
                         state.update(control_error=str(error))
                 elif action == "start_rollout":

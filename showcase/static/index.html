@@ -104,9 +104,14 @@
             <p id="budgetHelp">Extended attempts get twice as many simulator actions. A scored rollout still ends early when the selected simulator detects success.</p>
           </div>
           <div id="worldModelSetting" class="rollout-setting">
-            <label for="worldModelSelect"><span><b>3C</b> Consequence preview</span><small>INDEPENDENT FROM THE SELECTED POLICY</small></label>
+            <label for="worldModelSelect"><span><b>3C</b> World-model comparison</span><small>INDEPENDENT FROM THE SELECTED POLICY</small></label>
             <select id="worldModelSelect"></select>
             <p id="worldModelHelp">Loading compatible world-model options…</p>
+            <label class="comparison-toggle" for="compareWorldModel">
+              <input id="compareWorldModel" type="checkbox">
+              <span>Compare prediction after real execution</span>
+            </label>
+            <p id="comparisonHelp">Off by default. The policy executes normally; a prediction is shown only after the matching real action prefix finishes.</p>
           </div>
         </div>
         <div class="control-actions">
@@ -118,22 +123,24 @@
       </section>
 
       <section id="previewCard" class="preview-card hidden" aria-live="polite">
-        <div class="card-label"><span>02</span> COUNTERFACTUAL ACTION PREVIEW · LIVE EPISODE REMAINS PAUSED</div>
+        <div class="card-label"><span>02</span> WORLD-MODEL PREDICTION VS COMPLETED EXECUTION</div>
         <div class="preview-layout">
-          <div class="preview-media">
-            <video id="previewVideo" controls muted loop playsinline></video>
-            <div id="previewPlaceholder">A preview appears after the policy proposes its next action chunk.</div>
+          <div class="comparison-media-grid">
+            <figure class="comparison-video">
+              <figcaption>ACTUAL POLICY EXECUTION</figcaption>
+              <video id="actualVideo" controls muted playsinline preload="metadata"></video>
+            </figure>
+            <figure class="comparison-video predicted">
+              <figcaption>WORLD-MODEL PREDICTION</figcaption>
+              <video id="previewVideo" controls muted playsinline preload="metadata"></video>
+            </figure>
           </div>
           <div class="preview-decision">
             <small id="previewKind">SELECTED WORLD MODEL</small>
-            <strong id="previewTitle">Waiting for a policy proposal</strong>
-            <p id="previewDescription">The world model predicts a consequence; the simulator still owns task success and the operator decides whether to execute.</p>
-            <code id="previewEvidence">No preview evidence recorded yet</code>
-            <div class="preview-actions">
-              <button id="approvePreview" class="primary-action">EXECUTE PREVIEWED PREFIX</button>
-              <button id="rejectPreview" class="danger">REJECT · KEEP LIVE STATE</button>
-            </div>
-            <p id="previewHelp">Both buttons become available after a manual preview completes.</p>
+            <strong id="previewTitle">Completed action-prefix comparison</strong>
+            <p id="previewDescription">Both clips start from the same simulator state and use the same actions. This card is revealed only after the real prefix completes.</p>
+            <code id="previewEvidence">No completed comparison recorded yet</code>
+            <p id="previewHelp">Playback does not loop automatically, so each clip represents one finite action prefix.</p>
           </div>
         </div>
       </section>

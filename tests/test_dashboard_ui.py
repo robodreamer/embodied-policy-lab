@@ -31,21 +31,25 @@ def test_dashboard_has_explicit_startup_indicator():
     assert '["waiting", "initializing", "preparing_task"]' in javascript
 
 
-def test_dashboard_separates_live_state_from_counterfactual_preview():
+def test_dashboard_reveals_opt_in_comparison_after_actual_execution():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
     javascript = (STATIC / "app.js").read_text(encoding="utf-8")
 
     for element_id in (
         "worldModelSelect",
+        "compareWorldModel",
+        "actualVideo",
         "previewVideo",
-        "approvePreview",
-        "rejectPreview",
     ):
         assert f'id="{element_id}"' in html
         assert f'$("{element_id}")' in javascript
     assert "LIVE SIMULATOR STATE" in html
-    assert 'action: "approve_preview"' in javascript
-    assert 'action: "reject_preview"' in javascript
+    assert 'action: "set_world_model_comparison"' in javascript
+    assert "ACTUAL POLICY EXECUTION" in html
+    assert "WORLD-MODEL PREDICTION" in html
+    assert "loop playsinline" not in html
+    assert 'action: "approve_preview"' not in javascript
+    assert 'action: "reject_preview"' not in javascript
 
 
 def test_dashboard_opens_before_heavy_policy_startup():

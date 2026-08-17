@@ -49,6 +49,14 @@ class FakeInner:
     def __init__(self, position=0.0):
         self.sim = FakeSim(position)
 
+    def _get_observations(self, force_update=False):
+        value = int(self.sim.state.qpos[0])
+        frame = np.full((6, 8, 3), value, dtype=np.uint8)
+        return {
+            "video.robot0_agentview_left": frame,
+            "video.robot0_eye_in_hand": frame,
+        }
+
 
 class FakeEnv:
     def __init__(self, position=0.0):
@@ -59,6 +67,9 @@ class FakeEnv:
     def reset(self):
         self.env.sim = FakeSim()
         return {}, {}
+
+    def get_observation(self, observation):
+        return observation
 
     def close(self):
         self.closed = True
@@ -73,14 +84,17 @@ def test_simulator_preview_steps_only_the_branch(monkeypatch, tmp_path: Path):
         branches.append(branch)
         return branch
 
-    def render_frames(env, *, width, height):
-        value = int(env.env.sim.state.qpos[0])
+    def render_frames(env, *, width, height, observation=None):
+        value = int(env.env.sim.state.qpos[0]) if observation is None else int(
+            observation["video.robot0_agentview_left"][0, 0, 0]
+        )
         return (np.full((height, width, 3), value, dtype=np.uint8),)
 
     def step_environment(env, action):
         env.env.sim.state.qpos[0] += float(action[0])
         env.env.sim.state.time += 1.0
-        return {}, 0.0, False, False, {"success": False}
+        observation = env.get_observation(env.env._get_observations(force_update=True))
+        return observation, 0.0, False, False, {"success": False}
 
     written = {}
     monkeypatch.setattr(
@@ -112,6 +126,13 @@ def test_simulator_preview_steps_only_the_branch(monkeypatch, tmp_path: Path):
     assert branches[0].env.sim.state.qpos.tolist() == [5.0]
     assert result.live_state_unchanged
     assert result.previewed_steps == 2
+    assert result.predicted_state_sha256 == world_model_plugins.environment_state_sha256(
+        branches[0]
+    )
+    comparison = world_model_plugins.compare_states(
+        plugin.predicted_state(), branches[0].env.sim.get_state()
+    )
+    assert comparison["within_tolerance"]
     assert written == {
         "path": tmp_path / "preview.mp4",
         "frame_count": 3,

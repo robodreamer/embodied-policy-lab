@@ -108,7 +108,7 @@ def main():
     previews = sorted(
         path
         for path in (session_dir / "previews").glob("*.mp4")
-        if path.name != "latest.mp4"
+        if not path.name.startswith("latest_") and path.name != "latest.mp4"
     )
     llm_events = local_llm_events(session_dir / "llm-generations.jsonl")
     inference_events = local_llm_events(session_dir / "inference-audit.jsonl")
@@ -179,7 +179,7 @@ def main():
 | Peak GPU temperature | {temperature:.0f} °C |
 | Local prompt generations | {llm_generation_count} |
 | Audited policy requests | {inference_audit_count} |
-| Counterfactual previews | {preview_audit_count} |
+| Completed prediction/actual comparisons | {preview_audit_count} |
 
 ## Local-inference network audit
 
@@ -200,10 +200,10 @@ with the local policy server over loopback.
 - `network-*`: raw network system-call traces
 - `client.log` and `server.log`: runtime logs
 - `videos/`: rollout MP4 files ({video_count})
-- `previews/`: counterfactual action-prefix MP4 files ({preview_count})
+- `previews/`: paired prediction and actual action-prefix MP4 files ({preview_count})
 - `llm-generations.jsonl`: local prompt-generation provenance ({llm_generation_count})
 - `inference-audit.jsonl`: prompt and action hashes for synchronous policy requests ({inference_audit_count})
-- `preview-audit.jsonl`: consequence metadata and live-state non-mutation hashes ({preview_audit_count})
+- `preview-audit.jsonl`: consequence metadata, non-mutation evidence, and predicted/actual state comparisons ({preview_audit_count})
 """.format(
         backend=summary["backend"],
         simulator=summary["simulator"],

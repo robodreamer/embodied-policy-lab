@@ -44,6 +44,7 @@ class PreviewResult:
     live_state_sha256_before: str
     live_state_sha256_after: str
     live_state_unchanged: bool
+    predicted_state_sha256: str
     branch_success: bool
     branch_terminated: bool
     caveat: str
@@ -58,12 +59,46 @@ class WorldModelPlugin(Protocol):
     def preview(self, request: PreviewRequest) -> PreviewResult: ...
 
 
-def _state_sha256(state: Any) -> str:
+def state_sha256(state: Any) -> str:
     digest = hashlib.sha256()
     digest.update(np.asarray(state.time, dtype=np.float64).tobytes())
     digest.update(np.asarray(state.qpos, dtype=np.float64).tobytes())
     digest.update(np.asarray(state.qvel, dtype=np.float64).tobytes())
     return digest.hexdigest()
+
+
+def environment_state_sha256(env: Any) -> str:
+    return state_sha256(env.unwrapped.env.sim.get_state())
+
+
+def compare_states(predicted: Any, actual: Any, *, atol: float = 1e-9) -> dict:
+    """Compare MuJoCo states without treating floating-point noise as drift."""
+    predicted_qpos = np.asarray(predicted.qpos, dtype=np.float64)
+    actual_qpos = np.asarray(actual.qpos, dtype=np.float64)
+    predicted_qvel = np.asarray(predicted.qvel, dtype=np.float64)
+    actual_qvel = np.asarray(actual.qvel, dtype=np.float64)
+    if predicted_qpos.shape != actual_qpos.shape or predicted_qvel.shape != actual_qvel.shape:
+        return {
+            "within_tolerance": False,
+            "absolute_tolerance": atol,
+            "shape_match": False,
+            "time_error": None,
+            "max_qpos_error": None,
+            "max_qvel_error": None,
+        }
+    time_error = abs(float(predicted.time) - float(actual.time))
+    qpos_error = float(np.max(np.abs(predicted_qpos - actual_qpos), initial=0.0))
+    qvel_error = float(np.max(np.abs(predicted_qvel - actual_qvel), initial=0.0))
+    return {
+        "within_tolerance": bool(
+            time_error <= atol and qpos_error <= atol and qvel_error <= atol
+        ),
+        "absolute_tolerance": atol,
+        "shape_match": True,
+        "time_error": time_error,
+        "max_qpos_error": qpos_error,
+        "max_qvel_error": qvel_error,
+    }
 
 
 class SimulatorCounterfactualPlugin:
@@ -87,12 +122,19 @@ class SimulatorCounterfactualPlugin:
         self._step_environment = step_environment
         self._branch = None
         self._branch_identity: tuple[str, str, int] | None = None
+        self._last_predicted_state = None
 
     def close(self) -> None:
         if self._branch is not None:
             self._branch.close()
             self._branch = None
             self._branch_identity = None
+        self._last_predicted_state = None
+
+    def predicted_state(self) -> Any:
+        if self._last_predicted_state is None:
+            raise RuntimeError("No simulator prediction has completed")
+        return copy.deepcopy(self._last_predicted_state)
 
     def attach_branch(
         self, branch: Any, *, task_name: str, split: str, seed: int
@@ -125,17 +167,13 @@ class SimulatorCounterfactualPlugin:
 
         live_sim = request.source_env.unwrapped.env.sim
         live_state = copy.deepcopy(live_sim.get_state())
-        live_hash_before = _state_sha256(live_state)
+        live_hash_before = state_sha256(live_state)
         branch = self._get_branch(request)
         frames: list[np.ndarray] = []
         branch_success = False
         branch_terminated = False
         started = time.perf_counter()
         try:
-            # Reset controller integrators and observable caches, then overwrite
-            # the physical state with the live state. Reusing the environment
-            # avoids rebuilding the MuJoCo model on every policy replan.
-            branch.reset()
             branch_sim = branch.unwrapped.env.sim
             branch_state = branch_sim.get_state()
             if (
@@ -149,18 +187,25 @@ class SimulatorCounterfactualPlugin:
                 )
             branch_sim.set_state(copy.deepcopy(live_state))
             branch_sim.forward()
+            branch_observation = self._branch_observation(branch)
             frames.append(
                 self._render_frames(
-                    branch, width=request.width, height=request.height
+                    branch,
+                    width=request.width,
+                    height=request.height,
+                    observation=branch_observation,
                 )[0]
             )
             for action in actions[:previewed_steps]:
-                _, _, terminated, truncated, info = self._step_environment(
+                branch_observation, _, terminated, truncated, info = self._step_environment(
                     branch, action
                 )
                 frames.append(
                     self._render_frames(
-                        branch, width=request.width, height=request.height
+                        branch,
+                        width=request.width,
+                        height=request.height,
+                        observation=branch_observation,
                     )[0]
                 )
                 branch_success = branch_success or bool(info.get("success", False))
@@ -173,7 +218,9 @@ class SimulatorCounterfactualPlugin:
             self.close()
             raise
 
-        live_hash_after = _state_sha256(live_sim.get_state())
+        self._last_predicted_state = copy.deepcopy(branch.unwrapped.env.sim.get_state())
+        predicted_hash = state_sha256(self._last_predicted_state)
+        live_hash_after = state_sha256(live_sim.get_state())
         unchanged = live_hash_before == live_hash_after
         if not unchanged:
             raise RuntimeError("Counterfactual preview changed the live MuJoCo state")
@@ -190,6 +237,7 @@ class SimulatorCounterfactualPlugin:
             live_state_sha256_before=live_hash_before,
             live_state_sha256_after=live_hash_after,
             live_state_unchanged=unchanged,
+            predicted_state_sha256=predicted_hash,
             branch_success=branch_success,
             branch_terminated=branch_terminated,
             caveat=(
@@ -197,6 +245,12 @@ class SimulatorCounterfactualPlugin:
                 "it is a consequence preview, not a safety certificate."
             ),
         )
+
+    @staticmethod
+    def _branch_observation(branch: Any) -> dict:
+        wrapper = branch.unwrapped
+        raw = wrapper.env._get_observations(force_update=True)
+        return wrapper.get_observation(raw)
 
 
 def create_world_model_plugin(

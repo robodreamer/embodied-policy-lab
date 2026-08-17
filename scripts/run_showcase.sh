@@ -16,8 +16,9 @@ Backend, model, and task options:
   --backend libero|robocasa       Simulator backend (default: libero)
   --model pi05|groot-n1.5         Local policy plugin (default: pi05)
   --world-model NAME              none or robocasa-sim (RoboCasa default)
-  --preview-steps COUNT           Proposed actions shown in each preview (default: 5)
-  --preview-approval MODE         manual or auto (default: manual interactively)
+  --preview-steps COUNT           Legacy option; comparison follows --replan-steps
+  --compare-world-model           Compare prediction after each real action prefix
+  --no-compare-world-model        Run normally without comparison (default)
   --task-suite NAME               LIBERO suite or RoboCasa task set
   --task-set NAME                 Alias for --task-suite
   --task-id ID                    Initial task interactively, or one batch task
@@ -59,7 +60,8 @@ BACKEND="${BACKEND:-libero}"
 MODEL="${MODEL:-pi05}"
 WORLD_MODEL="${WORLD_MODEL:-}"
 PREVIEW_STEPS="${PREVIEW_STEPS:-5}"
-PREVIEW_APPROVAL="${PREVIEW_APPROVAL:-manual}"
+PREVIEW_APPROVAL="${PREVIEW_APPROVAL:-auto}"
+COMPARE_WORLD_MODEL="${COMPARE_WORLD_MODEL:-0}"
 TASK_SUITE="${TASK_SUITE:-}"
 TASK_IDS="${TASK_IDS:-}"
 ROBOCASA_SPLIT="${ROBOCASA_SPLIT:-target}"
@@ -92,6 +94,8 @@ while [[ $# -gt 0 ]]; do
     --world-model) WORLD_MODEL="${2:?--world-model requires a value}"; shift 2 ;;
     --preview-steps) PREVIEW_STEPS="${2:?--preview-steps requires a value}"; shift 2 ;;
     --preview-approval) PREVIEW_APPROVAL="${2:?--preview-approval requires a value}"; shift 2 ;;
+    --compare-world-model) COMPARE_WORLD_MODEL=1; shift ;;
+    --no-compare-world-model) COMPARE_WORLD_MODEL=0; shift ;;
     --task-suite|--task-set) TASK_SUITE="${2:?$1 requires a value}"; shift 2 ;;
     --task-id|--task-ids) TASK_IDS="${2:?$1 requires a value}"; shift 2 ;;
     --split) ROBOCASA_SPLIT="${2:?--split requires a value}"; shift 2 ;;
@@ -215,8 +219,10 @@ if [[ "$PREVIEW_APPROVAL" != "manual" && "$PREVIEW_APPROVAL" != "auto" ]]; then
   echo "--preview-approval must be manual or auto." >&2
   exit 2
 fi
-if [[ "$INTERACTIVE" != "1" ]]; then
-  PREVIEW_APPROVAL="auto"
+PREVIEW_APPROVAL="auto"
+if [[ "$COMPARE_WORLD_MODEL" != "0" && "$COMPARE_WORLD_MODEL" != "1" ]]; then
+  echo "COMPARE_WORLD_MODEL must be 0 or 1." >&2
+  exit 2
 fi
 if [[ "$VIEWER_WIDTH" == "0" ]] || [[ "$VIEWER_HEIGHT" == "0" ]] || \
   [[ ! "$VIEWER_FPS" =~ ^[0-9]+([.][0-9]+)?$ ]] || \
@@ -250,6 +256,9 @@ case "$BACKEND/$WORLD_MODEL" in
     exit 2
     ;;
 esac
+if [[ "$WORLD_MODEL" == "none" ]]; then
+  COMPARE_WORLD_MODEL=0
+fi
 if [[ ! -x "$RUNTIME_PYTHON" ]] || [[ ! -x "$CLIENT_PYTHON" ]]; then
   if [[ "$MODEL" == "groot-n1.5" ]]; then
     echo "GR00T is not set up. Run ./scripts/setup_groot.sh first." >&2
@@ -350,7 +359,7 @@ wait_for_tcp_listener() {
   "$PROJECT_DIR" "$SESSION_DIR/state.json" "$BACKEND" "$MODEL" "$TASK_SUITE" \
   "$TASK_IDS" "$POLICY_PORT" "$INTERACTIVE" "$NETWORK_AUDIT" \
   "$VIEWER_WIDTH" "$VIEWER_HEIGHT" "$WORLD_MODEL" "$PREVIEW_STEPS" \
-  "$PREVIEW_APPROVAL" <<'PY'
+  "$PREVIEW_APPROVAL" "$COMPARE_WORLD_MODEL" <<'PY'
 import datetime
 import json
 import pathlib
@@ -366,6 +375,7 @@ viewer_width, viewer_height = map(int, sys.argv[10:12])
 world_model_key = sys.argv[12]
 preview_steps = int(sys.argv[13])
 preview_approval = sys.argv[14]
+compare_world_model = sys.argv[15] == "1"
 sys.path.insert(0, str(project_dir))
 
 from showcase import backend_registry
@@ -401,6 +411,8 @@ state = {
     "available_world_models": world_model_registry.catalog(backend),
     "preview_steps": preview_steps,
     "preview_approval": preview_approval,
+    "compare_world_model": compare_world_model,
+    "comparison_status": "initializing" if compare_world_model else "disabled",
     "suite": suite,
     "task_ids": task_ids,
     "task_id": task_id,
@@ -570,6 +582,11 @@ else
     --initial-evaluation-mode "$EVALUATION_MODE"
     --initial-rollout-budget-multiplier "$ROLLOUT_BUDGET_MULTIPLIER"
   )
+  if [[ "$COMPARE_WORLD_MODEL" == "1" ]]; then
+    CLIENT_COMMAND+=(--compare-world-model)
+  else
+    CLIENT_COMMAND+=(--no-compare-world-model)
+  fi
   if [[ "$INTERACTIVE" == "1" ]]; then
     CLIENT_COMMAND+=(--interactive --task-id "$TASK_IDS")
     if [[ "$AUTO_START" == "1" ]]; then

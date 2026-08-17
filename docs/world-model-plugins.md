@@ -1,4 +1,4 @@
-# World-model previews for robot policies
+# Post-execution world-model comparisons for robot policies
 
 The policy and world model are deliberately separate selections:
 
@@ -11,12 +11,14 @@ The policy and world model are deliberately separate selections:
 `robocasa-sim` is the runnable baseline. The launcher creates the live and
 counterfactual environments from the same construction RNG state, copies the
 current MuJoCo state into the counterfactual branch, and executes only the
-configured prefix there. The dashboard shows that video while the live episode
-is paused. It also records before/after live-state hashes in
-`preview-audit.jsonl`.
+configured action prefix there. The real policy prefix then executes normally.
+Only after those real actions finish does the dashboard reveal the prediction
+beside the recorded execution. It also records predicted/actual final-state
+hashes and before/after live-state hashes in `preview-audit.jsonl`.
 
 This is a consequence preview, not a safety certificate. RoboCasa still owns
-task success, and the operator chooses whether the previewed prefix is executed.
+task success. The world model observes and compares; it does not approve, reject,
+or gate policy execution.
 
 ## Run it
 
@@ -28,20 +30,22 @@ task success, and the operator chooses whether the previewed prefix is executed.
   --backend robocasa \
   --model pi05 \
   --world-model robocasa-sim \
-  --preview-steps 5 \
-  --preview-approval manual
+  --compare-world-model
 ```
 
-The browser workflow is **propose → preview → execute or reject**. World-model
-selection is available between rollouts, while the simulator camera remains
-visible. Choose `Direct execution (no preview)` to recover the previous flow.
-Batch runs use automatic approval but still save every preview and audit event.
+The browser checkbox is off by default. When enabled, the workflow is
+**propose → predict privately → execute the real prefix → reveal both clips**.
+The comparison length always matches `--replan-steps`. World-model selection and
+the checkbox are available between rollouts. Choose `Direct execution (no
+preview)` or leave comparison unchecked for ordinary policy execution.
 
 Artifacts are retained under the session directory:
 
-- `previews/*.mp4`: each counterfactual prefix plus `latest.mp4` for the UI;
-- `preview-audit.jsonl`: action hash, timing, branch outcome, and live-state
-  non-mutation evidence;
+- `previews/*prediction*.mp4` and `*actual*.mp4`: paired finite clips plus
+  `latest_prediction.mp4` and `latest_actual.mp4` for the UI;
+- `preview-audit.jsonl`: action hash, timing, branch outcome, live-state
+  non-mutation evidence, predicted/actual final-state hashes, and numerical
+  qpos/qvel error checked at an absolute tolerance of `1e-9`;
 - `inference-audit.jsonl`: the independent policy request/action record;
 - `videos/*.mp4`: actions that were actually executed in the live episode.
 

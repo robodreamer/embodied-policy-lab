@@ -11,6 +11,7 @@ import datetime
 import json
 import os
 import pathlib
+import random
 import re
 
 import gymnasium as gym
@@ -27,12 +28,6 @@ CAMERA_KEYS = (
     "video.robot0_eye_in_hand",
     "video.robot0_agentview_right",
 )
-VIEWER_CAMERA_NAMES = (
-    "robot0_agentview_left",
-    "robot0_eye_in_hand",
-)
-
-
 def timestamp() -> str:
     return datetime.datetime.now(datetime.timezone.utc).astimezone().isoformat()
 
@@ -102,22 +97,60 @@ def create_environment_pair(task_name: str, split: str, seed: int):
     Replaying the same NumPy RNG state is therefore required before a MuJoCo
     state can be copied safely between the two models.
     """
-    construction_state = np.random.get_state()
+    numpy_state = np.random.get_state()
+    python_state = random.getstate()
     live_env = None
     try:
         np.random.seed(seed)
+        random.seed(seed)
         live_env = create_environment(task_name, split, seed)
-        live_post_construction = np.random.get_state()
-        np.random.set_state(construction_state)
+        live_numpy_state = np.random.get_state()
+        live_python_state = random.getstate()
         np.random.seed(seed)
+        random.seed(seed)
         branch_env = create_environment(task_name, split, seed)
-        np.random.set_state(live_post_construction)
+        np.random.set_state(live_numpy_state)
+        random.setstate(live_python_state)
         return live_env, branch_env
     except Exception:
         if live_env is not None:
             live_env.close()
-        np.random.set_state(construction_state)
+        np.random.set_state(numpy_state)
+        random.setstate(python_state)
         raise
+
+
+def reset_environment_pair(live_env, branch_env, seed: int):
+    """Reset a paired environment with identical randomized scene choices."""
+    numpy_state = np.random.get_state()
+    python_state = random.getstate()
+    try:
+        np.random.seed(seed)
+        random.seed(seed)
+        live_observation, live_info = live_env.reset(seed=seed)
+        live_numpy_state = np.random.get_state()
+        live_python_state = random.getstate()
+        np.random.seed(seed)
+        random.seed(seed)
+        branch_env.reset(seed=seed)
+        np.random.set_state(live_numpy_state)
+        random.setstate(live_python_state)
+    except Exception:
+        np.random.set_state(numpy_state)
+        random.setstate(python_state)
+        raise
+
+    live_state = live_env.unwrapped.env.sim.get_state()
+    branch_state = branch_env.unwrapped.env.sim.get_state()
+    if (
+        np.asarray(live_state.qpos).shape != np.asarray(branch_state.qpos).shape
+        or np.asarray(live_state.qvel).shape != np.asarray(branch_state.qvel).shape
+    ):
+        raise ValueError(
+            "Paired RoboCasa resets produced different MuJoCo models; "
+            "counterfactual comparison cannot run safely"
+        )
+    return live_observation, live_info
 
 
 def robot_state_from_observation(observation: dict) -> np.ndarray:
@@ -136,26 +169,36 @@ def robot_state_from_observation(observation: dict) -> np.ndarray:
     return robot_state
 
 
-def render_viewer_frames(env, width: int, height: int) -> tuple[np.ndarray, ...]:
-    """Render presentation-quality views without changing policy observations.
+def observation_from_environment(env) -> dict:
+    """Read a mapped observation after directly synchronizing MuJoCo state."""
+    wrapper = env.unwrapped
+    raw = wrapper.env._get_observations(force_update=True)
+    return wrapper.get_observation(raw)
 
-    RoboCasa's Gym wrapper intentionally supplies square 256px observations to
-    the policy. Rendering the dashboard views directly from MuJoCo lets the UI
-    use a sharper widescreen image while leaving that policy contract intact.
+
+def render_viewer_frames(
+    env, width: int, height: int, *, observation: dict | None = None
+) -> tuple[np.ndarray, ...]:
+    """Build distinct, correctly oriented dashboard views from mapped cameras.
+
+    RoboCasa's Gym wrapper already applies the required vertical orientation
+    correction. Reading those mapped observations avoids the shared offscreen
+    render-buffer behavior that can make consecutive direct MuJoCo renders show
+    the same camera.
     """
     if width < 1 or height < 1:
         raise ValueError("Viewer width and height must be positive")
-    robocasa_env = env.unwrapped.env
-    return tuple(
-        np.ascontiguousarray(
-            robocasa_env.sim.render(
-                camera_name=camera_name,
-                width=width,
-                height=height,
-            )[::-1]
-        )
-        for camera_name in VIEWER_CAMERA_NAMES
-    )
+    if observation is None:
+        observation = observation_from_environment(env)
+
+    frames = []
+    for key in CAMERA_KEYS[:2]:
+        source = Image.fromarray(np.asarray(observation[key], dtype=np.uint8))
+        source.thumbnail((width, height), Image.Resampling.LANCZOS)
+        canvas = Image.new("RGB", (width, height), (5, 7, 5))
+        canvas.paste(source, ((width - source.width) // 2, (height - source.height) // 2))
+        frames.append(np.asarray(canvas))
+    return tuple(frames)
 
 
 def validate_action_chunk(value) -> np.ndarray:
