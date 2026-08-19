@@ -29,6 +29,133 @@ LIBERO evaluation path. Operationally it behaves like an action policy. The
 important experimental distinction is its training objective and world encoder,
 not a visible imagined rollout before every action.
 
+## How Fast-WAM produces actions
+
+The released Fast-WAM checkpoint used here does **not** generate several future
+videos and choose the action associated with the best one. Its normal inference
+path generates one continuous action chunk directly from the current cameras,
+language instruction, and robot state.
+
+During training, the model receives the clean current frame, future
+ground-truth frames, language, state, and demonstrated actions. The future
+video latents and action tokens have separate flow-matching losses:
+
+```text
+current frame -------------------+
+future ground-truth frames ------+-- video flow-matching loss
+language + robot state ----------+
+demonstrated action chunk -------+-- action flow-matching loss
+```
+
+The video objective forces the Wan2.2 video backbone to learn motion, contact,
+object persistence, and interaction structure. A structured attention mask is
+important to interpreting the result: action tokens can attend to the clean
+first-frame tokens, but cannot attend to future-video tokens. The first-frame
+tokens also cannot absorb future tokens. Future information therefore cannot
+leak into the action branch during training.
+
+The base checkpoint's inference path is:
+
+```text
+external + wrist cameras
+          |
+          v
+center crop, resize, concatenate to 224x448
+          |
+          v
+VAE encoding of the current frame only
+          |
+          v
+one video-DiT pass and cached per-layer visual K/V features
+          |
+          +---- T5 instruction embedding + normalized 8D state
+          |
+          v
+32x7 Gaussian action noise
+          |
+          v  ten action flow-matching steps
+one normalized 32x7 action chunk
+          |
+          v
+dataset-statistics denormalization and gripper conversion
+          |
+          v
+execute the first 10 actions, observe again, and replan
+```
+
+No future-video tokens are instantiated or denoised in `infer_action`. The
+fixed model seed of 42 makes identical inputs produce identical action samples
+in this experiment. Sampling one action trajectory from a learned conditional
+distribution is not action selection through planning.
+
+Specifically, Fast-WAM currently has no:
+
+- candidate set of action sequences;
+- predicted future rollout for each candidate;
+- reward, success, collision, or safety critic;
+- candidate ranking, tree search, or trajectory optimization.
+
+A true world-model model-predictive-control loop would instead propose multiple
+action sequences, predict the future resulting from each, score those futures,
+choose the highest-scoring sequence, execute a short prefix, and then replan
+from a new observation. This is a possible future experiment, not a behavior of
+the released base Fast-WAM policy.
+
+### Output contracts versus the local VLA profiles
+
+At their outer interfaces all three policies return continuous action chunks;
+the WAM/VLA distinction is not a special action datatype:
+
+| Local profile | Output | Generator | Representation conditioning the action generator |
+|---|---:|---|---|
+| Fast-WAM LIBERO | `32x7` | Ten-step action flow matching | Wan2.2 video DiT shaped by future-video co-training |
+| pi0.5 LIBERO | `10x7` | Ten-step action flow matching | PaliGemma-derived VLM shaped by heterogeneous semantic and robot co-training |
+| GR00T N1.5 RoboCasa | `16x12` | Action DiT / flow matching | Eagle VLM with FLARE future-latent alignment |
+
+Each Fast-WAM LIBERO step contains end-effector translation deltas, axis-angle
+rotation deltas, and one gripper value:
+
+```text
+delta-x, delta-y, delta-z,
+delta-rotation-x, delta-rotation-y, delta-rotation-z,
+gripper
+```
+
+The gripper output is converted from the training convention to LIBERO's
+convention, inverted, and sign-binarized after action denormalization.
+
+### What the paper is trying to establish
+
+The paper deliberately separates four cases:
+
+- **Fast-WAM:** future-video co-training, but current-frame-to-action inference;
+- **Fast-WAM-Joint:** future video and actions are denoised together;
+- **Fast-WAM-IDM:** a future video is generated first and actions are then
+  conditioned on its representation;
+- **without video co-training:** the same direct action interface without the
+  future-video training objective.
+
+Its reported LIBERO averages are 97.6% for Fast-WAM, 98.5% for Joint, 98.0%
+for IDM, and 93.5% without video co-training. The larger degradation from
+removing video co-training supports the paper's thesis: future prediction is a
+valuable representation-learning objective, while explicitly rendering a
+future at every control step provides much less benefit relative to its cost.
+
+This is evidence for temporal/video supervision as a useful training signal. It
+does not by itself prove that Fast-WAM performs explicit causal planning or has
+learned a general-purpose simulator. The repository's optional `infer_joint`
+path can expose predicted frames, but the base model's structured mask prevents
+those generated future tokens from selecting or ranking the base action. The
+Joint and IDM variants are separate experimental architectures.
+
+Relevant implementation paths:
+
+- [`../showcase/fastwam_policy.py`](../showcase/fastwam_policy.py): exact local
+  preprocessing, current-frame encoding, action generation, denormalization,
+  and staging behavior;
+- [`../../../upstream-fastwam/src/fastwam/models/wan22/fastwam.py`](../../../upstream-fastwam/src/fastwam/models/wan22/fastwam.py): pinned upstream
+  training mask plus `infer_action` and `infer_joint` implementations.
+
 ## Evidence measured on this workstation
 
 | Measurement | Fast-WAM / LIBERO | pi0.5 / LIBERO | GR00T N1.5 / RoboCasa |
