@@ -112,12 +112,14 @@ def main():
     )
     llm_events = local_llm_events(session_dir / "llm-generations.jsonl")
     inference_events = local_llm_events(session_dir / "inference-audit.jsonl")
+    policy_inference_artifacts = sorted(
+        (session_dir / "policy-inference").glob("request-*.json")
+    )
     preview_events = local_llm_events(session_dir / "preview-audit.jsonl")
     completed_preview_events = [
         event
         for event in preview_events
-        if event.get("status") == "completed"
-        or "predicted_matches_actual" in event
+        if event.get("status") == "completed" or "predicted_matches_actual" in event
     ]
     failed_preview_events = [
         event for event in preview_events if event.get("status") == "failed"
@@ -154,6 +156,9 @@ def main():
         "prompt_stats": state.get("prompt_stats", {}),
         "local_llm_generations": llm_events,
         "inference_audit_events": len(inference_events),
+        "policy_inference_artifacts": [
+            path.name for path in policy_inference_artifacts
+        ],
         "preview_audit_events": len(preview_events),
         "completed_prediction_comparisons": len(completed_preview_events),
         "prediction_failures": len(failed_preview_events),
@@ -215,6 +220,7 @@ with the local policy server over loopback.
 - `previews/`: predictor/actual media, including retained discarded predictions ({preview_count})
 - `llm-generations.jsonl`: local prompt-generation provenance ({llm_generation_count})
 - `inference-audit.jsonl`: prompt and action hashes for synchronous policy requests ({inference_audit_count})
+- `policy-inference/`: exact Fast-WAM inputs, actions, and staging metrics ({policy_inference_count})
 - `preview-audit.jsonl`: completed comparisons and non-gating predictor failures ({preview_event_count} total events)
 """.format(
         backend=summary["backend"],
@@ -240,6 +246,7 @@ with the local policy server over loopback.
         temperature=gpu["max_temperature_c"],
         llm_generation_count=len(llm_events),
         inference_audit_count=len(inference_events),
+        policy_inference_count=len(policy_inference_artifacts),
         preview_audit_count=len(completed_preview_events),
         preview_failure_count=len(failed_preview_events),
         preview_event_count=len(preview_events),

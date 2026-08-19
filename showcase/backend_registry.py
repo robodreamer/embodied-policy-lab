@@ -81,6 +81,13 @@ POLICIES = {
         transport="zeromq",
         runtime_directory="upstream-robocasa-groot",
     ),
+    "fastwam": PolicySpec(
+        key="fastwam",
+        display_name="Fast-WAM",
+        runtime="local PyTorch/CUDA · staged 24 GB profile",
+        transport="http",
+        runtime_directory="../upstream-fastwam",
+    ),
 }
 
 
@@ -92,6 +99,14 @@ PROFILES = {
         checkpoint="gs://openpi-assets/checkpoints/pi05_libero",
         action_horizon=10,
         default_replan_steps=5,
+    ),
+    ("libero", "fastwam"): ProfileSpec(
+        backend="libero",
+        policy="fastwam",
+        model_name="fastwam_libero_uncond_2cam224",
+        checkpoint="checkpoints/fastwam_release/libero_uncond_2cam224.pt",
+        action_horizon=32,
+        default_replan_steps=10,
     ),
     ("robocasa", "pi05"): ProfileSpec(
         backend="robocasa",
@@ -128,6 +143,8 @@ MODEL_ALIASES = {
     "gr00t-n1.5": "groot-n1.5",
     "groot_n1.5": "groot-n1.5",
     "gr00t_n1.5": "groot-n1.5",
+    "fast-wam": "fastwam",
+    "fast_wam": "fastwam",
 }
 
 
@@ -152,7 +169,9 @@ def get_policy(key: str) -> PolicySpec:
         return POLICIES[normalized]
     except KeyError as error:
         supported = ", ".join(sorted(POLICIES))
-        raise ValueError(f"Unknown model {key!r}; choose one of: {supported}") from error
+        raise ValueError(
+            f"Unknown model {key!r}; choose one of: {supported}"
+        ) from error
 
 
 def get_profile(backend: str, model: str) -> ProfileSpec:

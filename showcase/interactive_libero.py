@@ -1,4 +1,4 @@
-"""Persistent interactive π0.5 + LIBERO session controlled by the dashboard."""
+"""Persistent interactive LIBERO policy session controlled by the dashboard."""
 
 import collections
 import dataclasses
@@ -12,14 +12,15 @@ import time
 import imageio
 from libero.libero import benchmark
 import numpy as np
-from openpi_client import websocket_client_policy
 import tyro
 
 import instrumented_libero as core
+from libero_policy_plugins import create_libero_policy_client
 
 
 @dataclasses.dataclass
 class Args:
+    model: str = "pi05"
     host: str = "127.0.0.1"
     port: int = 8000
     resize_size: int = 224
@@ -27,6 +28,7 @@ class Args:
     task_suite_name: str = "libero_spatial"
     task_id: int = 0
     num_steps_wait: int = 10
+    max_policy_steps: int = 0
     video_out_path: str = "showcase-runs/videos"
     session_dir: str = "showcase-runs/current"
     seed: int = 7
@@ -92,7 +94,7 @@ def run(args):
     ]
     video_path = pathlib.Path(args.video_out_path)
     video_path.mkdir(parents=True, exist_ok=True)
-    client = websocket_client_policy.WebsocketClientPolicy(args.host, args.port)
+    client = create_libero_policy_client(args.model, args.host, args.port)
     inbox = ControlInbox(args.session_dir)
     inference_audit_path = pathlib.Path(args.session_dir) / "inference-audit.jsonl"
     latencies = []
@@ -106,8 +108,11 @@ def run(args):
     prompt_source = "typed" if prompt_override else "canonical"
     evaluation_mode = "exploratory" if prompt_override else "scored"
     model_request_count = 0
-    base_max_steps = core._max_steps(args.task_suite_name)
+    base_max_steps = core._max_steps(args.task_suite_name, args.model)
     rollout_budget_multiplier = 3 if prompt_override else 2
+    initial_max_steps = base_max_steps * rollout_budget_multiplier
+    if args.max_policy_steps > 0:
+        initial_max_steps = min(initial_max_steps, args.max_policy_steps)
 
     state = core.LiveState(
         args.session_dir,
@@ -116,12 +121,12 @@ def run(args):
             "interactive": True,
             "backend": "libero",
             "simulator": "LIBERO / robosuite / MuJoCo",
-            "model_plugin": "pi05",
-            "model": "pi05_libero",
-            "model_display_name": "Physical Intelligence π0.5",
-            "runtime": "local JAX/CUDA",
-            "policy_transport": "websocket",
-            "policy_endpoint": "ws://{}:{}".format(args.host, args.port),
+            "model_plugin": client.spec.key,
+            "model": client.profile.model_name,
+            "model_display_name": client.spec.display_name,
+            "runtime": client.spec.runtime,
+            "policy_transport": client.spec.transport,
+            "policy_endpoint": client.endpoint,
             "network_audit": args.network_audit,
             "suite": args.task_suite_name,
             "task_ids": [args.task_id],
@@ -129,7 +134,7 @@ def run(args):
             "total_tasks": suite.n_tasks,
             "seed": args.seed,
             "replan_steps": args.replan_steps,
-            "action_horizon": 10,
+            "action_horizon": client.profile.action_horizon,
             "action_dimension": 7,
             "action_labels": [
                 "EEF ΔX",
@@ -142,7 +147,7 @@ def run(args):
             ],
             "state_dimension": 8,
             "base_max_steps": base_max_steps,
-            "max_steps": base_max_steps * rollout_budget_multiplier,
+            "max_steps": initial_max_steps,
             "rollout_budget_multiplier": rollout_budget_multiplier,
             "evaluation_mode": evaluation_mode,
             "started_at": _timestamp(),
@@ -251,6 +256,8 @@ def run(args):
         attempt_budget_multiplier = rollout_budget_multiplier
         attempt_evaluation_mode = evaluation_mode
         attempt_max_steps = base_max_steps * attempt_budget_multiplier
+        if args.max_policy_steps > 0:
+            attempt_max_steps = min(attempt_max_steps, args.max_policy_steps)
         initial_states = suite.get_task_init_states(current_task_id)
         env, _ = core._get_libero_env(task, core.LIBERO_ENV_RESOLUTION, args.seed)
         env.reset()
@@ -403,7 +410,8 @@ def run(args):
                     model_request_id=request_id,
                 )
                 inference_started = time.perf_counter()
-                action_chunk = np.asarray(client.infer(model_input)["actions"])
+                policy_response = client.infer(model_input)
+                action_chunk = np.asarray(policy_response["actions"])
                 inference_latency = (time.perf_counter() - inference_started) * 1000.0
                 action_chunk_sha256 = hashlib.sha256(action_chunk.tobytes()).hexdigest()
                 if first_action_chunk_sha256 is None:
@@ -420,6 +428,8 @@ def run(args):
                     "prompt_sha256": prompt_sha256,
                     "action_chunk_sha256": action_chunk_sha256,
                     "inference_latency_ms": round(inference_latency, 2),
+                    "policy_timing": policy_response.get("timing"),
+                    "policy_artifact": policy_response.get("artifact"),
                     "max_steps": attempt_max_steps,
                 }
                 with inference_audit_path.open("a", encoding="utf-8") as stream:

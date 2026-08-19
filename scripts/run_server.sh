@@ -19,14 +19,52 @@ export XLA_PYTHON_CLIENT_MEM_FRACTION="${XLA_PYTHON_CLIENT_MEM_FRACTION:-$DEFAUL
 
 case "$BACKEND" in
   libero)
-    if [[ "$MODEL" != "pi05" ]]; then
-      echo "Model $MODEL does not support LIBERO in this repository." >&2
-      exit 2
-    fi
-    OPENPI_DIR="$PROJECT_DIR/upstream-openpi"
-    export OPENPI_DATA_HOME="$PROJECT_DIR/cache/openpi"
-    cd "$OPENPI_DIR"
-    exec uv run scripts/serve_policy.py --env LIBERO --port "$PORT"
+    case "$MODEL" in
+      pi05)
+        OPENPI_DIR="$PROJECT_DIR/upstream-openpi"
+        export OPENPI_DATA_HOME="$PROJECT_DIR/cache/openpi"
+        cd "$OPENPI_DIR"
+        exec uv run scripts/serve_policy.py --env LIBERO --port "$PORT"
+        ;;
+      fastwam)
+        if [[ -z "${FASTWAM_DIR:-}" ]]; then
+          for candidate in "$PROJECT_DIR/../upstream-fastwam" \
+            "$PROJECT_DIR/../../upstream-fastwam"; do
+            if [[ -d "$candidate/.git" ]]; then
+              FASTWAM_DIR="$(cd "$candidate" && pwd)"
+              break
+            fi
+          done
+        fi
+        if [[ -z "${FASTWAM_DIR:-}" ]]; then
+          echo "Cannot find upstream-fastwam; set FASTWAM_DIR explicitly." >&2
+          exit 1
+        fi
+        PYTHON="$FASTWAM_DIR/.venv/bin/python"
+        CHECKPOINT="${FASTWAM_CHECKPOINT:-$FASTWAM_DIR/checkpoints/fastwam_release/libero_uncond_2cam224.pt}"
+        STATS="${FASTWAM_STATS:-$FASTWAM_DIR/checkpoints/fastwam_release/libero_uncond_2cam224_dataset_stats.json}"
+        if [[ ! -x "$PYTHON" ]] || [[ ! -f "$CHECKPOINT" ]] || [[ ! -f "$STATS" ]]; then
+          echo "Fast-WAM runtime or release artifacts are missing." >&2
+          echo "Run ./scripts/setup_fastwam_libero.sh --check for details." >&2
+          exit 1
+        fi
+        COMMAND=(
+          "$PYTHON" "$PROJECT_DIR/showcase/serve_fastwam_policy.py"
+          --port "$PORT"
+          --upstream-root "$FASTWAM_DIR"
+          --checkpoint "$CHECKPOINT"
+          --stats "$STATS"
+        )
+        if [[ -n "${FASTWAM_ARTIFACT_DIR:-}" ]]; then
+          COMMAND+=(--artifact-dir "$FASTWAM_ARTIFACT_DIR")
+        fi
+        exec "${COMMAND[@]}"
+        ;;
+      *)
+        echo "Unsupported LIBERO model: $MODEL (choose pi05 or fastwam)" >&2
+        exit 2
+        ;;
+    esac
     ;;
   robocasa)
     case "$MODEL" in

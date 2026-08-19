@@ -15,7 +15,8 @@ it prints and invokes the shared showcase command.
 
 `showcase/backend_registry.py` is the dependency-free compatibility manifest.
 It describes simulators, policies, aliases, action horizons, transports, and
-valid pairings. `showcase/robocasa_policy_plugins.py` is the adapter boundary.
+valid pairings. `showcase/robocasa_policy_plugins.py` and
+`showcase/libero_policy_plugins.py` are the adapter boundaries.
 Every adapter implements three operations:
 
 1. identify its endpoint and policy metadata;
@@ -32,6 +33,7 @@ or GR00T directly.
 | Plugin key | Simulator | Transport | Observation | Action chunk |
 |---|---|---|---|---:|
 | `pi05` | LIBERO | WebSocket | 2 cameras + 8D state + prompt | 10 × 7D |
+| `fastwam` | LIBERO | localhost HTTP | 2 cameras + 8D state + prompt | 32 × 7D |
 | `pi05` | RoboCasa | WebSocket | 3 cameras + 16D state + prompt | 50 × 12D |
 | `groot-n1.5` | RoboCasa | ZeroMQ | 3 cameras + named state fields + language annotation | 16 × 12D |
 
@@ -43,10 +45,17 @@ official order: end-effector position, end-effector rotation, gripper, mobile
 base, and control mode. That yields the 12D action accepted by RoboCasa's
 `convert_action`.
 
+Fast-WAM intentionally runs in a separate Python 3.10 PyTorch process. Its
+localhost HTTP adapter sends lossless uint8 camera arrays and float32 state,
+then validates a finite 32×7 response. The server applies the released
+two-camera preprocessing and dataset statistics. It caches text embeddings,
+but re-encodes the current image at every policy query. This distinction is a
+required correctness invariant for closed-loop validation.
+
 ## Adding another model
 
 1. Add a `PolicySpec` and aliases in `showcase/backend_registry.py`.
-2. Add the valid simulator pairing to `COMPATIBILITY`.
+2. Add the valid simulator pairing to `PROFILES`.
 3. Implement an adapter in `showcase/robocasa_policy_plugins.py` (or the
    corresponding simulator plugin module).
 4. Add a server launch case in `scripts/run_server.sh` and an isolated setup

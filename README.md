@@ -7,10 +7,10 @@
 Simulator and model are independent CLI choices. The current compatibility
 matrix is:
 
-| Simulator | `pi05` | `groot-n1.5` |
-|---|---:|---:|
-| LIBERO | ✓ | — |
-| RoboCasa365 | ✓ | ✓ |
+| Simulator | `pi05` | `fastwam` | `groot-n1.5` |
+|---|---:|---:|---:|
+| LIBERO | ✓ | experimental | — |
+| RoboCasa365 | ✓ | — | ✓ |
 
 RoboCasa also has an independent predictor selector. Direct execution
 (`--world-model none`) is the default. The optional `robocasa-sim` choice is a
@@ -28,7 +28,9 @@ The policy adapter boundary is documented in
 [the model-plugin guide](docs/model-plugins.md). RoboCasa implementation and
 validation history remains in [the development notes](docs/robocasa-backend.md),
 with GR00T-specific setup and measured results in
-[the N1.5 notes](docs/groot-n1.5.md).
+[the N1.5 notes](docs/groot-n1.5.md). The bounded Fast-WAM integration and its
+validation gates are documented in
+[the dated Fast-WAM experiment note](notes/2026-08-19-fastwam-libero-validation.md).
 
 Quick RoboCasa checks:
 
@@ -72,8 +74,9 @@ or bypass it entirely:
   --task-id 2 --trials 3 --default
 ```
 
-This repository is a reproducible local deployment of π0.5 and NVIDIA Isaac
-GR00T N1.5 in the LIBERO and RoboCasa robot-manipulation simulators. It uses
+This repository is a reproducible local deployment of π0.5, experimental
+Fast-WAM, and NVIDIA Isaac GR00T N1.5 in the LIBERO and RoboCasa
+robot-manipulation simulators. It uses
 pinned upstream integrations, robosuite, MuJoCo, and the workstation's NVIDIA
 GPU. Simulation rendering is headless through EGL; each rollout is saved as an
 MP4 for inspection.
@@ -86,7 +89,8 @@ excluded from version control.
 
 - Upstream sources: Physical Intelligence OpenPI and RoboCasa's NVIDIA Isaac GR00T fork
 - Pinned revisions: Git submodules plus `UPSTREAM_COMMIT` for the original OpenPI baseline
-- Models: `pi05_libero`, `pi05_pretrain_human300`, and `gr00t_n1.5_robocasa365_120k`
+- Models: `pi05_libero`, experimental `fastwam_libero_uncond_2cam224`,
+  `pi05_pretrain_human300`, and `gr00t_n1.5_robocasa365_120k`
 - Policy runtimes: isolated JAX/CUDA and PyTorch/CUDA environments
 - Simulator runtimes: Python 3.8 LIBERO, Python 3.11 RoboCasa/OpenPI, and Python 3.12 RoboCasa/GR00T
 - Terminal-picker default: RoboCasa + π0.5; the legacy low-level CLI still defaults to LIBERO
@@ -110,8 +114,8 @@ The showcase opens a local browser console displaying:
 - full-resolution external and wrist-camera MuJoCo views, rendered separately
   from the lower-resolution observations used by the policy pipeline;
 - the active language command and episode progress;
-- the profile-specific action chunk (10×7D LIBERO π0.5, 50×12D RoboCasa
-  π0.5, or 16×12D RoboCasa GR00T);
+- the profile-specific action chunk (10×7D LIBERO π0.5, 32×7D LIBERO
+  Fast-WAM, 50×12D RoboCasa π0.5, or 16×12D RoboCasa GR00T);
 - cold/startup and warm inference latency;
 - GPU utilization, VRAM, power, and temperature;
 - task success and the local policy endpoint;
@@ -144,7 +148,26 @@ GROOT_DOWNLOAD_CHECKPOINT=1 ./scripts/setup_groot.sh
   --backend robocasa --model groot-n1.5
 ```
 
-The two large policies should be run one at a time on this 24 GB GPU. The
+For the experimental Fast-WAM LIBERO profile, keep the pinned Fast-WAM runtime
+beside this repository, verify both isolated environments, then use the same
+dashboard. The released checkpoint is action-only at evaluation time: it
+predicts a 32×7 action chunk from the current external/wrist frames and 8D
+state; it does not render a future-video preview.
+
+```bash
+./scripts/setup_fastwam_libero.sh --check
+./scripts/run_interactive_showcase.sh \
+  --backend libero --model fastwam --task-id 2
+```
+
+The 24 GB profile stages T5, VAE, and MoT components. A first instruction is
+slow because it loads and caches its T5 embedding; every replan still encodes
+the current camera pair. Defaults follow the paper/released evaluator: 32-action
+horizon, 10 diffusion steps, seed 42, 10 executed actions per replan, 30 initial
+no-op steps, two horizontally concatenated 224×224 cameras, and binarized
+gripper output.
+
+Large policies should be run one at a time on this 24 GB GPU. The
 launcher owns the selected server lifecycle, so ordinary runs already do this.
 
 The browser opens at <http://127.0.0.1:8085>. By default, the showcase runs task
@@ -162,6 +185,9 @@ Every run is retained under a timestamped `showcase-runs/` directory, and
 - `videos/*.mp4`: simulator rollouts;
 - `previews/*.mp4` and `preview-audit.jsonl`: paired prediction/actual outcomes,
   non-mutation evidence, and final-state comparisons;
+- `policy-inference/request-*.json` plus matching `*-input.png`: Fast-WAM's
+  exact current two-camera input, normalized/denormalized action chunk, prompt
+  hash, staging latency, and peak CUDA allocation for each replan;
 - `client.log`, `server.log`, and `dashboard.log`: runtime trails.
 
 Review the last session or build an MP4 reel with:
@@ -176,7 +202,10 @@ Useful showcase controls:
 | Environment variable | Default | Purpose |
 |---|---:|---|
 | `BACKEND` | `libero` | Select `libero` or `robocasa` |
-| `MODEL` | `pi05` | Select `pi05` or `groot-n1.5` |
+| `MODEL` | `pi05` | Select `pi05`, `fastwam`, or `groot-n1.5` |
+| `FASTWAM_DIR` | sibling checkout | Pinned Fast-WAM source/runtime and release weights |
+| `LIBERO_OPENPI_DIR` | local/fallback checkout | OpenPI source containing the LIBERO simulator client |
+| `LIBERO_CLIENT_PYTHON` | OpenPI LIBERO venv | Explicit simulator Python, useful from a worktree |
 | `POLICY_PORT` | `8000` | Local policy port (`PI05_PORT` remains a legacy alias) |
 | `TASK_SUITE` | backend default | Select a LIBERO suite or RoboCasa task set |
 | `TASK_IDS` | `0` | Comma-separated task IDs, or `all` |
@@ -331,7 +360,7 @@ remains a draft until you explicitly start a new rollout or apply it to the
 current rollout.
 
 Ollama prompt generation defaults to CPU (`LOCAL_LLM_NUM_GPU=0`) so a compact
-LLM cannot evict or exhaust the 24 GB GPU while π0.5 or GR00T is resident. This
+LLM cannot evict or exhaust the 24 GB GPU while π0.5, Fast-WAM, or GR00T is resident. This
 is slower than GPU prompt generation but keeps policy inference stable. Override
 the value only on a machine with enough spare VRAM or a separate prompt GPU.
 
@@ -416,6 +445,8 @@ you want a single rollout.
   `upstream-openpi/examples/libero/.venv`.
 - LIBERO's path configuration is kept in `config/libero`, not in `~/.libero`.
 - Model assets are kept in `cache/openpi`, not in `~/.cache/openpi`.
+- Fast-WAM uses a separately pinned sibling checkout and its isolated Python
+  3.10 environment; release weights remain outside this repository.
 - The upstream checkout is intentionally left unmodified. Local orchestration
   lives in this folder's `scripts` directory.
 - `results/README.md` is the publishable location for sanitized validation
@@ -463,4 +494,6 @@ configured directory so the harmless warning does not obscure rollout results.
 
 - Official openpi repository: <https://github.com/Physical-Intelligence/openpi>
 - Official LIBERO example: <https://github.com/Physical-Intelligence/openpi/tree/main/examples/libero>
+- Official Fast-WAM repository: <https://github.com/yuantianyuan01/FastWAM>
+- Fast-WAM paper: <https://arxiv.org/abs/2603.16666>
 - Recent local reproduction: <https://note.com/npaka/n/n1eb56d6be1c7?hl=en>

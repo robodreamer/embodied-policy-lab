@@ -1,4 +1,4 @@
-"""Instrumented π0.5 LIBERO evaluator for the local showcase dashboard.
+"""Instrumented LIBERO policy evaluator for the local showcase dashboard.
 
 This intentionally mirrors the official openpi LIBERO evaluator while adding
 live state, camera frames, action chunks, timing, and selectable task IDs. It
@@ -8,6 +8,7 @@ does not modify the upstream checkout.
 import collections
 import dataclasses
 import datetime
+import hashlib
 import json
 import logging
 import math
@@ -21,10 +22,11 @@ from libero.libero import get_libero_path
 from libero.libero.envs import OffScreenRenderEnv
 import numpy as np
 from openpi_client import image_tools
-from openpi_client import websocket_client_policy
 from PIL import Image
 import tqdm
 import tyro
+
+from libero_policy_plugins import create_libero_policy_client
 
 
 LIBERO_DUMMY_ACTION = [0.0] * 6 + [-1.0]
@@ -33,6 +35,7 @@ LIBERO_ENV_RESOLUTION = 256
 
 @dataclasses.dataclass
 class Args:
+    model: str = "pi05"
     host: str = "127.0.0.1"
     port: int = 8000
     resize_size: int = 224
@@ -40,6 +43,7 @@ class Args:
     task_suite_name: str = "libero_spatial"
     task_ids: str = "0"
     num_steps_wait: int = 10
+    max_policy_steps: int = 0
     num_trials_per_task: int = 1
     video_out_path: str = "showcase-runs/videos"
     session_dir: str = "showcase-runs/current"
@@ -90,7 +94,15 @@ def _parse_task_ids(raw, task_count):
     return result
 
 
-def _max_steps(task_suite_name):
+def _max_steps(task_suite_name, model="pi05"):
+    if model in ("fastwam", "fast-wam", "fast_wam"):
+        return {
+            "libero_spatial": 400,
+            "libero_object": 400,
+            "libero_goal": 400,
+            "libero_10": 700,
+            "libero_90": 700,
+        }[task_suite_name]
     return {
         "libero_spatial": 220,
         "libero_object": 280,
@@ -156,11 +168,17 @@ def evaluate(args):
     task_ids = _parse_task_ids(args.task_ids, suite.n_tasks)
     video_path = pathlib.Path(args.video_out_path)
     video_path.mkdir(parents=True, exist_ok=True)
-    client = websocket_client_policy.WebsocketClientPolicy(args.host, args.port)
+    client = create_libero_policy_client(args.model, args.host, args.port)
+    inference_audit_path = pathlib.Path(args.session_dir) / "inference-audit.jsonl"
     latencies = []
+    model_request_count = 0
     total_episodes = 0
     total_successes = 0
-    max_steps = _max_steps(args.task_suite_name)
+    max_steps = (
+        args.max_policy_steps
+        if args.max_policy_steps > 0
+        else _max_steps(args.task_suite_name, args.model)
+    )
 
     state = LiveState(
         args.session_dir,
@@ -168,19 +186,19 @@ def evaluate(args):
             "phase": "initializing",
             "backend": "libero",
             "simulator": "LIBERO / robosuite / MuJoCo",
-            "model_plugin": "pi05",
-            "model": "pi05_libero",
-            "model_display_name": "Physical Intelligence π0.5",
-            "runtime": "local JAX/CUDA",
-            "policy_transport": "websocket",
-            "policy_endpoint": "ws://{}:{}".format(args.host, args.port),
+            "model_plugin": client.spec.key,
+            "model": client.profile.model_name,
+            "model_display_name": client.spec.display_name,
+            "runtime": client.spec.runtime,
+            "policy_transport": client.spec.transport,
+            "policy_endpoint": client.endpoint,
             "network_audit": args.network_audit,
             "suite": args.task_suite_name,
             "task_ids": task_ids,
             "total_tasks": len(task_ids),
             "seed": args.seed,
             "replan_steps": args.replan_steps,
-            "action_horizon": 10,
+            "action_horizon": client.profile.action_horizon,
             "action_dimension": 7,
             "action_labels": [
                 "EEF ΔX",
@@ -196,6 +214,7 @@ def evaluate(args):
             "successes": 0,
             "episodes": 0,
             "inference_latencies_ms": [],
+            "model_request_count": 0,
         },
     )
 
@@ -245,11 +264,34 @@ def evaluate(args):
                     inference_latency = None
                     if not action_plan:
                         inference_started = time.perf_counter()
-                        action_chunk = np.asarray(client.infer(model_input)["actions"])
+                        policy_response = client.infer(model_input)
+                        action_chunk = np.asarray(policy_response["actions"])
                         inference_latency = (
                             time.perf_counter() - inference_started
                         ) * 1000.0
                         latencies.append(inference_latency)
+                        model_request_count += 1
+                        prompt = str(model_input["prompt"])
+                        audit_event = {
+                            "created_at": _timestamp(),
+                            "request_id": model_request_count,
+                            "task_id": task_id,
+                            "episode": episode_index + 1,
+                            "step": max(0, step - args.num_steps_wait),
+                            "prompt": prompt,
+                            "prompt_sha256": hashlib.sha256(
+                                prompt.encode("utf-8")
+                            ).hexdigest(),
+                            "action_chunk_sha256": hashlib.sha256(
+                                action_chunk.tobytes()
+                            ).hexdigest(),
+                            "inference_latency_ms": round(inference_latency, 2),
+                            "policy_timing": policy_response.get("timing"),
+                            "policy_artifact": policy_response.get("artifact"),
+                            "max_steps": max_steps,
+                        }
+                        with inference_audit_path.open("a", encoding="utf-8") as stream:
+                            stream.write(json.dumps(audit_event) + "\n")
                         if len(action_chunk) < args.replan_steps:
                             raise ValueError(
                                 "Policy returned fewer actions than replan_steps"
@@ -261,6 +303,8 @@ def evaluate(args):
                             inference_latencies_ms=[
                                 round(value, 2) for value in latencies[-120:]
                             ],
+                            model_request_count=model_request_count,
+                            last_inference_audit=audit_event,
                         )
 
                     action = np.asarray(action_plan.popleft())

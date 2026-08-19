@@ -14,7 +14,7 @@ Usage:
 
 Backend, model, and task options:
   --backend libero|robocasa       Simulator backend (default: libero)
-  --model pi05|groot-n1.5         Local policy plugin (default: pi05)
+  --model pi05|fastwam|groot-n1.5 Local policy plugin (default: pi05)
   --world-model NAME              none (default) or robocasa-sim oracle baseline
   --preview-steps COUNT           Legacy option; comparison follows --replan-steps
   --compare-world-model           Compare prediction after each real action prefix
@@ -27,6 +27,7 @@ Backend, model, and task options:
   --trials COUNT                  Automatic attempts for a batch run
   --seed SEED                     Reproducible simulator seed
   --replan-steps COUNT            Actions executed before querying the policy again
+  --max-policy-steps COUNT        LIBERO test-only rollout cap; 0 uses suite default
   --viewer-width PX               RoboCasa dashboard render width (default: 960)
   --viewer-height PX              RoboCasa dashboard render height (default: 540)
   --viewer-fps FPS                Maximum dashboard render rate (default: 6)
@@ -51,6 +52,7 @@ Examples:
   ./scripts/run_interactive_showcase.sh --backend robocasa --model groot-n1.5
   ./scripts/run_showcase.sh --backend robocasa --batch --task-id 2 --trials 3
   ./scripts/run_showcase.sh --backend libero --task-suite libero_spatial --task-ids 0,1
+  ./scripts/run_interactive_showcase.sh --backend libero --model fastwam --task-id 2
 
 Environment-variable controls remain supported for backward compatibility.
 EOF
@@ -68,6 +70,7 @@ ROBOCASA_SPLIT="${ROBOCASA_SPLIT:-target}"
 TRIALS_PER_TASK="${TRIALS_PER_TASK:-1}"
 SEED="${SEED:-7}"
 REPLAN_STEPS="${REPLAN_STEPS:-}"
+MAX_POLICY_STEPS="${MAX_POLICY_STEPS:-0}"
 VIEWER_WIDTH="${VIEWER_WIDTH:-960}"
 VIEWER_HEIGHT="${VIEWER_HEIGHT:-540}"
 VIEWER_FPS="${VIEWER_FPS:-6}"
@@ -86,6 +89,7 @@ LOCAL_LLM_URL="${LOCAL_LLM_URL:-}"
 LOCAL_LLM_MODEL="${LOCAL_LLM_MODEL:-}"
 LOCAL_LLM_NUM_GPU="${LOCAL_LLM_NUM_GPU:-0}"
 SESSION_DIR="${SESSION_DIR:-}"
+FASTWAM_DIR="${FASTWAM_DIR:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -102,6 +106,7 @@ while [[ $# -gt 0 ]]; do
     --trials) TRIALS_PER_TASK="${2:?--trials requires a value}"; shift 2 ;;
     --seed) SEED="${2:?--seed requires a value}"; shift 2 ;;
     --replan-steps) REPLAN_STEPS="${2:?--replan-steps requires a value}"; shift 2 ;;
+    --max-policy-steps) MAX_POLICY_STEPS="${2:?--max-policy-steps requires a value}"; shift 2 ;;
     --viewer-width) VIEWER_WIDTH="${2:?--viewer-width requires a value}"; shift 2 ;;
     --viewer-height) VIEWER_HEIGHT="${2:?--viewer-height requires a value}"; shift 2 ;;
     --viewer-fps) VIEWER_FPS="${2:?--viewer-fps requires a value}"; shift 2 ;;
@@ -132,6 +137,7 @@ WORLD_MODEL="${WORLD_MODEL,,}"
 case "$MODEL" in
   pi|pi0.5|pi-0.5) MODEL="pi05" ;;
   groot|gr00t|gr00t-n1.5|groot_n1.5|gr00t_n1.5) MODEL="groot-n1.5" ;;
+  fast-wam|fast_wam) MODEL="fastwam" ;;
 esac
 case "$WORLD_MODEL" in
   off|direct) WORLD_MODEL="none" ;;
@@ -142,13 +148,43 @@ esac
 
 case "$BACKEND" in
   libero)
-    if [[ "$MODEL" != "pi05" ]]; then
-      echo "Model $MODEL does not support LIBERO in this repository; choose pi05." >&2
-      exit 2
+    OPENPI_DIR="${LIBERO_OPENPI_DIR:-$PROJECT_DIR/upstream-openpi}"
+    # A git worktree does not share ignored virtualenvs with the primary
+    # checkout. Reuse that checkout's pinned LIBERO client when available.
+    if [[ -z "${LIBERO_OPENPI_DIR:-}" ]] && \
+      [[ ! -x "$OPENPI_DIR/examples/libero/.venv/bin/python" ]]; then
+      candidate="$PROJECT_DIR/../../embodied-policy-lab/upstream-openpi"
+      if [[ -x "$candidate/examples/libero/.venv/bin/python" ]]; then
+        OPENPI_DIR="$(cd "$candidate" && pwd)"
+      fi
     fi
-    OPENPI_DIR="$PROJECT_DIR/upstream-openpi"
-    RUNTIME_PYTHON="$OPENPI_DIR/.venv/bin/python"
-    CLIENT_PYTHON="$OPENPI_DIR/examples/libero/.venv/bin/python"
+    case "$MODEL" in
+      pi05)
+        RUNTIME_PYTHON="$OPENPI_DIR/.venv/bin/python"
+        CLIENT_PYTHON="${LIBERO_CLIENT_PYTHON:-$OPENPI_DIR/examples/libero/.venv/bin/python}"
+        ;;
+      fastwam)
+        if [[ -z "$FASTWAM_DIR" ]]; then
+          for candidate in "$PROJECT_DIR/../upstream-fastwam" \
+            "$PROJECT_DIR/../../upstream-fastwam"; do
+            if [[ -d "$candidate/.git" ]]; then
+              FASTWAM_DIR="$(cd "$candidate" && pwd)"
+              break
+            fi
+          done
+        fi
+        if [[ -z "$FASTWAM_DIR" ]]; then
+          echo "Cannot find upstream-fastwam; set FASTWAM_DIR explicitly." >&2
+          exit 1
+        fi
+        RUNTIME_PYTHON="$FASTWAM_DIR/.venv/bin/python"
+        CLIENT_PYTHON="${LIBERO_CLIENT_PYTHON:-$OPENPI_DIR/examples/libero/.venv/bin/python}"
+        ;;
+      *)
+        echo "Model $MODEL does not support LIBERO; choose pi05 or fastwam." >&2
+        exit 2
+        ;;
+    esac
     TASK_SUITE="${TASK_SUITE:-libero_spatial}"
     TASK_IDS="${TASK_IDS:-0}"
     WORLD_MODEL="${WORLD_MODEL:-none}"
@@ -191,9 +227,16 @@ esac
 if [[ -z "$REPLAN_STEPS" ]]; then
   if [[ "$MODEL" == "groot-n1.5" ]]; then
     REPLAN_STEPS=16
+  elif [[ "$MODEL" == "fastwam" ]]; then
+    REPLAN_STEPS=10
   else
     REPLAN_STEPS=5
   fi
+fi
+if [[ "$MODEL" == "fastwam" ]]; then
+  NUM_STEPS_WAIT=30
+else
+  NUM_STEPS_WAIT=10
 fi
 
 if [[ "$MODEL" == "groot-n1.5" ]]; then
@@ -202,7 +245,7 @@ if [[ "$MODEL" == "groot-n1.5" ]]; then
   export NO_ALBUMENTATIONS_UPDATE=1
 fi
 
-for integer_value in "$TRIALS_PER_TASK" "$SEED" "$REPLAN_STEPS" "$POLICY_PORT" \
+for integer_value in "$TRIALS_PER_TASK" "$SEED" "$REPLAN_STEPS" "$MAX_POLICY_STEPS" "$POLICY_PORT" \
   "$DASHBOARD_PORT" "$REALTIME_DELAY_MS" "$VIEWER_WIDTH" "$VIEWER_HEIGHT" \
   "$PREVIEW_STEPS"; do
   if [[ ! "$integer_value" =~ ^[0-9]+$ ]]; then
@@ -233,6 +276,10 @@ fi
 if [[ "$ROLLOUT_BUDGET_MULTIPLIER" != "0" ]] && \
   [[ ! "$ROLLOUT_BUDGET_MULTIPLIER" =~ ^[123]$ ]]; then
   echo "--budget must be 1, 2, or 3." >&2
+  exit 2
+fi
+if [[ "$BACKEND" != "libero" ]] && [[ "$MAX_POLICY_STEPS" != "0" ]]; then
+  echo "--max-policy-steps is currently a LIBERO-only test control." >&2
   exit 2
 fi
 if [[ -n "$EVALUATION_MODE" ]] && \
@@ -410,7 +457,9 @@ simulator, policy = backend_registry.require_compatible(backend, model)
 profile = backend_registry.get_profile(backend, model)
 world_model = world_model_registry.require_world_model(backend, world_model_key)
 now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-transport_scheme = "ws" if policy.transport == "websocket" else "tcp"
+transport_scheme = {"websocket": "ws", "http": "http"}.get(
+    policy.transport, "tcp"
+)
 try:
     task_id = int(task_ids)
 except ValueError:
@@ -500,10 +549,14 @@ fi
 echo "Starting local $MODEL server for $BACKEND..."
 if [[ "$NETWORK_AUDIT" == "1" ]]; then
   setsid strace -f -e trace=network -s 256 -o "$SESSION_DIR/network-server.log" \
-    env BACKEND="$BACKEND" MODEL="$MODEL" POLICY_PORT="$POLICY_PORT" "$SCRIPT_DIR/run_server.sh" \
+    env BACKEND="$BACKEND" MODEL="$MODEL" POLICY_PORT="$POLICY_PORT" \
+      FASTWAM_DIR="$FASTWAM_DIR" FASTWAM_ARTIFACT_DIR="$SESSION_DIR/policy-inference" \
+      "$SCRIPT_DIR/run_server.sh" \
     > "$SESSION_DIR/server.log" 2>&1 &
 else
-  setsid env BACKEND="$BACKEND" MODEL="$MODEL" POLICY_PORT="$POLICY_PORT" "$SCRIPT_DIR/run_server.sh" \
+  setsid env BACKEND="$BACKEND" MODEL="$MODEL" POLICY_PORT="$POLICY_PORT" \
+    FASTWAM_DIR="$FASTWAM_DIR" FASTWAM_ARTIFACT_DIR="$SESSION_DIR/policy-inference" \
+    "$SCRIPT_DIR/run_server.sh" \
     > "$SESSION_DIR/server.log" 2>&1 &
 fi
 SERVER_PID=$!
@@ -559,9 +612,12 @@ if [[ "$BACKEND" == "libero" ]]; then
     fi
     CLIENT_COMMAND=(
       "$CLIENT_PYTHON" "$PROJECT_DIR/showcase/interactive_libero.py"
+      --model "$MODEL"
       --host 127.0.0.1
       --port "$POLICY_PORT"
       --replan-steps "$REPLAN_STEPS"
+      --num-steps-wait "$NUM_STEPS_WAIT"
+      --max-policy-steps "$MAX_POLICY_STEPS"
       --task-suite-name "$TASK_SUITE"
       --task-id "$TASK_IDS"
       --video-out-path "$SESSION_DIR/videos"
@@ -573,9 +629,12 @@ if [[ "$BACKEND" == "libero" ]]; then
   else
     CLIENT_COMMAND=(
       "$CLIENT_PYTHON" "$PROJECT_DIR/showcase/instrumented_libero.py"
+      --model "$MODEL"
       --host 127.0.0.1
       --port "$POLICY_PORT"
       --replan-steps "$REPLAN_STEPS"
+      --num-steps-wait "$NUM_STEPS_WAIT"
+      --max-policy-steps "$MAX_POLICY_STEPS"
       --task-suite-name "$TASK_SUITE"
       --task-ids "$TASK_IDS"
       --num-trials-per-task "$TRIALS_PER_TASK"
