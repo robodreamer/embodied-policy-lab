@@ -64,6 +64,16 @@ def test_dashboard_opens_before_heavy_policy_startup():
     assert "Loading policy weights into local accelerator memory" in launcher
 
 
+def test_fastwam_startup_reports_cpu_progress_and_expected_duration():
+    launcher = (ROOT / "scripts" / "run_showcase.sh").read_text(encoding="utf-8")
+
+    assert "wait_for_policy_http" in launcher
+    assert "startup_elapsed_seconds" in launcher
+    assert "typical startup is 90-120 seconds" in launcher
+    assert "GPU activity starts with the first policy request" in launcher
+    assert "the loader process is still active" in launcher
+
+
 def test_launcher_has_independent_concurrency_and_state_reconciliation_guards():
     launcher = (ROOT / "scripts" / "run_showcase.sh").read_text(encoding="utf-8")
 

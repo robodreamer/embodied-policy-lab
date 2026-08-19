@@ -409,6 +409,57 @@ wait_for_http() {
   return 1
 }
 
+update_fastwam_startup_status() {
+  local elapsed_seconds="$1"
+  local detail
+  if (( elapsed_seconds < 120 )); then
+    detail="Deserializing the 12 GB Fast-WAM checkpoint on CPU - ${elapsed_seconds}s elapsed; typical startup is 90-120 seconds. GPU activity starts with the first policy request."
+  else
+    detail="Fast-WAM is still loading on CPU - ${elapsed_seconds}s elapsed. Competing CPU or RAM workloads can extend startup; the loader process is still active."
+  fi
+  echo "$detail"
+  "$RUNTIME_PYTHON" - "$SESSION_DIR/state.json" "$elapsed_seconds" "$detail" <<'PY'
+import datetime
+import json
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+elapsed_seconds = int(sys.argv[2])
+detail = sys.argv[3]
+state = json.loads(path.read_text(encoding="utf-8"))
+if state.get("phase") != "initializing":
+    raise SystemExit(0)
+state["command_message"] = detail
+state["startup_elapsed_seconds"] = elapsed_seconds
+state["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+temporary = path.with_suffix(".startup.tmp")
+temporary.write_text(json.dumps(state, indent=2), encoding="utf-8")
+temporary.replace(path)
+PY
+}
+
+wait_for_policy_http() {
+  local port="$1"
+  local route="$2"
+  local owner_pid="$3"
+  local started_at=$SECONDS
+  local attempt
+  for attempt in $(seq 1 900); do
+    if ! kill -0 "$owner_pid" 2>/dev/null; then
+      return 1
+    fi
+    if http_ready "$port" "$route"; then
+      return 0
+    fi
+    if [[ "$MODEL" == "fastwam" ]] && (( attempt % 10 == 0 )); then
+      update_fastwam_startup_status "$((SECONDS - started_at))"
+    fi
+    sleep 1
+  done
+  return 1
+}
+
 wait_for_tcp_listener() {
   local port="$1"
   local owner_pid="$2"
@@ -465,10 +516,19 @@ try:
 except ValueError:
     task_id = 0
 
+if model == "fastwam":
+    startup_message = (
+        "Deserializing the 12 GB Fast-WAM checkpoint on CPU; typical startup is "
+        "90-120 seconds. An idle GPU is expected until the first policy request."
+    )
+else:
+    startup_message = "Loading policy weights into local accelerator memory"
+
 state = {
     "phase": "initializing",
     "message": "Loading the selected local policy and simulator",
-    "command_message": "Loading policy weights into local accelerator memory",
+    "command_message": startup_message,
+    "startup_elapsed_seconds": 0,
     "backend": simulator.key,
     "simulator": simulator.simulator,
     "model_plugin": policy.key,
@@ -566,7 +626,7 @@ if [[ "$MODEL" == "groot-n1.5" ]]; then
   wait_for_tcp_listener "$POLICY_PORT" "$SERVER_PID" || POLICY_READY=$?
 else
   POLICY_READY=0
-  wait_for_http "$POLICY_PORT" /healthz "$SERVER_PID" || POLICY_READY=$?
+  wait_for_policy_http "$POLICY_PORT" /healthz "$SERVER_PID" || POLICY_READY=$?
 fi
 if [[ "$POLICY_READY" != "0" ]]; then
   echo "Policy server failed. See $SESSION_DIR/server.log" >&2
