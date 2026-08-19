@@ -160,6 +160,37 @@ state; it does not render a future-video preview.
   --backend libero --model fastwam --task-id 2
 ```
 
+### Choosing a Fast-WAM LIBERO task suite
+
+The default suite is `libero_spatial`. Its ten benchmark tasks deliberately
+repeat the same black-bowl-to-plate goal while moving the bowl between different
+spatial locations. This tests spatial generalization; it does **not** mean that
+Fast-WAM is limited to black bowls. The released checkpoint's training and
+evaluation configuration covers all four LIBERO suites:
+
+| Suite | What it is useful for |
+|---|---|
+| `libero_spatial` | The same black bowl in different locations; focused spatial reasoning |
+| `libero_object` | More object variety with relatively direct manipulation goals |
+| `libero_goal` | More varied manipulation goals |
+| `libero_10` | The most varied, longer-horizon ten-task evaluation set |
+
+Use `libero_10` for a broader demonstration, or `libero_object` for simpler
+object-variety tests:
+
+```bash
+./scripts/run_interactive_showcase.sh \
+  --backend libero --model fastwam --task-suite libero_10 --task-id 0
+
+./scripts/run_interactive_showcase.sh \
+  --backend libero --model fastwam --task-suite libero_object --task-id 0
+```
+
+The dashboard can switch among tasks in the suite selected at launch. It cannot
+currently change suites live because the LIBERO simulator and its task catalog
+are constructed for one suite. Finish the current session, then relaunch with a
+different `--task-suite`; no additional checkpoint download is needed.
+
 The 24 GB profile stages T5, VAE, and MoT components. A first instruction is
 slow because it loads and caches its T5 embedding; every replan still encodes
 the current camera pair. Defaults follow the paper/released evaluator: 32-action
