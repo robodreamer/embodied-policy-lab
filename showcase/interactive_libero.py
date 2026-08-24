@@ -96,8 +96,8 @@ def _clip_psnr(predicted, actual):
     return round(float(np.mean(values)), 3) if values else None
 
 
-def _publish_policy_prediction(session_dir, pending):
-    """Reveal a Flex-π future only after its matching real prefix completes."""
+def _save_policy_prediction(session_dir, pending):
+    """Save a matched Flex-π prefix without revealing it during the rollout."""
 
     count = min(len(pending["predicted"]), len(pending["actual"]))
     if count < 2:
@@ -118,7 +118,8 @@ def _publish_policy_prediction(session_dir, pending):
         "executed_actions": pending["executed"],
         "mean_rgb_psnr_db": _clip_psnr(predicted, actual),
         "caveat": pending["metadata"].get("caveat"),
-        "revealed_after_execution": True,
+        "matched_prefix_completed": True,
+        "revealed_after_rollout": False,
     }
 
 
@@ -361,6 +362,7 @@ def run(args):
         abort_reason = None
         step = 0
         pending_policy_prediction = None
+        completed_policy_prediction = None
         attempt_number += 1
         attempt_started = time.perf_counter()
 
@@ -426,6 +428,7 @@ def run(args):
                     active_prompt = prompt_override or canonical_prompt
                     action_plan.clear()
                     pending_policy_prediction = None
+                    completed_policy_prediction = None
                     state.update(
                         prompt=active_prompt,
                         prompt_source=prompt_source,
@@ -595,17 +598,13 @@ def run(args):
                         client.compose_preview(actual_external, actual_wrist)
                     )
                 if done or not action_plan:
-                    published = _publish_policy_prediction(
+                    published = _save_policy_prediction(
                         args.session_dir, pending_policy_prediction
                     )
                     if published:
+                        completed_policy_prediction = published
                         state.update(
-                            policy_prediction_status="ready",
-                            policy_prediction_result=published,
-                            policy_prediction_video_url=(
-                                "/previews/latest_policy_prediction.mp4"
-                            ),
-                            policy_actual_video_url="/previews/latest_policy_actual.mp4",
+                            policy_prediction_status="captured_for_post_rollout"
                         )
                     pending_policy_prediction = None
             selected_goal_reached = selected_goal_reached or bool(done)
@@ -622,6 +621,14 @@ def run(args):
 
         env.close()
         duration = time.perf_counter() - attempt_started
+        if completed_policy_prediction:
+            completed_policy_prediction = dict(completed_policy_prediction)
+            completed_policy_prediction["revealed_after_rollout"] = True
+        if auto_start_next:
+            # A reset/task switch immediately begins another rollout. Keep the
+            # prior prefix as an artifact, but do not flash its result between
+            # the two running states.
+            completed_policy_prediction = None
         if aborted:
             status = "aborted"
         elif attempt_evaluation_mode == "exploratory":
@@ -698,6 +705,22 @@ def run(args):
             prompt_stats=_prompt_stats(history),
             task_ids=sorted({item["task_id"] for item in history}),
             last_video=str(output_video) if replay_images else None,
+            policy_prediction_status=(
+                "ready"
+                if completed_policy_prediction
+                else ("unavailable" if client.mode == "full-joint" else "disabled")
+            ),
+            policy_prediction_result=completed_policy_prediction,
+            policy_prediction_video_url=(
+                "/previews/latest_policy_prediction.mp4"
+                if completed_policy_prediction
+                else None
+            ),
+            policy_actual_video_url=(
+                "/previews/latest_policy_actual.mp4"
+                if completed_policy_prediction
+                else None
+            ),
             progress=1.0
             if status in ("success", "failure", "unscored")
             else state.data.get("progress", 0.0),

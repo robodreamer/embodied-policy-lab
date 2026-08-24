@@ -761,6 +761,7 @@ async function updateState() {
     const independentPreview = state.preview_result || {};
     const policyPreview = state.policy_prediction_result || {};
     const isSimulatorOracle = state.world_model_prediction_kind === "simulator_oracle";
+    const rolloutFinished = ["awaiting_command", "stopped", "complete"].includes(state.phase);
     const independentComparisonReady = Boolean(
       state.compare_world_model
       && state.comparison_status === "ready"
@@ -768,7 +769,8 @@ async function updateState() {
       && state.actual_video_url
     );
     const policyComparisonReady = Boolean(
-      state.policy_prediction_status === "ready"
+      rolloutFinished
+      && state.policy_prediction_status === "ready"
       && state.policy_prediction_video_url
       && state.policy_actual_video_url
     );
@@ -776,7 +778,7 @@ async function updateState() {
     const preview = policyComparisonReady ? policyPreview : independentPreview;
     $("previewCard").classList.toggle("hidden", !comparisonReady);
     $("previewCardLabel").innerHTML = policyComparisonReady
-      ? '<span>02</span> FLEX-π WORLD-ACTION PREDICTION VS COMPLETED EXECUTION'
+      ? '<span>02</span> FLEX-π POST-ROLLOUT WORLD-ACTION CHECK'
       : (isSimulatorOracle
         ? '<span>02</span> SIMULATOR ORACLE REPLAY VS COMPLETED EXECUTION'
         : '<span>02</span> LEARNED PREDICTION VS COMPLETED EXECUTION');
@@ -787,11 +789,11 @@ async function updateState() {
       ? `${modelDisplayName} · ${String(preview.kind || "joint_world_action").replaceAll("_", " ").toUpperCase()}`
       : `${worldModelDisplayName} · ${String(state.world_model_prediction_kind || "preview").replaceAll("_", " ").toUpperCase()}`;
     $("previewTitle").textContent = policyComparisonReady
-      ? `${preview.frame_count || "—"} aligned frames across ${preview.executed_actions || "—"} executed actions`
+      ? `${preview.frame_count || "—"} aligned frames from the final ${preview.executed_actions || "—"}-action prefix`
       : `${preview.previewed_steps || state.replan_steps || "—"}-step ${isSimulatorOracle ? "oracle replay" : "prediction"} and execution`;
     $("previewDescription").textContent = preview.caveat
-      ? `${preview.caveat} Both clips were revealed after actual execution completed.`
-      : "Both clips start from the same pre-action state, use the same action prefix, and are revealed only after actual execution completes.";
+      ? `${preview.caveat} Both clips were withheld until the rollout ended.`
+      : "Both clips start from the same pre-action state, use the same action prefix, and are revealed only after the rollout ends.";
     const matchLabel = preview.predicted_matches_actual === true
       ? "FINAL STATE MATCHES WITHIN TOLERANCE"
       : (preview.predicted_matches_actual === false ? "FINAL STATE DIFFERS" : "FINAL STATE NOT CHECKED");
@@ -799,7 +801,7 @@ async function updateState() {
       ? ` · MAX ΔQPOS ${Number(preview.state_comparison.max_qpos_error).toExponential(2)} · MAX ΔQVEL ${Number(preview.state_comparison.max_qvel_error).toExponential(2)}`
       : "";
     $("previewEvidence").textContent = policyComparisonReady
-      ? `MEAN RGB PSNR ${format(preview.mean_rgb_psnr_db, 2)} dB · ${preview.frame_interval_actions || "—"} ACTIONS BETWEEN FRAMES · REVEALED AFTER EXECUTION`
+      ? `MEAN RGB PSNR ${format(preview.mean_rgb_psnr_db, 2)} dB · ${preview.frame_interval_actions || "—"} ACTIONS BETWEEN FRAMES · REVEALED AFTER ROLLOUT`
       : (preview.live_state_unchanged
         ? `${matchLabel}${stateError} · PREDICTED ${preview.predicted_state_sha256 || "—"} · ACTUAL ${preview.actual_state_sha256 || "—"} · ${format(preview.duration_ms, 1)} ms`
         : "No completed comparison evidence recorded yet");
@@ -811,13 +813,13 @@ async function updateState() {
       lastPreviewUrl = previewUrl;
       $("previewVideo").src = previewUrl;
       $("previewVideo").currentTime = 0;
-      $("previewVideo").play().catch(() => {});
+      $("previewVideo").load();
     }
     if (actualUrl && actualUrl !== lastActualUrl) {
       lastActualUrl = actualUrl;
       $("actualVideo").src = actualUrl;
       $("actualVideo").currentTime = 0;
-      $("actualVideo").play().catch(() => {});
+      $("actualVideo").load();
     }
     const runningProgress = state.phase === "running" ? Math.max(0, Math.min(1, Number(state.progress) || 0)) : 0;
     $("progressBar").style.transform = `scaleX(${runningProgress})`;

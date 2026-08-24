@@ -58,10 +58,10 @@ environment. Its lossless HTTP boundary adds aligned uint16 millimetre depth.
 The client defaults to world-action co-generation (`full-joint` internally)
 and can switch to `action-only` between rollouts. Co-generation returns future
 RGB along with the DINO, pointmap, and end-effector action streams. The
-dashboard withholds that future until
-the matching real action prefix completes, then publishes temporally aligned
-clips and mean RGB PSNR. This is evidence about the checkpoint's learned
-dynamics, not an independent model comparison.
+dashboard saves each matched prefix privately, retains the final comparison,
+and publishes its clips and mean RGB PSNR only after the complete rollout ends.
+This is evidence about the checkpoint's learned dynamics, not an independent
+model comparison.
 
 ## Adding another model
 

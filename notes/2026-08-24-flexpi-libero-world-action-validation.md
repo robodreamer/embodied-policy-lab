@@ -91,9 +91,10 @@ rollouts. For full-joint inference:
    ten-action replan prefix.
 2. Execute the returned actions normally; prediction never gates execution.
 3. Capture actual composites at the same indices.
-4. Only after the prefix completes, publish predicted and actual clips.
-5. Report mean pixel PSNR as a reproducible alignment smoke metric and retain
-   both videos for qualitative review.
+4. After a prefix completes, save the matched clips privately without changing
+   the live execution layout.
+5. Once the entire rollout ends, reveal the final matched comparison and report
+   mean pixel PSNR as a reproducible alignment smoke metric.
 
 PSNR is intentionally not treated as a robot-success metric. The main policy
 measure remains closed-loop LIBERO task success. The visual comparison checks

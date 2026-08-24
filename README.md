@@ -171,9 +171,9 @@ The setup fetches the 12 GB release checkpoint, required VAE/T5/DINO assets,
 and only four tiny camera-intrinsics files from the training dataset—not the
 roughly 12 GB demonstration dataset. Selecting Flex-π defaults to world-action
 co-generation: RGB, DINO, pointmap, and end-effector action futures come from
-the same checkpoint pass. Its RGB future is shown beside real execution only
-after the matching action prefix has completed. Action-only remains available
-as an explicit lower-memory mode.
+the same checkpoint pass. Matched RGB evidence is collected silently while the
+policy runs and shown only after the complete rollout ends. Action-only remains
+available as an explicit lower-memory mode.
 
 ```bash
 ./scripts/setup_flexpi_libero.sh
