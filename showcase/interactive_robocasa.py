@@ -953,11 +953,6 @@ def run(args: Args) -> None:
                             "prompt_sha256": prompt_sha256,
                             "action_chunk_shape": list(action_chunk.shape),
                             "action_chunk_sha256": action_hash,
-                            "action_contract_diagnostics": (
-                                world_model_plugins.action_contract_diagnostics(
-                                    action_chunk
-                                )
-                            ),
                             "inference_latency_ms": round(inference_latency, 2),
                             "max_steps": attempt_max_steps,
                             "execution_prefix_steps": approved_prefix_steps,

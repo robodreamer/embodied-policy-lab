@@ -64,8 +64,10 @@ required correctness invariant for closed-loop validation.
    horizon, dimensions, and non-finite actions.
 6. Run one audited local request and one short rollout before claiming support.
 
-Checkpoint weights and virtual environments remain ignored. Source forks are
-pinned Git submodules so a published clone can reproduce the integration.
+Checkpoint weights and virtual environments remain ignored. In-tree upstream
+integrations are pinned Git submodules. Fast-WAM uses a revision-checked sibling
+checkout because its independent runtime and release assets are not part of
+this repository.
 
 ## GR00T setup
 

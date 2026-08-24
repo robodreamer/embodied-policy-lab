@@ -17,12 +17,9 @@ RoboCasa also has an independent predictor selector. Direct execution
 deterministic simulator-oracle baseline: it replays each action prefix in a
 matching cloned MuJoCo environment and compares that replay with the live
 execution. It is not a learned world model. Comparison is opt-in, never gates
-execution, and fails open if the diagnostic branch has a problem. DINO-WM and
-JEPA-WM DROID/RoboCasa checkpoints are pinned as diagnostic candidates, but are
-not offered as runnable predictors until their 7D arm-action, camera, and
-temporal contracts are validated against this lab's 12D mobile-manipulator
-actions. See
-[the world-model guide](docs/world-model-plugins.md).
+execution, and fails open if the diagnostic branch has a problem. Unvalidated
+learned predictors are intentionally kept out of the registry and default
+dependency set. See [the world-model guide](docs/world-model-plugins.md).
 
 The policy adapter boundary is documented in
 [the model-plugin guide](docs/model-plugins.md). RoboCasa implementation and
@@ -81,14 +78,15 @@ pinned upstream integrations, robosuite, MuJoCo, and the workstation's NVIDIA
 GPU. Simulation rendering is headless through EGL; each rollout is saved as an
 MP4 for inspection.
 
-The project is structured for publication: `upstream-openpi` is a pinned Git
-submodule, while model weights and generated machine-specific artifacts are
-excluded from version control.
+The project is structured for publication: in-tree upstream integrations are
+pinned Git submodules. Fast-WAM uses a revision-checked sibling checkout so its
+independent runtime and release assets stay isolated. Model weights and
+generated machine-specific artifacts are excluded from version control.
 
 ## Status
 
 - Upstream sources: Physical Intelligence OpenPI and RoboCasa's NVIDIA Isaac GR00T fork
-- Pinned revisions: Git submodules plus `UPSTREAM_COMMIT` for the original OpenPI baseline
+- Pinned revisions: Git submodules, `UPSTREAM_COMMIT`, and the Fast-WAM setup revision gate
 - Models: `pi05_libero`, experimental `fastwam_libero_uncond_2cam224`,
   `pi05_pretrain_human300`, and `gr00t_n1.5_robocasa365_120k`
 - Policy runtimes: isolated JAX/CUDA and PyTorch/CUDA environments

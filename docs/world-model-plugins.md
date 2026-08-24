@@ -6,7 +6,6 @@ The policy and predictor are deliberately separate selections:
 |---|---|---|---|
 | π0.5 or GR00T N1.5 | a RoboCasa 12D action chunk | `robocasa-sim` | deterministic ground-truth replay in a cloned MuJoCo state |
 | π0.5 or GR00T N1.5 | a RoboCasa 12D action chunk | `none` | nothing; execute directly |
-| either policy (future adapter) | 7D arm-only projection | DINO-WM / JEPA-WM | a learned latent trajectory |
 
 `robocasa-sim` is a **simulator oracle baseline, not a learned world model**.
 The launcher creates the live and
@@ -56,31 +55,11 @@ Artifacts are retained under the session directory:
 - `inference-audit.jsonl`: the independent policy request/action record;
 - `videos/*.mp4`: actions that were actually executed in the live episode.
 
-## Why learned DINO-WM / JEPA-WM is not enabled yet
+## Learned-predictor admission boundary
 
-The pinned `upstream-jepa-wms` source advertises DROID/RoboCasa checkpoints, but
-those checkpoints consume 7D arm actions (XYZ, Euler rotation, gripper). This
-lab's policy plugins expose a 12D mobile-manipulator contract. The learned
-options therefore remain visibly unavailable in the main selector until all of
-the following are measured:
-
-1. the four mobile-base dimensions are zero or have an explicit learned map;
-2. the binary control-mode channel is handled explicitly rather than mistaken
-   for base motion;
-3. simulator control steps are calibrated to the world model's temporal rate;
-4. rotation convention, camera crop, and context-window packing match training;
-5. decoded or latent predictions are compared with saved simulator outcomes;
-6. latency and memory fit alongside the selected policy.
-
-Set up the isolated Python 3.10 runtime without disturbing either policy env:
-
-```bash
-JEPA_DOWNLOAD_WEIGHTS=1 JEPA_WORLD_MODEL=dino_wm_droid \
-  ./scripts/setup_world_models.sh
-```
-
-`showcase/serve_jepa_world_model.py` is a standalone, loopback-only diagnostic
-worker; the main launcher does not start it or present it as a working app
-plugin. It rejects unvalidated mobile-base projections rather than silently
-discarding them and can report latent displacement plus latent error against a
-simulator outcome. Its result is diagnostic evidence only.
+Learned predictor candidates are intentionally absent from the runnable
+registry and default dependencies. Add one only after its camera, temporal, and
+action contracts match a supported simulator profile, its output is compared
+with saved simulator outcomes, and its latency and memory fit beside the
+selected policy. A predictor remains an opt-in, non-gating diagnostic until
+those checks pass; simulator success remains authoritative.

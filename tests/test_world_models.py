@@ -4,7 +4,6 @@ import dataclasses
 from pathlib import Path
 
 import numpy as np
-import pytest
 
 from showcase import world_model_plugins
 from showcase import world_model_registry
@@ -17,12 +16,10 @@ def test_registry_keeps_world_model_choice_independent_from_policy():
     assert simulator.prediction_kind == "simulator_oracle"
     assert "not a learned world model" in simulator.description.lower()
     assert not simulator.is_learned
-
-    learned = world_model_registry.get_world_model("dino-wm")
-    assert learned.action_schema == "robocasa-panda-manip-7d-v1"
-    assert not learned.available
-    with pytest.raises(ValueError, match="12D mobile-manipulator"):
-        world_model_registry.require_world_model("robocasa", learned.key)
+    assert [item["key"] for item in world_model_registry.catalog("robocasa")] == [
+        "none",
+        "robocasa-sim",
+    ]
 
 
 @dataclasses.dataclass
@@ -179,21 +176,3 @@ def test_predictor_failure_is_returned_instead_of_raised(tmp_path: Path):
     assert result is None
     assert isinstance(error, RuntimeError)
     assert str(error) == "diagnostic branch failed"
-
-
-def test_action_contract_diagnostics_separate_base_and_control_mode():
-    actions = np.zeros((3, 12), dtype=np.float32)
-    actions[:, 11] = -1.0
-    diagnostics = world_model_plugins.action_contract_diagnostics(actions)
-
-    assert diagnostics["base_motion_max_abs"] == 0.0
-    assert diagnostics["base_motion_within_tolerance"]
-    assert diagnostics["control_mode_min"] == -1.0
-    assert diagnostics["control_mode_max"] == -1.0
-    assert "nonzero_base_motion" not in diagnostics["blocked_reasons"]
-    assert not diagnostics["learned_projection_validated"]
-
-    actions[0, 7] = 0.01
-    diagnostics = world_model_plugins.action_contract_diagnostics(actions)
-    assert not diagnostics["base_motion_within_tolerance"]
-    assert "nonzero_base_motion" in diagnostics["blocked_reasons"]

@@ -12,7 +12,6 @@ import dataclasses
 
 
 ROBOCASA_ACTION_SCHEMA = "robocasa-panda-omron-12d-v1"
-ROBOCASA_MANIP_ACTION_SCHEMA = "robocasa-panda-manip-7d-v1"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -57,40 +56,6 @@ WORLD_MODELS = {
             "sanity-check baseline, not a learned world model."
         ),
     ),
-    "dino-wm-droid": WorldModelSpec(
-        key="dino-wm-droid",
-        display_name="DINO-WM · DROID/RoboCasa",
-        runtime="isolated PyTorch worker",
-        prediction_kind="learned_latent_dynamics",
-        compatible_backends=("robocasa",),
-        action_schema=ROBOCASA_MANIP_ACTION_SCHEMA,
-        available=False,
-        description=(
-            "Lightweight learned latent dynamics candidate trained with a 7D "
-            "DROID/RoboCasa manipulation action contract."
-        ),
-        unavailable_reason=(
-            "The current policies emit a 12D mobile-manipulator action. A tested "
-            "7D manipulation projection and goal-frame scoring worker are still required."
-        ),
-    ),
-    "jepa-wm-droid": WorldModelSpec(
-        key="jepa-wm-droid",
-        display_name="JEPA-WM · DROID/RoboCasa",
-        runtime="isolated PyTorch worker",
-        prediction_kind="learned_latent_dynamics",
-        compatible_backends=("robocasa",),
-        action_schema=ROBOCASA_MANIP_ACTION_SCHEMA,
-        available=False,
-        description=(
-            "Higher-capacity learned latent dynamics candidate trained with a 7D "
-            "DROID/RoboCasa manipulation action contract."
-        ),
-        unavailable_reason=(
-            "The 7D action projection, temporal context packing, and goal-frame "
-            "scoring path must be validated before it can gate 12D live actions."
-        ),
-    ),
 }
 
 
@@ -100,10 +65,6 @@ ALIASES = {
     "sim": "robocasa-sim",
     "simulator": "robocasa-sim",
     "simulator-oracle": "robocasa-sim",
-    "dino": "dino-wm-droid",
-    "dino-wm": "dino-wm-droid",
-    "jepa": "jepa-wm-droid",
-    "jepa-wm": "jepa-wm-droid",
 }
 
 

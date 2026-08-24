@@ -16,6 +16,3 @@
 	path = upstream-robocasa-groot
 	url = https://github.com/robocasa-benchmark/Isaac-GR00T.git
 	ignore = untracked
-[submodule "upstream-jepa-wms"]
-	path = upstream-jepa-wms
-	url = https://github.com/facebookresearch/jepa-wms.git

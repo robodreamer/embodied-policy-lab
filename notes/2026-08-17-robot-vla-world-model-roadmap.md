@@ -17,13 +17,11 @@ The corrected behavior:
 - distinguishes completed comparisons from failed diagnostic events;
 - reconciles interrupted client state and prevents accidental concurrent lab
   sessions independently of the GPU-oversubscription switch;
-- writes action-contract diagnostics for every policy response.
+- keeps policy inference audits independent from optional predictor evidence.
 
-Recent π0.5 evidence showed nonzero base-motion values (maximum absolute value
-approximately `1.8e-3`) and a binary control-mode channel near `-1`. The old
-diagnostic worker treated all five trailing dimensions as base motion, so it
-would reject every observed chunk. A learned 7D adapter must separate those
-semantics and validate rotation and temporal conventions before activation.
+Recent π0.5 evidence showed nonzero base-motion values and a separate binary
+control-mode channel. That evidence ruled out silently projecting the lab's
+12D mobile-manipulator output into an unrelated 7D arm-only action contract.
 
 ## Implemented simulator-oracle baseline
 
@@ -36,18 +34,15 @@ semantics and validate rotation and temporal conventions before activation.
   predicted/actual final-state hashes.
 - Preserve π0.5 and GR00T N1.5 behind their existing policy plugins.
 
-## Learned-model sequence
+## Promotion boundary
 
-1. Start with DINO-WM DROID/RoboCasa because its predictor is the smaller
-   candidate and can run in an isolated Python 3.10 worker.
-2. Validate its 7D arm action projection and temporal packing against the
-   paired-simulator outcome; never discard 12D base actions silently.
-3. Promote DINO-WM into the dashboard only after the compatibility test passes.
-4. Repeat the same evidence protocol with the larger JEPA-WM checkpoint.
-5. Keep Cosmos as a separate visual/world-generation judge until a checkpoint
-   with the exact RoboCasa action domain is validated.
-6. Consider V-JEPA2-AC for Franka-style fixed-base experiments and GE-Sim2 only
-   through explicit embodiment adapters.
+The earlier DINO-WM / JEPA-WM prototype surface was removed before promotion:
+neither candidate had a validated mapping from the lab's 12D RoboCasa action
+contract, and disabled selector entries plus an unused submodule made the main
+experience noisier without providing a runnable capability. Their research
+questions, along with Cosmos and future visual/world-generation candidates,
+belong in isolated experiment branches until an exact simulator action and
+observation contract passes the same evidence protocol.
 
 World models provide proposals, rankings, or diagnostics. Simulator success and
 robot safety remain independent authorities.

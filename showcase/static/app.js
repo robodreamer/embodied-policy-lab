@@ -162,7 +162,7 @@ function populateWorldModels(models, selected) {
   select.value = desired;
   const selectedOption = select.selectedOptions[0];
   $("worldModelHelp").textContent = selectedOption?.dataset.description
-    || "Choose a learned predictor or an explicitly labeled simulator baseline.";
+    || "Choose a compatible predictor or an explicitly labeled simulator baseline.";
 }
 
 function isRateEligible(item) {

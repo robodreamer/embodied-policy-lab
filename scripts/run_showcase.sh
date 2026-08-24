@@ -142,8 +142,6 @@ esac
 case "$WORLD_MODEL" in
   off|direct) WORLD_MODEL="none" ;;
   sim|simulator|simulator-oracle) WORLD_MODEL="robocasa-sim" ;;
-  dino|dino-wm) WORLD_MODEL="dino-wm-droid" ;;
-  jepa|jepa-wm) WORLD_MODEL="jepa-wm-droid" ;;
 esac
 
 case "$BACKEND" in
@@ -293,11 +291,6 @@ if [[ "$ROBOCASA_SPLIT" != "pretrain" && "$ROBOCASA_SPLIT" != "target" ]]; then
 fi
 case "$BACKEND/$WORLD_MODEL" in
   libero/none|robocasa/none|robocasa/robocasa-sim) ;;
-  robocasa/dino-wm-droid|robocasa/jepa-wm-droid)
-    echo "$WORLD_MODEL is installed as a diagnostic candidate but is not an execution preview yet." >&2
-    echo "See docs/world-model-plugins.md for the required 7D/12D validation." >&2
-    exit 2
-    ;;
   *)
     echo "World model $WORLD_MODEL does not support backend $BACKEND." >&2
     exit 2
