@@ -153,7 +153,7 @@ Relevant implementation paths:
 - [`../showcase/fastwam_policy.py`](../showcase/fastwam_policy.py): exact local
   preprocessing, current-frame encoding, action generation, denormalization,
   and staging behavior;
-- [`../../../upstream-fastwam/src/fastwam/models/wan22/fastwam.py`](../../../upstream-fastwam/src/fastwam/models/wan22/fastwam.py): pinned upstream
+- [pinned upstream `fastwam.py`](https://github.com/yuantianyuan01/FastWAM/blob/45d8e1458921d83f8ad6cf9ce993d371208dabd0/src/fastwam/models/wan22/fastwam.py): pinned upstream
   training mask plus `infer_action` and `infer_joint` implementations.
 
 ## Evidence measured on this workstation

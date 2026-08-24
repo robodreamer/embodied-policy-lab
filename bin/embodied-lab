@@ -55,8 +55,6 @@ libero    groot-n1.5    incompatible
 PREDICTOR / BASELINE  BACKEND    STATUS
 none                  any        ready / default direct execution
 robocasa-sim          robocasa   ready / deterministic oracle baseline
-dino-wm-droid     robocasa   adapter validation required
-jepa-wm-droid     robocasa   adapter validation required
 EOF
 }
 

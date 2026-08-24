@@ -16,7 +16,6 @@ Backend, model, and task options:
   --backend libero|robocasa       Simulator backend (default: libero)
   --model pi05|fastwam|groot-n1.5 Local policy plugin (default: pi05)
   --world-model NAME              none (default) or robocasa-sim oracle baseline
-  --preview-steps COUNT           Legacy option; comparison follows --replan-steps
   --compare-world-model           Compare prediction after each real action prefix
   --no-compare-world-model        Run normally without comparison (default)
   --task-suite NAME               LIBERO suite or RoboCasa task set
@@ -61,8 +60,6 @@ EOF
 BACKEND="${BACKEND:-libero}"
 MODEL="${MODEL:-pi05}"
 WORLD_MODEL="${WORLD_MODEL:-}"
-PREVIEW_STEPS="${PREVIEW_STEPS:-5}"
-PREVIEW_APPROVAL="${PREVIEW_APPROVAL:-auto}"
 COMPARE_WORLD_MODEL="${COMPARE_WORLD_MODEL:-0}"
 TASK_SUITE="${TASK_SUITE:-}"
 TASK_IDS="${TASK_IDS:-}"
@@ -96,8 +93,11 @@ while [[ $# -gt 0 ]]; do
     --backend) BACKEND="${2:?--backend requires a value}"; shift 2 ;;
     --model) MODEL="${2:?--model requires a value}"; shift 2 ;;
     --world-model) WORLD_MODEL="${2:?--world-model requires a value}"; shift 2 ;;
-    --preview-steps) PREVIEW_STEPS="${2:?--preview-steps requires a value}"; shift 2 ;;
-    --preview-approval) PREVIEW_APPROVAL="${2:?--preview-approval requires a value}"; shift 2 ;;
+    --preview-steps|--preview-approval)
+      echo "Warning: $1 is deprecated; comparison length follows --replan-steps." >&2
+      : "${2:?$1 requires a value}"
+      shift 2
+      ;;
     --compare-world-model) COMPARE_WORLD_MODEL=1; shift ;;
     --no-compare-world-model) COMPARE_WORLD_MODEL=0; shift ;;
     --task-suite|--task-set) TASK_SUITE="${2:?$1 requires a value}"; shift 2 ;;
@@ -156,6 +156,12 @@ case "$BACKEND" in
         OPENPI_DIR="$(cd "$candidate" && pwd)"
       fi
     fi
+    LIBERO_OPENPI_DATA_HOME="${OPENPI_DATA_HOME:-$PROJECT_DIR/cache/openpi}"
+    primary_openpi_cache="$(dirname "$OPENPI_DIR")/cache/openpi"
+    if [[ ! -d "$LIBERO_OPENPI_DATA_HOME/openpi-assets/checkpoints/pi05_libero" ]] && \
+      [[ -d "$primary_openpi_cache/openpi-assets/checkpoints/pi05_libero" ]]; then
+      LIBERO_OPENPI_DATA_HOME="$primary_openpi_cache"
+    fi
     case "$MODEL" in
       pi05)
         RUNTIME_PYTHON="$OPENPI_DIR/.venv/bin/python"
@@ -165,7 +171,7 @@ case "$BACKEND" in
         if [[ -z "$FASTWAM_DIR" ]]; then
           for candidate in "$PROJECT_DIR/../upstream-fastwam" \
             "$PROJECT_DIR/../../upstream-fastwam"; do
-            if [[ -d "$candidate/.git" ]]; then
+            if git -C "$candidate" rev-parse --git-dir >/dev/null 2>&1; then
               FASTWAM_DIR="$(cd "$candidate" && pwd)"
               break
             fi
@@ -222,15 +228,19 @@ case "$BACKEND" in
     ;;
 esac
 
-if [[ -z "$REPLAN_STEPS" ]]; then
-  if [[ "$MODEL" == "groot-n1.5" ]]; then
-    REPLAN_STEPS=16
-  elif [[ "$MODEL" == "fastwam" ]]; then
-    REPLAN_STEPS=10
-  else
-    REPLAN_STEPS=5
-  fi
-fi
+read -r DEFAULT_REPLAN_STEPS ACTION_HORIZON < <(
+  python3 - "$PROJECT_DIR" "$BACKEND" "$MODEL" <<'PY'
+import pathlib
+import sys
+
+sys.path.insert(0, sys.argv[1])
+from showcase import backend_registry
+
+profile = backend_registry.get_profile(sys.argv[2], sys.argv[3])
+print(profile.default_replan_steps, profile.action_horizon)
+PY
+)
+REPLAN_STEPS="${REPLAN_STEPS:-$DEFAULT_REPLAN_STEPS}"
 if [[ "$MODEL" == "fastwam" ]]; then
   NUM_STEPS_WAIT=30
 else
@@ -244,23 +254,20 @@ if [[ "$MODEL" == "groot-n1.5" ]]; then
 fi
 
 for integer_value in "$TRIALS_PER_TASK" "$SEED" "$REPLAN_STEPS" "$MAX_POLICY_STEPS" "$POLICY_PORT" \
-  "$DASHBOARD_PORT" "$REALTIME_DELAY_MS" "$VIEWER_WIDTH" "$VIEWER_HEIGHT" \
-  "$PREVIEW_STEPS"; do
+  "$DASHBOARD_PORT" "$REALTIME_DELAY_MS" "$VIEWER_WIDTH" "$VIEWER_HEIGHT"; do
   if [[ ! "$integer_value" =~ ^[0-9]+$ ]]; then
     echo "Expected a non-negative integer, got: $integer_value" >&2
     exit 2
   fi
 done
-if [[ "$TRIALS_PER_TASK" == "0" ]] || [[ "$REPLAN_STEPS" == "0" ]] || \
-  [[ "$PREVIEW_STEPS" == "0" ]]; then
-  echo "--trials, --replan-steps, and --preview-steps must be positive." >&2
+if [[ "$TRIALS_PER_TASK" == "0" ]] || [[ "$REPLAN_STEPS" == "0" ]]; then
+  echo "--trials and --replan-steps must be positive." >&2
   exit 2
 fi
-if [[ "$PREVIEW_APPROVAL" != "manual" && "$PREVIEW_APPROVAL" != "auto" ]]; then
-  echo "--preview-approval must be manual or auto." >&2
+if (( REPLAN_STEPS > ACTION_HORIZON )); then
+  echo "--replan-steps cannot exceed the $ACTION_HORIZON-action horizon for $BACKEND/$MODEL." >&2
   exit 2
 fi
-PREVIEW_APPROVAL="auto"
 if [[ "$COMPARE_WORLD_MODEL" != "0" && "$COMPARE_WORLD_MODEL" != "1" ]]; then
   echo "COMPARE_WORLD_MODEL must be 0 or 1." >&2
   exit 2
@@ -473,8 +480,8 @@ wait_for_tcp_listener() {
 "$RUNTIME_PYTHON" - \
   "$PROJECT_DIR" "$SESSION_DIR/state.json" "$BACKEND" "$MODEL" "$TASK_SUITE" \
   "$TASK_IDS" "$POLICY_PORT" "$INTERACTIVE" "$NETWORK_AUDIT" \
-  "$VIEWER_WIDTH" "$VIEWER_HEIGHT" "$WORLD_MODEL" "$PREVIEW_STEPS" \
-  "$PREVIEW_APPROVAL" "$COMPARE_WORLD_MODEL" "$REPLAN_STEPS" <<'PY'
+  "$VIEWER_WIDTH" "$VIEWER_HEIGHT" "$WORLD_MODEL" \
+  "$COMPARE_WORLD_MODEL" "$REPLAN_STEPS" <<'PY'
 import datetime
 import json
 import pathlib
@@ -488,10 +495,8 @@ interactive = sys.argv[8] == "1"
 network_audit = sys.argv[9] == "1"
 viewer_width, viewer_height = map(int, sys.argv[10:12])
 world_model_key = sys.argv[12]
-preview_steps = int(sys.argv[13])
-preview_approval = sys.argv[14]
-compare_world_model = sys.argv[15] == "1"
-replan_steps = int(sys.argv[16])
+compare_world_model = sys.argv[13] == "1"
+replan_steps = int(sys.argv[14])
 sys.path.insert(0, str(project_dir))
 
 from showcase import backend_registry
@@ -537,8 +542,6 @@ state = {
     "world_model_description": world_model.description,
     "available_world_models": world_model_registry.catalog(backend),
     "preview_steps": replan_steps,
-    "configured_preview_steps": preview_steps,
-    "preview_approval": preview_approval,
     "compare_world_model": compare_world_model,
     "comparison_status": "initializing" if compare_world_model else "disabled",
     "suite": suite,
@@ -603,11 +606,15 @@ echo "Starting local $MODEL server for $BACKEND..."
 if [[ "$NETWORK_AUDIT" == "1" ]]; then
   setsid strace -f -e trace=network -s 256 -o "$SESSION_DIR/network-server.log" \
     env BACKEND="$BACKEND" MODEL="$MODEL" POLICY_PORT="$POLICY_PORT" \
+      LIBERO_OPENPI_DIR="${OPENPI_DIR:-}" \
+      OPENPI_DATA_HOME="${LIBERO_OPENPI_DATA_HOME:-}" \
       FASTWAM_DIR="$FASTWAM_DIR" FASTWAM_ARTIFACT_DIR="$SESSION_DIR/policy-inference" \
       "$SCRIPT_DIR/run_server.sh" \
     > "$SESSION_DIR/server.log" 2>&1 &
 else
   setsid env BACKEND="$BACKEND" MODEL="$MODEL" POLICY_PORT="$POLICY_PORT" \
+    LIBERO_OPENPI_DIR="${OPENPI_DIR:-}" \
+    OPENPI_DATA_HOME="${LIBERO_OPENPI_DATA_HOME:-}" \
     FASTWAM_DIR="$FASTWAM_DIR" FASTWAM_ARTIFACT_DIR="$SESSION_DIR/policy-inference" \
     "$SCRIPT_DIR/run_server.sh" \
     > "$SESSION_DIR/server.log" 2>&1 &
@@ -702,8 +709,6 @@ else
     "$CLIENT_PYTHON" "$PROJECT_DIR/showcase/interactive_robocasa.py"
     --model "$MODEL"
     --world-model "$WORLD_MODEL"
-    --preview-steps "$PREVIEW_STEPS"
-    --preview-approval "$PREVIEW_APPROVAL"
     --host 127.0.0.1
     --port "$POLICY_PORT"
     --replan-steps "$REPLAN_STEPS"

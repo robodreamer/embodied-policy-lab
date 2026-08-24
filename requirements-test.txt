@@ -1,0 +1,4 @@
+imageio>=2.37,<3
+numpy>=1.26,<3
+pillow>=10,<13
+pytest>=8,<9

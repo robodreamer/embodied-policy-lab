@@ -81,7 +81,9 @@ MP4 for inspection.
 The project is structured for publication: in-tree upstream integrations are
 pinned Git submodules. Fast-WAM uses a revision-checked sibling checkout so its
 independent runtime and release assets stay isolated. Model weights and
-generated machine-specific artifacts are excluded from version control.
+generated machine-specific artifacts are excluded from version control. See
+[the external asset notes](docs/external-assets.md) for weight-license and
+integrity details.
 
 ## Status
 
@@ -146,14 +148,16 @@ GROOT_DOWNLOAD_CHECKPOINT=1 ./scripts/setup_groot.sh
   --backend robocasa --model groot-n1.5
 ```
 
-For the experimental Fast-WAM LIBERO profile, keep the pinned Fast-WAM runtime
-beside this repository, verify both isolated environments, then use the same
-dashboard. The released checkpoint is action-only at evaluation time: it
-predicts a 32×7 action chunk from the current external/wrist frames and 8D
-state; it does not render a future-video preview.
+For the experimental Fast-WAM LIBERO profile, the setup script creates the
+pinned sibling runtime, downloads the release at a pinned Hub revision, and
+verifies the checkpoint and statistics hashes. The released checkpoint is
+action-only at evaluation time: it predicts a 32×7 action chunk from the
+current external/wrist frames and 8D state; it does not render a future-video
+preview.
 
 ```bash
-./scripts/setup_fastwam_libero.sh --check
+./scripts/setup_fastwam_libero.sh
+./scripts/setup_fastwam_libero.sh --check  # later integrity/readiness check
 ./scripts/run_interactive_showcase.sh \
   --backend libero --model fastwam --task-id 2
 ```

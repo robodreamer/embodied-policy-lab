@@ -4,6 +4,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 EXPECTED_REVISION="45d8e1458921d83f8ad6cf9ce993d371208dabd0"
+RELEASE_REVISION="05680dbe51815d18bbe70d3faa61b2cffaf03cd7"
+CHECKPOINT_SHA256="1000437cfcf55c000094f79a2600634c502bcb5b492476b94bf8509883a49579"
+STATS_SHA256="30f81ad7d5076e97323e3328bce003e01a04cb21327b5bacd21bb72846768638"
 CHECK_ONLY=0
 if [[ "${1:-}" == "--check" ]]; then
   CHECK_ONLY=1
@@ -30,10 +33,13 @@ find_fastwam() {
 
 FASTWAM_ROOT="$(find_fastwam || true)"
 if [[ -z "$FASTWAM_ROOT" ]]; then
-  echo "Fast-WAM source is missing. Clone the pinned upstream beside this repo:" >&2
-  echo "  git clone https://github.com/yuantianyuan01/FastWAM.git ../upstream-fastwam" >&2
-  echo "  git -C ../upstream-fastwam checkout $EXPECTED_REVISION" >&2
-  exit 1
+  if [[ "$CHECK_ONLY" == "1" ]]; then
+    echo "missing Fast-WAM source beside this repo (expected revision $EXPECTED_REVISION)" >&2
+    exit 1
+  fi
+  FASTWAM_ROOT="$(cd "$PROJECT_DIR/.." && pwd)/upstream-fastwam"
+  git clone https://github.com/yuantianyuan01/FastWAM.git "$FASTWAM_ROOT"
+  git -C "$FASTWAM_ROOT" checkout "$EXPECTED_REVISION"
 fi
 
 status=0
@@ -47,16 +53,54 @@ check() {
   fi
 }
 
+verify_sha256() {
+  local description="$1" path="$2" expected="$3" actual
+  if [[ ! -f "$path" ]]; then
+    return
+  fi
+  actual="$(sha256sum "$path" | cut -d ' ' -f 1)"
+  if [[ "$actual" == "$expected" ]]; then
+    printf 'ok      %s sha256: %s\n' "$description" "$actual"
+  else
+    printf 'wrong   %s sha256: %s (expected %s)\n' \
+      "$description" "$actual" "$expected" >&2
+    status=1
+  fi
+}
+
 actual_revision="$(git -C "$FASTWAM_ROOT" rev-parse HEAD)"
 if [[ "$actual_revision" == "$EXPECTED_REVISION" ]]; then
   echo "ok      upstream revision: $actual_revision"
 else
   echo "wrong   upstream revision: $actual_revision (expected $EXPECTED_REVISION)" >&2
-  status=1
+  echo "Refusing to change an existing checkout; pin it explicitly or set FASTWAM_DIR." >&2
+  exit 1
 fi
+
+RELEASE_DIR="$FASTWAM_ROOT/checkpoints/fastwam_release"
+CHECKPOINT="$RELEASE_DIR/libero_uncond_2cam224.pt"
+STATS="$RELEASE_DIR/libero_uncond_2cam224_dataset_stats.json"
+if [[ "$CHECK_ONLY" != "1" ]]; then
+  if [[ ! -x "$FASTWAM_ROOT/.venv/bin/python" ]]; then
+    uv venv --python 3.10 "$FASTWAM_ROOT/.venv"
+  fi
+  PYTHON="$FASTWAM_ROOT/.venv/bin/python"
+  UV_EXTRA_INDEX_URL=https://download.pytorch.org/whl/cu128 \
+    uv pip install --python "$PYTHON" --index-strategy unsafe-best-match \
+    -e "$FASTWAM_ROOT"
+  mkdir -p "$RELEASE_DIR"
+  uvx hf@latest download yuanty/fastwam \
+    libero_uncond_2cam224.pt \
+    libero_uncond_2cam224_dataset_stats.json \
+    --revision "$RELEASE_REVISION" \
+    --local-dir "$RELEASE_DIR"
+fi
+
 check "Fast-WAM Python" "$FASTWAM_ROOT/.venv/bin/python"
-check "release checkpoint" "$FASTWAM_ROOT/checkpoints/fastwam_release/libero_uncond_2cam224.pt"
-check "normalization stats" "$FASTWAM_ROOT/checkpoints/fastwam_release/libero_uncond_2cam224_dataset_stats.json"
+check "release checkpoint" "$CHECKPOINT"
+check "normalization stats" "$STATS"
+verify_sha256 "release checkpoint" "$CHECKPOINT" "$CHECKPOINT_SHA256"
+verify_sha256 "normalization stats" "$STATS" "$STATS_SHA256"
 
 OPENPI_ROOT="${LIBERO_OPENPI_DIR:-$PROJECT_DIR/upstream-openpi}"
 if [[ ! -x "$OPENPI_ROOT/examples/libero/.venv/bin/python" ]]; then
@@ -81,7 +125,7 @@ if [[ "$CHECK_ONLY" == "1" ]]; then
 fi
 if [[ "$status" != "0" ]]; then
   echo >&2
-  echo "Install Fast-WAM using its pinned upstream instructions and release assets." >&2
+  echo "Rerun $0 to install the pinned Fast-WAM runtime and release assets." >&2
   echo "Set up the LIBERO client with ./scripts/setup.sh if it is the missing item." >&2
   exit "$status"
 fi

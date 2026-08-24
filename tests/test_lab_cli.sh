@@ -7,6 +7,26 @@ list_output="$($PROJECT_DIR/lab --list)"
 grep -F "robocasa  pi05          ready / default" <<<"$list_output" >/dev/null
 grep -F "robocasa  groot-n1.5    ready" <<<"$list_output" >/dev/null
 grep -F "libero    fastwam       experimental" <<<"$list_output" >/dev/null
+if grep -E 'dino-wm|jepa-wm' <<<"$list_output" >/dev/null; then
+  echo "unsupported learned predictors must not appear in ./lab --list" >&2
+  exit 1
+fi
+
+while read -r backend model; do
+  grep -E "^${backend}[[:space:]]+${model}[[:space:]]" <<<"$list_output" >/dev/null || {
+    echo "registry profile missing from ./lab --list: $backend/$model" >&2
+    exit 1
+  }
+done < <(python3 - "$PROJECT_DIR" <<'PY'
+import sys
+
+sys.path.insert(0, sys.argv[1])
+from showcase import backend_registry
+
+for backend, model in sorted(backend_registry.PROFILES):
+    print(backend, model)
+PY
+)
 
 default_output="$($PROJECT_DIR/lab --default --dry-run)"
 grep -F "Simulator: robocasa" <<<"$default_output" >/dev/null

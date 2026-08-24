@@ -80,7 +80,8 @@ closed-loop experiment and is explicitly not done.
 ## How to run
 
 ```bash
-cd /home/andypark/Projects/playground/git-worktrees/embodied-policy-lab-fastwam
+cd /path/to/embodied-policy-lab
+./scripts/setup_fastwam_libero.sh
 ./scripts/setup_fastwam_libero.sh --check
 
 # Interactive dashboard; task 2 matches the bounded fixture used earlier.

@@ -27,6 +27,8 @@ from PIL import Image
 EXPECTED_UPSTREAM_REVISION = "45d8e1458921d83f8ad6cf9ce993d371208dabd0"
 CHECKPOINT_FILENAME = "libero_uncond_2cam224.pt"
 STATS_FILENAME = "libero_uncond_2cam224_dataset_stats.json"
+CHECKPOINT_SHA256 = "1000437cfcf55c000094f79a2600634c502bcb5b492476b94bf8509883a49579"
+STATS_SHA256 = "30f81ad7d5076e97323e3328bce003e01a04cb21327b5bacd21bb72846768638"
 PROMPT_TEMPLATE = (
     "A video recorded from a robot's point of view executing the following "
     "instruction: {task}"
@@ -52,6 +54,18 @@ def _git_revision(path: pathlib.Path) -> str:
     return subprocess.check_output(
         ["git", "rev-parse", "HEAD"], cwd=path, text=True
     ).strip()
+
+
+def _verify_sha256(path: pathlib.Path, expected: str) -> None:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(8 * 1024 * 1024), b""):
+            digest.update(chunk)
+    actual = digest.hexdigest()
+    if actual != expected:
+        raise ValueError(
+            f"Artifact checksum mismatch for {path}: got {actual}, expected {expected}"
+        )
 
 
 def _center_crop_resize(image: np.ndarray, size: int = 224) -> np.ndarray:
@@ -156,6 +170,8 @@ class StagedFastWamPolicy:
         for path in (self.checkpoint, self.stats_path):
             if not path.is_file():
                 raise FileNotFoundError(path)
+        _verify_sha256(self.checkpoint, CHECKPOINT_SHA256)
+        _verify_sha256(self.stats_path, STATS_SHA256)
         if self.artifact_dir:
             self.artifact_dir.mkdir(parents=True, exist_ok=True)
 

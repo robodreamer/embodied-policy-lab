@@ -33,8 +33,6 @@ except ImportError:  # Direct script execution adds showcase/ to sys.path.
 class Args:
     model: str = "pi05"
     world_model: str = "none"
-    preview_steps: int = 5
-    preview_approval: str = "auto"  # Legacy CLI field; comparisons never gate execution.
     compare_world_model: bool = False
     host: str = "127.0.0.1"
     port: int = 8000
@@ -208,10 +206,6 @@ def run(args: Args) -> None:
             f"replan_steps cannot exceed {policy_spec.display_name}'s "
             f"{policy_profile.action_horizon}-step action horizon"
         )
-    if args.preview_steps < 1:
-        raise ValueError("preview_steps must be positive")
-    if args.preview_approval not in ("manual", "auto"):
-        raise ValueError("preview_approval must be manual or auto")
     if args.viewer_width < 1 or args.viewer_height < 1:
         raise ValueError("viewer_width and viewer_height must be positive")
     if args.viewer_fps <= 0:
@@ -318,8 +312,6 @@ def run(args: Args) -> None:
             "world_model_description": active_world_model.description,
             "available_world_models": world_model_registry.catalog("robocasa"),
             "preview_steps": execution_prefix_steps(),
-            "configured_preview_steps": args.preview_steps,
-            "preview_approval": "post_execution_comparison",
             "compare_world_model": compare_world_model,
             "comparison_active": False,
             "comparison_status": "waiting_for_action_chunk"

@@ -24,12 +24,18 @@ from robocasa.utils.dataset_registry_utils import get_task_horizon
 from robocasa.utils.env_utils import convert_action
 from robosuite.utils.binding_utils import MjRenderContextOffscreen
 
-
-CAMERA_KEYS = (
-    "video.robot0_agentview_left",
-    "video.robot0_eye_in_hand",
-    "video.robot0_agentview_right",
-)
+try:
+    from .robocasa_contracts import (
+        CAMERA_KEYS,
+        robot_state_from_observation,
+        validate_action_chunk,
+    )
+except ImportError:  # Direct script execution adds showcase/ to sys.path.
+    from robocasa_contracts import (
+        CAMERA_KEYS,
+        robot_state_from_observation,
+        validate_action_chunk,
+    )
 
 
 def timestamp() -> str:
@@ -161,29 +167,6 @@ def reset_environment_pair(live_env, branch_env, seed: int):
     return live_observation, live_info
 
 
-def robot_state_from_observation(observation: dict) -> np.ndarray:
-    robot_state = np.concatenate(
-        (
-            observation["state.end_effector_position_relative"],
-            observation["state.end_effector_rotation_relative"],
-            observation["state.base_position"],
-            observation["state.base_rotation"],
-            observation["state.gripper_qpos"],
-        ),
-        axis=0,
-    )
-    if robot_state.shape != (16,):
-        raise ValueError(f"Expected a 16D RoboCasa state; got {robot_state.shape}")
-    return robot_state
-
-
-def observation_from_environment(env) -> dict:
-    """Read a mapped observation after directly synchronizing MuJoCo state."""
-    wrapper = env.unwrapped
-    raw = wrapper.env._get_observations(force_update=True)
-    return wrapper.get_observation(raw)
-
-
 def suspend_environment_renderer(env) -> None:
     """Release a branch EGL context so it cannot contaminate live rendering."""
     sim = env.unwrapped.env.sim
@@ -243,15 +226,6 @@ def render_viewer_frames(
             "robot0_eye_in_hand",
         )
     )
-
-
-def validate_action_chunk(value) -> np.ndarray:
-    actions = np.asarray(value)
-    if actions.ndim != 2 or actions.shape[1] != 12:
-        raise ValueError(f"Expected a [horizon, 12] action chunk; got {actions.shape}")
-    if not np.isfinite(actions).all():
-        raise ValueError("Policy returned non-finite RoboCasa actions")
-    return actions
 
 
 def step_environment(env, action: np.ndarray):
