@@ -3,7 +3,11 @@ import pytest
 
 from showcase import backend_registry
 from showcase.fastwam_policy import combine_cameras, format_prompt
-from showcase.libero_policy_plugins import _uint8_payload, decode_uint8_payload
+from showcase.libero_policy_plugins import (
+    FastWamLiberoClient,
+    _uint8_payload,
+    decode_uint8_payload,
+)
 
 
 def test_fastwam_profile_matches_released_libero_contract():
@@ -26,6 +30,20 @@ def test_camera_composition_is_external_then_wrist_and_transport_is_lossless():
     assert combined.shape == (224, 448, 3)
     assert np.array_equal(combined[:, :224], np.full((224, 224, 3), (1, 2, 3)))
     assert np.array_equal(combined[:, 224:], np.full((224, 224, 3), (101, 102, 103)))
+
+
+def test_shared_client_keeps_validated_fastwam_224_input_contract():
+    client = object.__new__(FastWamLiberoClient)
+    external = np.zeros((256, 256, 3), dtype=np.uint8)
+    wrist = np.zeros((256, 256, 3), dtype=np.uint8)
+    observation = client.prepare_observation(
+        external,
+        wrist,
+        np.zeros(8, dtype=np.float32),
+        "pick up the bowl",
+    )
+    assert observation["observation/image"].shape == (224, 224, 3)
+    assert observation["observation/wrist_image"].shape == (224, 224, 3)
 
 
 def test_prompt_is_wrapped_exactly_once():

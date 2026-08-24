@@ -17,11 +17,22 @@ import pathlib
 import time
 
 import imageio
+# Flex-π's Python 3.10 / torch>=2.6 runtime needs its official LIBERO setup
+# hook before importing the benchmark package. It pins the active checkout's
+# data paths and permits the trusted NumPy-backed benchmark init-state files.
+# Older OpenPI client environments do not install flexpi and keep their
+# existing import behavior.
+try:
+    from flexpi.utils.libero_setup import prepare_libero
+except ImportError:
+    pass
+else:
+    prepare_libero()
+
 from libero.libero import benchmark
 from libero.libero import get_libero_path
 from libero.libero.envs import OffScreenRenderEnv
 import numpy as np
-from openpi_client import image_tools
 from PIL import Image
 import tqdm
 import tyro
@@ -50,6 +61,7 @@ class Args:
     seed: int = 7
     realtime_delay_ms: int = 35
     network_audit: bool = True
+    flexpi_mode: str = "action-only"
 
 
 def _timestamp():
@@ -112,7 +124,7 @@ def _max_steps(task_suite_name, model="pi05"):
     }[task_suite_name]
 
 
-def _get_libero_env(task, resolution, seed):
+def _get_libero_env(task, resolution, seed, *, camera_depths=False):
     task_bddl_file = (
         pathlib.Path(get_libero_path("bddl_files"))
         / task.problem_folder
@@ -122,6 +134,7 @@ def _get_libero_env(task, resolution, seed):
         "bddl_file_name": task_bddl_file,
         "camera_heights": resolution,
         "camera_widths": resolution,
+        "camera_depths": camera_depths,
     }
     env = OffScreenRenderEnv(**env_args)
     env.seed(seed)
@@ -136,15 +149,30 @@ def _quat2axisangle(quat):
     return (quat[:3] * 2.0 * math.acos(quat[3])) / denominator
 
 
-def _prepare_observation(obs, resize_size, prompt):
-    external = np.ascontiguousarray(obs["agentview_image"][::-1, ::-1])
-    wrist = np.ascontiguousarray(obs["robot0_eye_in_hand_image"][::-1, ::-1])
-    external = image_tools.convert_to_uint8(
-        image_tools.resize_with_pad(external, resize_size, resize_size)
-    )
-    wrist = image_tools.convert_to_uint8(
-        image_tools.resize_with_pad(wrist, resize_size, resize_size)
-    )
+def _depth_mm(obs, env):
+    """Convert robosuite's normalized depth buffers to lossless millimetres."""
+
+    from robosuite.utils.camera_utils import get_real_depth_map
+
+    result = {}
+    for output_name, observation_name in (
+        ("external", "agentview_depth"),
+        ("wrist", "robot0_eye_in_hand_depth"),
+    ):
+        if observation_name not in obs:
+            raise ValueError(
+                f"Depth-enabled LIBERO observation is missing {observation_name!r}"
+            )
+        normalized = np.clip(np.asarray(obs[observation_name]), 0.0, 1.0)
+        metres = np.asarray(get_real_depth_map(env.sim, normalized))[..., 0]
+        millimetres = np.clip(metres * 1000.0, 0, 65535).astype(np.uint16)
+        result[output_name] = np.ascontiguousarray(millimetres[::-1, ::-1])
+    return result
+
+
+def _prepare_observation(obs, resize_size, prompt, client, env=None):
+    del resize_size  # Each policy client owns its exact input preprocessing contract.
+    external, wrist = _display_images(obs)
     robot_state = np.concatenate(
         (
             obs["robot0_eef_pos"],
@@ -152,13 +180,23 @@ def _prepare_observation(obs, resize_size, prompt):
             obs["robot0_gripper_qpos"],
         )
     )
-    model_input = {
-        "observation/image": external,
-        "observation/wrist_image": wrist,
-        "observation/state": robot_state,
-        "prompt": str(prompt),
-    }
+    depth = None
+    if client.requires_depth:
+        if env is None:
+            raise ValueError("A live LIBERO environment is required for depth conversion")
+        depth = _depth_mm(obs, env)
+    model_input = client.prepare_observation(
+        external, wrist, robot_state, str(prompt), depth=depth
+    )
     return external, wrist, robot_state, model_input
+
+
+def _display_images(obs):
+    """Return display/train-aligned raw RGB without policy-specific resizing."""
+
+    external = np.ascontiguousarray(obs["agentview_image"][::-1, ::-1])
+    wrist = np.ascontiguousarray(obs["robot0_eye_in_hand_image"][::-1, ::-1])
+    return np.asarray(external, dtype=np.uint8), np.asarray(wrist, dtype=np.uint8)
 
 
 def evaluate(args):
@@ -168,7 +206,9 @@ def evaluate(args):
     task_ids = _parse_task_ids(args.task_ids, suite.n_tasks)
     video_path = pathlib.Path(args.video_out_path)
     video_path.mkdir(parents=True, exist_ok=True)
-    client = create_libero_policy_client(args.model, args.host, args.port)
+    client = create_libero_policy_client(
+        args.model, args.host, args.port, flexpi_mode=args.flexpi_mode
+    )
     inference_audit_path = pathlib.Path(args.session_dir) / "inference-audit.jsonl"
     latencies = []
     model_request_count = 0
@@ -200,6 +240,12 @@ def evaluate(args):
             "replan_steps": args.replan_steps,
             "action_horizon": client.profile.action_horizon,
             "action_dimension": 7,
+            "policy_mode": client.mode,
+            "available_policy_modes": list(client.available_modes),
+            "model_image_width": client.model_image_width,
+            "model_image_height": client.model_image_height,
+            "camera_observation_width": LIBERO_ENV_RESOLUTION,
+            "camera_observation_height": LIBERO_ENV_RESOLUTION,
             "action_labels": [
                 "EEF ΔX",
                 "EEF ΔY",
@@ -223,7 +269,10 @@ def evaluate(args):
             task = suite.get_task(task_id)
             initial_states = suite.get_task_init_states(task_id)
             env, task_description = _get_libero_env(
-                task, LIBERO_ENV_RESOLUTION, args.seed
+                task,
+                LIBERO_ENV_RESOLUTION,
+                args.seed,
+                camera_depths=client.requires_depth,
             )
 
             for episode_index in range(args.num_trials_per_task):
@@ -256,7 +305,7 @@ def evaluate(args):
                         continue
 
                     external, wrist, robot_state, model_input = _prepare_observation(
-                        obs, args.resize_size, task_description
+                        obs, args.resize_size, task_description, client, env
                     )
                     state.frames(external, wrist)
                     replay_images.append(external)
@@ -288,6 +337,8 @@ def evaluate(args):
                             "inference_latency_ms": round(inference_latency, 2),
                             "policy_timing": policy_response.get("timing"),
                             "policy_artifact": policy_response.get("artifact"),
+                            "policy_mode": client.mode,
+                            "policy_prediction": policy_response.get("prediction"),
                             "max_steps": max_steps,
                         }
                         with inference_audit_path.open("a", encoding="utf-8") as stream:
@@ -322,7 +373,7 @@ def evaluate(args):
                     step += 1
                     if done:
                         final_external, final_wrist, _, _ = _prepare_observation(
-                            obs, args.resize_size, task_description
+                            obs, args.resize_size, task_description, client, env
                         )
                         state.frames(final_external, final_wrist)
                         replay_images.append(final_external)

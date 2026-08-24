@@ -510,6 +510,16 @@ def main():
                 self._file(
                     session_dir / "previews" / "latest_actual.mp4", "video/mp4"
                 )
+            elif route == "/previews/latest_policy_prediction.mp4":
+                self._file(
+                    session_dir / "previews" / "latest_policy_prediction.mp4",
+                    "video/mp4",
+                )
+            elif route == "/previews/latest_policy_actual.mp4":
+                self._file(
+                    session_dir / "previews" / "latest_policy_actual.mp4",
+                    "video/mp4",
+                )
             else:
                 super().do_GET()
 
@@ -529,6 +539,7 @@ def main():
                         "stop",
                         "set_prompt",
                         "set_task",
+                        "set_policy_mode",
                         "set_world_model",
                         "set_world_model_comparison",
                     }

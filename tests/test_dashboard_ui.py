@@ -54,6 +54,17 @@ def test_dashboard_reveals_opt_in_comparison_after_actual_execution():
     assert 'action: "reject_preview"' not in javascript
 
 
+def test_dashboard_exposes_flexpi_mode_and_delayed_joint_future():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    javascript = (STATIC / "app.js").read_text(encoding="utf-8")
+
+    assert 'id="policyModeSelect"' in html
+    assert 'action: "set_policy_mode"' in javascript
+    assert "policy_prediction_status === \"ready\"" in javascript
+    assert "FLEX-π JOINT FUTURE VS COMPLETED EXECUTION" in javascript
+    assert "REVEALED AFTER EXECUTION" in javascript
+
+
 def test_dashboard_opens_before_heavy_policy_startup():
     launcher = (ROOT / "scripts" / "run_showcase.sh").read_text(encoding="utf-8")
 

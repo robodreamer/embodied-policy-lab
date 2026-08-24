@@ -7,6 +7,7 @@ list_output="$($PROJECT_DIR/lab --list)"
 grep -F "robocasa  pi05          ready / default" <<<"$list_output" >/dev/null
 grep -F "robocasa  groot-n1.5    ready" <<<"$list_output" >/dev/null
 grep -F "libero    fastwam       experimental" <<<"$list_output" >/dev/null
+grep -F "libero    flexpi        experimental" <<<"$list_output" >/dev/null
 if grep -E 'dino-wm|jepa-wm' <<<"$list_output" >/dev/null; then
   echo "unsupported learned predictors must not appear in ./lab --list" >&2
   exit 1
@@ -52,5 +53,12 @@ fastwam_output="$("$PROJECT_DIR/lab" \
   --task-id 2 --trials 1 --default --dry-run)"
 grep -F "Model: fastwam" <<<"$fastwam_output" >/dev/null
 grep -F -- "--backend libero --model fastwam" <<<"$fastwam_output" >/dev/null
+
+flexpi_output="$("$PROJECT_DIR/lab" \
+  --backend libero --model flexpi --mode interactive \
+  --task-id 0 --default --dry-run -- --flexpi-mode full-joint)"
+grep -F "Model: flexpi" <<<"$flexpi_output" >/dev/null
+grep -F -- "--backend libero --model flexpi" <<<"$flexpi_output" >/dev/null
+grep -F -- "--flexpi-mode full-joint" <<<"$flexpi_output" >/dev/null
 
 echo "lab CLI checks passed"

@@ -35,6 +35,8 @@ class Args:
     realtime_delay_ms: int = 35
     network_audit: bool = True
     initial_prompt: str = ""
+    flexpi_mode: str = "action-only"
+    auto_start: bool = False
 
 
 class ControlInbox:
@@ -82,6 +84,44 @@ def _prompt_stats(history):
     return stats
 
 
+def _clip_psnr(predicted, actual):
+    values = []
+    for expected, observed in zip(predicted, actual):
+        expected = np.asarray(expected, dtype=np.float32)
+        observed = np.asarray(observed, dtype=np.float32)
+        if expected.shape != observed.shape:
+            continue
+        mse = float(np.mean((expected - observed) ** 2))
+        values.append(10.0 * np.log10((255.0 * 255.0) / max(mse, 1e-12)))
+    return round(float(np.mean(values)), 3) if values else None
+
+
+def _publish_policy_prediction(session_dir, pending):
+    """Reveal a Flex-π future only after its matching real prefix completes."""
+
+    count = min(len(pending["predicted"]), len(pending["actual"]))
+    if count < 2:
+        return None
+    predicted = pending["predicted"][:count]
+    actual = pending["actual"][:count]
+    output_dir = pathlib.Path(session_dir) / "previews"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    predicted_path = output_dir / "latest_policy_prediction.mp4"
+    actual_path = output_dir / "latest_policy_actual.mp4"
+    imageio.mimwrite(predicted_path, predicted, fps=2, macro_block_size=1)
+    imageio.mimwrite(actual_path, actual, fps=2, macro_block_size=1)
+    return {
+        "kind": pending["metadata"].get("kind", "joint_world_action"),
+        "mode": pending["mode"],
+        "frame_count": count,
+        "frame_interval_actions": pending["interval"],
+        "executed_actions": pending["executed"],
+        "mean_rgb_psnr_db": _clip_psnr(predicted, actual),
+        "caveat": pending["metadata"].get("caveat"),
+        "revealed_after_execution": True,
+    }
+
+
 def run(args):
     np.random.seed(args.seed)
     suite = benchmark.get_benchmark_dict()[args.task_suite_name]()
@@ -94,7 +134,9 @@ def run(args):
     ]
     video_path = pathlib.Path(args.video_out_path)
     video_path.mkdir(parents=True, exist_ok=True)
-    client = create_libero_policy_client(args.model, args.host, args.port)
+    client = create_libero_policy_client(
+        args.model, args.host, args.port, flexpi_mode=args.flexpi_mode
+    )
     inbox = ControlInbox(args.session_dir)
     inference_audit_path = pathlib.Path(args.session_dir) / "inference-audit.jsonl"
     latencies = []
@@ -136,6 +178,18 @@ def run(args):
             "replan_steps": args.replan_steps,
             "action_horizon": client.profile.action_horizon,
             "action_dimension": 7,
+            "policy_mode": client.mode,
+            "available_policy_modes": list(client.available_modes),
+            "policy_prediction_status": (
+                "available" if client.mode == "full-joint" else "disabled"
+            ),
+            "policy_prediction_result": None,
+            "policy_prediction_video_url": None,
+            "policy_actual_video_url": None,
+            "model_image_width": client.model_image_width,
+            "model_image_height": client.model_image_height,
+            "camera_observation_width": core.LIBERO_ENV_RESOLUTION,
+            "camera_observation_height": core.LIBERO_ENV_RESOLUTION,
             "action_labels": [
                 "EEF ΔX",
                 "EEF ΔY",
@@ -197,6 +251,9 @@ def run(args):
         if requested_evaluation not in ("scored", "exploratory"):
             raise ValueError("Evaluation mode must be scored or exploratory")
         evaluation_mode = requested_evaluation
+        requested_policy_mode = command.get("policy_mode")
+        if requested_policy_mode is not None:
+            client.set_mode(str(requested_policy_mode))
 
     initial_task = suite.get_task(current_task_id)
     initial_canonical_prompt = str(initial_task.language)
@@ -211,8 +268,14 @@ def run(args):
     )
 
     should_stop = False
+    startup_command = (
+        {"id": "auto-start", "action": "start_rollout"}
+        if args.auto_start
+        else None
+    )
     while not should_stop and attempt_number == 0:
-        command = inbox.read()
+        command = startup_command or inbox.read()
+        startup_command = None
         if not command:
             time.sleep(0.1)
             continue
@@ -236,6 +299,20 @@ def run(args):
             except ValueError as error:
                 state.update(control_error=str(error))
                 continue
+        elif action == "set_policy_mode":
+            try:
+                client.set_mode(str(command.get("policy_mode", "")))
+            except ValueError as error:
+                state.update(control_error=str(error))
+                continue
+            state.update(
+                policy_mode=client.mode,
+                policy_prediction_status=(
+                    "available" if client.mode == "full-joint" else "disabled"
+                ),
+                command_ack=command.get("id"),
+                command_message="Flex-π mode staged for the next rollout",
+            )
         elif action in ("start", "reset", "start_rollout"):
             if action == "start_rollout":
                 try:
@@ -259,7 +336,12 @@ def run(args):
         if args.max_policy_steps > 0:
             attempt_max_steps = min(attempt_max_steps, args.max_policy_steps)
         initial_states = suite.get_task_init_states(current_task_id)
-        env, _ = core._get_libero_env(task, core.LIBERO_ENV_RESOLUTION, args.seed)
+        env, _ = core._get_libero_env(
+            task,
+            core.LIBERO_ENV_RESOLUTION,
+            args.seed,
+            camera_depths=client.requires_depth,
+        )
         env.reset()
         obs = env.set_init_state(initial_states[attempt_number % len(initial_states)])
         action_plan = collections.deque()
@@ -273,6 +355,7 @@ def run(args):
         auto_start_next = False
         abort_reason = None
         step = 0
+        pending_policy_prediction = None
         attempt_number += 1
         attempt_started = time.perf_counter()
 
@@ -294,6 +377,15 @@ def run(args):
             inference_latency_ms=None,
             command_message="Running attempt {}".format(attempt_number),
             control_error=None,
+            policy_mode=client.mode,
+            policy_prediction_status=(
+                "waiting_for_joint_inference"
+                if client.mode == "full-joint"
+                else "disabled"
+            ),
+            policy_prediction_result=None,
+            policy_prediction_video_url=None,
+            policy_actual_video_url=None,
         )
         logging.info(
             "Interactive attempt %d, task %d: %s",
@@ -328,6 +420,7 @@ def run(args):
                     evaluation_mode = requested_evaluation
                     active_prompt = prompt_override or canonical_prompt
                     action_plan.clear()
+                    pending_policy_prediction = None
                     state.update(
                         prompt=active_prompt,
                         prompt_source=prompt_source,
@@ -371,6 +464,14 @@ def run(args):
                         ),
                     )
                     break
+                elif action == "set_policy_mode":
+                    state.update(
+                        control_error=(
+                            "Policy mode cannot change mid-rollout; abort or wait for "
+                            "completion, then select the next mode."
+                        ),
+                        command_ack=command.get("id"),
+                    )
 
             if step < args.num_steps_wait:
                 obs, _, done, _ = env.step(core.LIBERO_DUMMY_ACTION)
@@ -378,7 +479,7 @@ def run(args):
                 continue
 
             external, wrist, robot_state, model_input = core._prepare_observation(
-                obs, args.resize_size, active_prompt
+                obs, args.resize_size, active_prompt, client, env
             )
             state.frames(external, wrist)
             replay_images.append(external)
@@ -430,12 +531,32 @@ def run(args):
                     "inference_latency_ms": round(inference_latency, 2),
                     "policy_timing": policy_response.get("timing"),
                     "policy_artifact": policy_response.get("artifact"),
+                    "policy_mode": client.mode,
+                    "policy_prediction": policy_response.get("prediction"),
                     "max_steps": attempt_max_steps,
                 }
                 with inference_audit_path.open("a", encoding="utf-8") as stream:
                     stream.write(json.dumps(audit_event) + "\n")
                 latencies.append(inference_latency)
                 action_plan.extend(action_chunk[: args.replan_steps])
+                prediction_frames = policy_response.get("prediction_frames") or []
+                prediction_metadata = policy_response.get("prediction") or {}
+                if prediction_frames:
+                    interval = int(
+                        prediction_metadata.get("frame_interval_actions", 4)
+                    )
+                    pending_policy_prediction = {
+                        "predicted": prediction_frames,
+                        "actual": [client.compose_preview(external, wrist)],
+                        "capture_steps": set(
+                            range(interval, args.replan_steps + 1, interval)
+                        ),
+                        "interval": interval,
+                        "executed": 0,
+                        "metadata": prediction_metadata,
+                        "mode": client.mode,
+                    }
+                    state.update(policy_prediction_status="executing_actual_prefix")
                 state.update(
                     last_action_chunk=np.round(action_chunk, 5).tolist(),
                     inference_latency_ms=round(inference_latency, 2),
@@ -460,13 +581,35 @@ def run(args):
                 robot_state=np.round(robot_state, 5).tolist(),
             )
             obs, _, done, _ = env.step(current_action.tolist())
+            if pending_policy_prediction is not None:
+                pending_policy_prediction["executed"] += 1
+                executed = pending_policy_prediction["executed"]
+                if executed in pending_policy_prediction["capture_steps"]:
+                    actual_external, actual_wrist = core._display_images(obs)
+                    pending_policy_prediction["actual"].append(
+                        client.compose_preview(actual_external, actual_wrist)
+                    )
+                if done or not action_plan:
+                    published = _publish_policy_prediction(
+                        args.session_dir, pending_policy_prediction
+                    )
+                    if published:
+                        state.update(
+                            policy_prediction_status="ready",
+                            policy_prediction_result=published,
+                            policy_prediction_video_url=(
+                                "/previews/latest_policy_prediction.mp4"
+                            ),
+                            policy_actual_video_url="/previews/latest_policy_actual.mp4",
+                        )
+                    pending_policy_prediction = None
             selected_goal_reached = selected_goal_reached or bool(done)
             if args.realtime_delay_ms > 0:
                 time.sleep(args.realtime_delay_ms / 1000.0)
             step += 1
             if done and attempt_evaluation_mode == "scored":
                 final_external, final_wrist, _, _ = core._prepare_observation(
-                    obs, args.resize_size, active_prompt
+                    obs, args.resize_size, active_prompt, client, env
                 )
                 state.frames(final_external, final_wrist)
                 replay_images.append(final_external)
@@ -625,6 +768,20 @@ def run(args):
                     )
                     continue
                 state.update(control_error="Invalid task ID: {}".format(requested_task))
+            elif action == "set_policy_mode":
+                try:
+                    client.set_mode(str(command.get("policy_mode", "")))
+                except ValueError as error:
+                    state.update(control_error=str(error))
+                    continue
+                state.update(
+                    policy_mode=client.mode,
+                    command_ack=command.get("id"),
+                    command_message="Flex-π mode staged for the next rollout",
+                    policy_prediction_status=(
+                        "available" if client.mode == "full-joint" else "disabled"
+                    ),
+                )
             elif action == "start_rollout":
                 try:
                     apply_rollout_settings(command)

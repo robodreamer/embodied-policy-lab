@@ -20,7 +20,7 @@ Usage:
 
 Options:
   --backend NAME       robocasa (default) or libero
-  --model NAME         pi05 (default), fastwam, or groot-n1.5
+  --model NAME         pi05 (default), fastwam, flexpi, or groot-n1.5
   --world-model NAME   none (default) or robocasa-sim oracle baseline
   --mode MODE          interactive (default) or batch
   --task-set NAME      task collection (backend default when omitted)
@@ -50,6 +50,7 @@ robocasa  pi05          ready / default
 robocasa  groot-n1.5    ready
 libero    pi05          ready
 libero    fastwam       experimental / staged 24 GB profile
+libero    flexpi        experimental / action-only + full-joint modes
 libero    groot-n1.5    incompatible
 
 PREDICTOR / BASELINE  BACKEND    STATUS
@@ -151,7 +152,8 @@ main() {
         model="$(pick_id \
           "2/5 · Choose a compatible local policy (default first)" \
           $'pi05\tPhysical Intelligence π0.5 · default' \
-          $'fastwam\tFast-WAM · staged 24 GB experimental profile')" || return 1
+          $'fastwam\tFast-WAM · staged 24 GB experimental profile' \
+          $'flexpi\tFlex-π · selectable world-action compute')" || return 1
       fi
     fi
 
@@ -207,7 +209,7 @@ main() {
   fi
 
   case "$backend/$model" in
-    robocasa/pi05|robocasa/groot-n1.5|libero/pi05|libero/fastwam) ;;
+    robocasa/pi05|robocasa/groot-n1.5|libero/pi05|libero/fastwam|libero/flexpi) ;;
     *) die "incompatible profile: backend=$backend model=$model (use --list)" ;;
   esac
   case "$backend/$world_model" in

@@ -12,6 +12,7 @@ let evaluationDirty = false;
 let pendingCommand = null;
 let worldModelDirty = false;
 let comparisonDirty = false;
+let policyModeDirty = false;
 let lastPreviewUrl = "";
 let lastActualUrl = "";
 
@@ -165,6 +166,23 @@ function populateWorldModels(models, selected) {
     || "Choose a compatible predictor or an explicitly labeled simulator baseline.";
 }
 
+function populatePolicyModes(modes, selected) {
+  const select = $("policyModeSelect");
+  const available = Array.isArray(modes) && modes.length > 0;
+  $("policyModeSetting").classList.toggle("hidden", !available);
+  if (!available) return;
+  const desired = policyModeDirty ? select.value : String(selected || "action-only");
+  select.replaceChildren(...modes.map(mode => {
+    const option = document.createElement("option");
+    option.value = mode.key;
+    option.textContent = mode.display_name;
+    option.dataset.description = mode.description || "";
+    return option;
+  }));
+  select.value = desired;
+  $("policyModeHelp").textContent = select.selectedOptions[0]?.dataset.description || "";
+}
+
 function isRateEligible(item) {
   if (typeof item.rate_eligible === "boolean") return item.rate_eligible;
   return ["success", "failure"].includes(item.status)
@@ -307,6 +325,7 @@ function updateControls(state) {
   $("rolloutBudget").disabled = stopped || loading || commandPending;
   $("evaluationMode").disabled = stopped || loading || commandPending;
   $("worldModelSelect").disabled = stopped || loading || state.phase !== "awaiting_command" || commandPending;
+  $("policyModeSelect").disabled = stopped || loading || state.phase !== "awaiting_command" || commandPending;
   const hasPredictor = Boolean(state.world_model && state.world_model !== "none");
   $("compareWorldModel").disabled = stopped || loading || state.phase !== "awaiting_command" || commandPending || !hasPredictor;
   const exploratory = selectedEvaluationMode() === "exploratory";
@@ -443,6 +462,22 @@ async function configureControls() {
       updateControls(lastState);
     } catch (error) { setControlNote(error.message, true); }
   });
+  $("policyModeSelect").addEventListener("change", async () => {
+    policyModeDirty = true;
+    const requested = $("policyModeSelect").value;
+    $("policyModeHelp").textContent = $("policyModeSelect").selectedOptions[0]?.dataset.description || "";
+    try {
+      const result = await postJson("/api/control", {
+        action: "set_policy_mode",
+        policy_mode: requested,
+      });
+      pendingCommand = {id: result.command.id, action: "set_policy_mode", policyMode: requested};
+      setControlNote(requested === "full-joint"
+        ? "Full-joint world-action generation is staged. Its visual future appears only after the matching real action prefix executes."
+        : "Fast action-only inference is staged; no visual future will be generated.");
+      updateControls(lastState);
+    } catch (error) { setControlNote(error.message, true); }
+  });
   $("compareWorldModel").addEventListener("change", async () => {
     comparisonDirty = true;
     const enabled = $("compareWorldModel").checked;
@@ -474,6 +509,8 @@ async function configureControls() {
       const expectedTask = Number($("taskSelect").value);
       const expectedBudget = selectedBudget();
       const expectedEvaluation = selectedEvaluationMode();
+      const expectedPolicyMode = $("policyModeSetting").classList.contains("hidden")
+        ? undefined : $("policyModeSelect").value;
       const result = await postJson("/api/control", {
         action: "start_rollout",
         task_id: expectedTask,
@@ -481,6 +518,7 @@ async function configureControls() {
         source: pendingPromptSource,
         rollout_budget_multiplier: expectedBudget,
         evaluation_mode: expectedEvaluation,
+        policy_mode: expectedPolicyMode,
       });
       pendingCommand = {
         id: result.command.id,
@@ -490,6 +528,7 @@ async function configureControls() {
         taskId: expectedTask,
         budget: expectedBudget,
         evaluationMode: expectedEvaluation,
+        policyMode: expectedPolicyMode,
       };
       setControlNote(`Start requested. Keeping this draft visible until the new simulator state confirms the exact prompt and ${selectedBudgetSteps()}-step budget.`);
       updateControls(lastState);
@@ -569,12 +608,15 @@ async function updateState() {
         || Number(state.rollout_budget_multiplier) === pendingCommand.budget;
       const evaluationMatches = pendingCommand.evaluationMode === undefined
         || String(state.evaluation_mode || "scored") === pendingCommand.evaluationMode;
-      if (promptMatches && taskMatches && budgetMatches && evaluationMatches) {
+      const policyModeMatches = pendingCommand.policyMode === undefined
+        || String(state.policy_mode || "action-only") === pendingCommand.policyMode;
+      if (promptMatches && taskMatches && budgetMatches && evaluationMatches && policyModeMatches) {
         if (pendingCommand.action === "start_rollout") {
           draftDirty = false;
           taskDirty = false;
           budgetDirty = false;
           evaluationDirty = false;
+          policyModeDirty = false;
         } else if (pendingCommand.action === "set_prompt") {
           draftDirty = false;
           evaluationDirty = false;
@@ -587,6 +629,8 @@ async function updateState() {
           worldModelDirty = false;
         } else if (pendingCommand.action === "set_world_model_comparison") {
           comparisonDirty = false;
+        } else if (pendingCommand.action === "set_policy_mode") {
+          policyModeDirty = false;
         }
         pendingCommand = null;
       }
@@ -603,6 +647,7 @@ async function updateState() {
     $("interactiveControls").classList.toggle("hidden", !state.interactive);
     populateTasks(state.available_tasks, state.task_id);
     populateWorldModels(state.available_world_models, state.world_model);
+    populatePolicyModes(state.available_policy_modes, state.policy_mode);
     if (!comparisonDirty && (!pendingCommand || pendingCommand.action !== "set_world_model_comparison")) {
       $("compareWorldModel").checked = Boolean(state.compare_world_model);
     }
@@ -698,23 +743,37 @@ async function updateState() {
       item.textContent = label;
       return item;
     }));
-    const preview = state.preview_result || {};
+    const independentPreview = state.preview_result || {};
+    const policyPreview = state.policy_prediction_result || {};
     const isSimulatorOracle = state.world_model_prediction_kind === "simulator_oracle";
-    const comparisonReady = Boolean(
+    const independentComparisonReady = Boolean(
       state.compare_world_model
       && state.comparison_status === "ready"
       && state.preview_video_url
       && state.actual_video_url
     );
+    const policyComparisonReady = Boolean(
+      state.policy_prediction_status === "ready"
+      && state.policy_prediction_video_url
+      && state.policy_actual_video_url
+    );
+    const comparisonReady = independentComparisonReady || policyComparisonReady;
+    const preview = policyComparisonReady ? policyPreview : independentPreview;
     $("previewCard").classList.toggle("hidden", !comparisonReady);
-    $("previewCardLabel").innerHTML = isSimulatorOracle
-      ? '<span>02</span> SIMULATOR ORACLE REPLAY VS COMPLETED EXECUTION'
-      : '<span>02</span> LEARNED PREDICTION VS COMPLETED EXECUTION';
-    $("predictedVideoLabel").textContent = isSimulatorOracle
-      ? "SIMULATOR ORACLE REPLAY"
-      : "LEARNED PREDICTION";
-    $("previewKind").textContent = `${worldModelDisplayName} · ${String(state.world_model_prediction_kind || "preview").replaceAll("_", " ").toUpperCase()}`;
-    $("previewTitle").textContent = `${preview.previewed_steps || state.replan_steps || "—"}-step ${isSimulatorOracle ? "oracle replay" : "prediction"} and execution`;
+    $("previewCardLabel").innerHTML = policyComparisonReady
+      ? '<span>02</span> FLEX-π JOINT FUTURE VS COMPLETED EXECUTION'
+      : (isSimulatorOracle
+        ? '<span>02</span> SIMULATOR ORACLE REPLAY VS COMPLETED EXECUTION'
+        : '<span>02</span> LEARNED PREDICTION VS COMPLETED EXECUTION');
+    $("predictedVideoLabel").textContent = policyComparisonReady
+      ? "FLEX-π GENERATED FUTURE"
+      : (isSimulatorOracle ? "SIMULATOR ORACLE REPLAY" : "LEARNED PREDICTION");
+    $("previewKind").textContent = policyComparisonReady
+      ? `${modelDisplayName} · ${String(preview.kind || "joint_world_action").replaceAll("_", " ").toUpperCase()}`
+      : `${worldModelDisplayName} · ${String(state.world_model_prediction_kind || "preview").replaceAll("_", " ").toUpperCase()}`;
+    $("previewTitle").textContent = policyComparisonReady
+      ? `${preview.frame_count || "—"} aligned frames across ${preview.executed_actions || "—"} executed actions`
+      : `${preview.previewed_steps || state.replan_steps || "—"}-step ${isSimulatorOracle ? "oracle replay" : "prediction"} and execution`;
     $("previewDescription").textContent = preview.caveat
       ? `${preview.caveat} Both clips were revealed after actual execution completed.`
       : "Both clips start from the same pre-action state, use the same action prefix, and are revealed only after actual execution completes.";
@@ -724,11 +783,15 @@ async function updateState() {
     const stateError = preview.state_comparison?.shape_match
       ? ` · MAX ΔQPOS ${Number(preview.state_comparison.max_qpos_error).toExponential(2)} · MAX ΔQVEL ${Number(preview.state_comparison.max_qvel_error).toExponential(2)}`
       : "";
-    $("previewEvidence").textContent = preview.live_state_unchanged
-      ? `${matchLabel}${stateError} · PREDICTED ${preview.predicted_state_sha256 || "—"} · ACTUAL ${preview.actual_state_sha256 || "—"} · ${format(preview.duration_ms, 1)} ms`
-      : "No completed comparison evidence recorded yet";
-    const previewUrl = state.preview_video_url || "";
-    const actualUrl = state.actual_video_url || "";
+    $("previewEvidence").textContent = policyComparisonReady
+      ? `MEAN RGB PSNR ${format(preview.mean_rgb_psnr_db, 2)} dB · ${preview.frame_interval_actions || "—"} ACTIONS BETWEEN FRAMES · REVEALED AFTER EXECUTION`
+      : (preview.live_state_unchanged
+        ? `${matchLabel}${stateError} · PREDICTED ${preview.predicted_state_sha256 || "—"} · ACTUAL ${preview.actual_state_sha256 || "—"} · ${format(preview.duration_ms, 1)} ms`
+        : "No completed comparison evidence recorded yet");
+    const previewUrl = policyComparisonReady
+      ? state.policy_prediction_video_url : (state.preview_video_url || "");
+    const actualUrl = policyComparisonReady
+      ? state.policy_actual_video_url : (state.actual_video_url || "");
     if (previewUrl && previewUrl !== lastPreviewUrl) {
       lastPreviewUrl = previewUrl;
       $("previewVideo").src = previewUrl;

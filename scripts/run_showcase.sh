@@ -14,7 +14,8 @@ Usage:
 
 Backend, model, and task options:
   --backend libero|robocasa       Simulator backend (default: libero)
-  --model pi05|fastwam|groot-n1.5 Local policy plugin (default: pi05)
+  --model pi05|fastwam|flexpi|groot-n1.5 Local policy plugin (default: pi05)
+  --flexpi-mode MODE              action-only (default) or full-joint
   --world-model NAME              none (default) or robocasa-sim oracle baseline
   --compare-world-model           Compare prediction after each real action prefix
   --no-compare-world-model        Run normally without comparison (default)
@@ -52,6 +53,7 @@ Examples:
   ./scripts/run_showcase.sh --backend robocasa --batch --task-id 2 --trials 3
   ./scripts/run_showcase.sh --backend libero --task-suite libero_spatial --task-ids 0,1
   ./scripts/run_interactive_showcase.sh --backend libero --model fastwam --task-id 2
+  ./scripts/run_interactive_showcase.sh --backend libero --model flexpi --flexpi-mode full-joint
 
 Environment-variable controls remain supported for backward compatibility.
 EOF
@@ -87,11 +89,14 @@ LOCAL_LLM_MODEL="${LOCAL_LLM_MODEL:-}"
 LOCAL_LLM_NUM_GPU="${LOCAL_LLM_NUM_GPU:-0}"
 SESSION_DIR="${SESSION_DIR:-}"
 FASTWAM_DIR="${FASTWAM_DIR:-}"
+FLEXPI_DIR="${FLEXPI_DIR:-}"
+FLEXPI_MODE="${FLEXPI_MODE:-action-only}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --backend) BACKEND="${2:?--backend requires a value}"; shift 2 ;;
     --model) MODEL="${2:?--model requires a value}"; shift 2 ;;
+    --flexpi-mode) FLEXPI_MODE="${2:?--flexpi-mode requires a value}"; shift 2 ;;
     --world-model) WORLD_MODEL="${2:?--world-model requires a value}"; shift 2 ;;
     --preview-steps|--preview-approval)
       echo "Warning: $1 is deprecated; comparison length follows --replan-steps." >&2
@@ -138,6 +143,7 @@ case "$MODEL" in
   pi|pi0.5|pi-0.5) MODEL="pi05" ;;
   groot|gr00t|gr00t-n1.5|groot_n1.5|gr00t_n1.5) MODEL="groot-n1.5" ;;
   fast-wam|fast_wam) MODEL="fastwam" ;;
+  flex-pi|flex_pi|flex-π) MODEL="flexpi" ;;
 esac
 case "$WORLD_MODEL" in
   off|direct) WORLD_MODEL="none" ;;
@@ -184,14 +190,39 @@ case "$BACKEND" in
         RUNTIME_PYTHON="$FASTWAM_DIR/.venv/bin/python"
         CLIENT_PYTHON="${LIBERO_CLIENT_PYTHON:-$OPENPI_DIR/examples/libero/.venv/bin/python}"
         ;;
+      flexpi)
+        if [[ -z "$FLEXPI_DIR" ]]; then
+          for candidate in "$PROJECT_DIR/../upstream-flexpi" \
+            "$PROJECT_DIR/../../upstream-flexpi"; do
+            if [[ -d "$candidate/.git" ]]; then
+              FLEXPI_DIR="$(cd "$candidate" && pwd)"
+              break
+            fi
+          done
+        fi
+        if [[ -z "$FLEXPI_DIR" ]]; then
+          echo "Cannot find upstream-flexpi; set FLEXPI_DIR explicitly." >&2
+          exit 1
+        fi
+        RUNTIME_PYTHON="$FLEXPI_DIR/.venv/bin/python"
+        CLIENT_PYTHON="$RUNTIME_PYTHON"
+        ;;
       *)
-        echo "Model $MODEL does not support LIBERO; choose pi05 or fastwam." >&2
+        echo "Model $MODEL does not support LIBERO; choose pi05, fastwam, or flexpi." >&2
         exit 2
         ;;
     esac
     TASK_SUITE="${TASK_SUITE:-libero_spatial}"
     TASK_IDS="${TASK_IDS:-0}"
     WORLD_MODEL="${WORLD_MODEL:-none}"
+    if [[ "$MODEL" == "flexpi" ]]; then
+      case "$TASK_SUITE" in
+        libero_spatial|libero_object|libero_goal|libero_10) ;;
+        *) echo "Flex-π release supports libero_spatial, libero_object, libero_goal, and libero_10." >&2; exit 2 ;;
+      esac
+      FLEXPI_SUITE_NAME="${TASK_SUITE}_no_noops_lerobot"
+      FLEXPI_INTRINSICS="${FLEXPI_INTRINSICS:-$FLEXPI_DIR/data/libero-intrinsics/$FLEXPI_SUITE_NAME/meta/camera_intrinsics.json}"
+    fi
     if [[ "$WORLD_MODEL" != "none" ]]; then
       echo "LIBERO currently supports only --world-model none." >&2
       exit 2
@@ -245,6 +276,21 @@ if [[ "$MODEL" == "fastwam" ]]; then
   NUM_STEPS_WAIT=30
 else
   NUM_STEPS_WAIT=10
+fi
+
+FLEXPI_MODE="${FLEXPI_MODE,,}"
+FLEXPI_MODE="${FLEXPI_MODE//_/-}"
+case "$FLEXPI_MODE" in
+  action|fast) FLEXPI_MODE="action-only" ;;
+  joint|full) FLEXPI_MODE="full-joint" ;;
+esac
+if [[ "$FLEXPI_MODE" != "action-only" && "$FLEXPI_MODE" != "full-joint" ]]; then
+  echo "--flexpi-mode must be action-only or full-joint." >&2
+  exit 2
+fi
+if [[ "$MODEL" != "flexpi" && "$FLEXPI_MODE" != "action-only" ]]; then
+  echo "--flexpi-mode applies only to --model flexpi." >&2
+  exit 2
 fi
 
 if [[ "$MODEL" == "groot-n1.5" ]]; then
@@ -409,10 +455,12 @@ wait_for_http() {
   return 1
 }
 
-update_fastwam_startup_status() {
+update_large_model_startup_status() {
   local elapsed_seconds="$1"
   local detail
-  if (( elapsed_seconds < 120 )); then
+  if [[ "$MODEL" == "flexpi" ]]; then
+    detail="Loading Flex-π checkpoint and frozen visual/text components - ${elapsed_seconds}s elapsed. A clean cache can take much longer while required assets download."
+  elif (( elapsed_seconds < 120 )); then
     detail="Deserializing the 12 GB Fast-WAM checkpoint on CPU - ${elapsed_seconds}s elapsed; typical startup is 90-120 seconds. GPU activity starts with the first policy request."
   else
     detail="Fast-WAM is still loading on CPU - ${elapsed_seconds}s elapsed. Competing CPU or RAM workloads can extend startup; the loader process is still active."
@@ -452,8 +500,8 @@ wait_for_policy_http() {
     if http_ready "$port" "$route"; then
       return 0
     fi
-    if [[ "$MODEL" == "fastwam" ]] && (( attempt % 10 == 0 )); then
-      update_fastwam_startup_status "$((SECONDS - started_at))"
+    if [[ "$MODEL" == "fastwam" || "$MODEL" == "flexpi" ]] && (( attempt % 10 == 0 )); then
+      update_large_model_startup_status "$((SECONDS - started_at))"
     fi
     sleep 1
   done
@@ -481,7 +529,7 @@ wait_for_tcp_listener() {
   "$PROJECT_DIR" "$SESSION_DIR/state.json" "$BACKEND" "$MODEL" "$TASK_SUITE" \
   "$TASK_IDS" "$POLICY_PORT" "$INTERACTIVE" "$NETWORK_AUDIT" \
   "$VIEWER_WIDTH" "$VIEWER_HEIGHT" "$WORLD_MODEL" \
-  "$COMPARE_WORLD_MODEL" "$REPLAN_STEPS" <<'PY'
+  "$COMPARE_WORLD_MODEL" "$REPLAN_STEPS" "$FLEXPI_MODE" <<'PY'
 import datetime
 import json
 import pathlib
@@ -497,6 +545,7 @@ viewer_width, viewer_height = map(int, sys.argv[10:12])
 world_model_key = sys.argv[12]
 compare_world_model = sys.argv[13] == "1"
 replan_steps = int(sys.argv[14])
+flexpi_mode = sys.argv[15]
 sys.path.insert(0, str(project_dir))
 
 from showcase import backend_registry
@@ -518,6 +567,11 @@ if model == "fastwam":
     startup_message = (
         "Deserializing the 12 GB Fast-WAM checkpoint on CPU; typical startup is "
         "90-120 seconds. An idle GPU is expected until the first policy request."
+    )
+elif model == "flexpi":
+    startup_message = (
+        "Loading the 12 GB Flex-π release plus VAE, T5 and DINOv3 assets. "
+        "The first clean setup downloads about 25 GB; subsequent starts use the cache."
     )
 else:
     startup_message = "Loading policy weights into local accelerator memory"
@@ -552,9 +606,14 @@ state = {
     "state_dimension": simulator.state_dimension,
     "action_dimension": simulator.action_dimension,
     "action_horizon": profile.action_horizon,
+    "policy_mode": flexpi_mode if model == "flexpi" else "action-only",
+    "available_policy_modes": ([
+        {"key": "action-only", "display_name": "Action only", "description": "Fast action path without generated futures."},
+        {"key": "full-joint", "display_name": "Full joint world-action", "description": "Generate RGB, DINO, pointmap, and actions together."},
+    ] if model == "flexpi" else []),
     "camera_count": len(simulator.cameras),
-    "model_image_width": 224,
-    "model_image_height": 224,
+    "model_image_width": 512 if model == "flexpi" else 224,
+    "model_image_height": 448 if model == "flexpi" else 224,
     "viewer_width": viewer_width,
     "viewer_height": viewer_height,
     "episodes": 0,
@@ -609,6 +668,7 @@ if [[ "$NETWORK_AUDIT" == "1" ]]; then
       LIBERO_OPENPI_DIR="${OPENPI_DIR:-}" \
       OPENPI_DATA_HOME="${LIBERO_OPENPI_DATA_HOME:-}" \
       FASTWAM_DIR="$FASTWAM_DIR" FASTWAM_ARTIFACT_DIR="$SESSION_DIR/policy-inference" \
+      FLEXPI_DIR="$FLEXPI_DIR" FLEXPI_INTRINSICS="${FLEXPI_INTRINSICS:-}" FLEXPI_ARTIFACT_DIR="$SESSION_DIR/policy-inference" \
       "$SCRIPT_DIR/run_server.sh" \
     > "$SESSION_DIR/server.log" 2>&1 &
 else
@@ -616,6 +676,7 @@ else
     LIBERO_OPENPI_DIR="${OPENPI_DIR:-}" \
     OPENPI_DATA_HOME="${LIBERO_OPENPI_DATA_HOME:-}" \
     FASTWAM_DIR="$FASTWAM_DIR" FASTWAM_ARTIFACT_DIR="$SESSION_DIR/policy-inference" \
+    FLEXPI_DIR="$FLEXPI_DIR" FLEXPI_INTRINSICS="${FLEXPI_INTRINSICS:-}" FLEXPI_ARTIFACT_DIR="$SESSION_DIR/policy-inference" \
     "$SCRIPT_DIR/run_server.sh" \
     > "$SESSION_DIR/server.log" 2>&1 &
 fi
@@ -663,8 +724,14 @@ export MUJOCO_GL="${MUJOCO_GL:-egl}"
 export PYOPENGL_PLATFORM="${PYOPENGL_PLATFORM:-egl}"
 
 if [[ "$BACKEND" == "libero" ]]; then
-  export LIBERO_CONFIG_PATH="$PROJECT_DIR/config/libero"
-  export PYTHONPATH="$OPENPI_DIR/third_party/libero${PYTHONPATH:+:$PYTHONPATH}"
+  if [[ "$MODEL" == "flexpi" ]]; then
+    export PYTHONNOUSERSITE=1
+    export LIBERO_CONFIG_PATH="$FLEXPI_DIR/.libero-config"
+    export PYTHONPATH="$FLEXPI_DIR/third_party/LIBERO:$FLEXPI_DIR/src${PYTHONPATH:+:$PYTHONPATH}"
+  else
+    export LIBERO_CONFIG_PATH="$PROJECT_DIR/config/libero"
+    export PYTHONPATH="$OPENPI_DIR/third_party/libero${PYTHONPATH:+:$PYTHONPATH}"
+  fi
   if [[ "$INTERACTIVE" == "1" ]]; then
     if [[ ! "$TASK_IDS" =~ ^[0-9]+$ ]]; then
       echo "Interactive LIBERO mode requires one numeric --task-id." >&2
@@ -685,7 +752,11 @@ if [[ "$BACKEND" == "libero" ]]; then
       --seed "$SEED"
       --realtime-delay-ms "$REALTIME_DELAY_MS"
       --initial-prompt "$INITIAL_PROMPT"
+      --flexpi-mode "$FLEXPI_MODE"
     )
+    if [[ "$AUTO_START" == "1" ]]; then
+      CLIENT_COMMAND+=(--auto-start)
+    fi
   else
     CLIENT_COMMAND=(
       "$CLIENT_PYTHON" "$PROJECT_DIR/showcase/instrumented_libero.py"
@@ -702,6 +773,7 @@ if [[ "$BACKEND" == "libero" ]]; then
       --session-dir "$SESSION_DIR"
       --seed "$SEED"
       --realtime-delay-ms "$REALTIME_DELAY_MS"
+      --flexpi-mode "$FLEXPI_MODE"
     )
   fi
 else

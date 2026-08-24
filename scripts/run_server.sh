@@ -78,8 +78,52 @@ case "$BACKEND" in
         fi
         exec "${COMMAND[@]}"
         ;;
+      flexpi)
+        if [[ -z "${FLEXPI_DIR:-}" ]]; then
+          for candidate in "$PROJECT_DIR/../upstream-flexpi" \
+            "$PROJECT_DIR/../../upstream-flexpi"; do
+            if [[ -d "$candidate/.git" ]]; then
+              FLEXPI_DIR="$(cd "$candidate" && pwd)"
+              break
+            fi
+          done
+        fi
+        if [[ -z "${FLEXPI_DIR:-}" ]]; then
+          echo "Cannot find upstream-flexpi; set FLEXPI_DIR explicitly." >&2
+          exit 1
+        fi
+        PYTHON="$FLEXPI_DIR/.venv/bin/python"
+        RELEASE="$FLEXPI_DIR/runs/flexpi-libero"
+        CHECKPOINT="${FLEXPI_CHECKPOINT:-$RELEASE/checkpoints/weights/step_010860.pt}"
+        CONFIG="${FLEXPI_CONFIG:-$RELEASE/config.yaml}"
+        STATS="${FLEXPI_STATS:-$RELEASE/dataset_stats.json}"
+        INTRINSICS="${FLEXPI_INTRINSICS:-$FLEXPI_DIR/data/libero-intrinsics/libero_spatial_no_noops_lerobot/meta/camera_intrinsics.json}"
+        if [[ ! -x "$PYTHON" ]] || [[ ! -f "$CHECKPOINT" ]] || \
+          [[ ! -f "$CONFIG" ]] || [[ ! -f "$STATS" ]] || [[ ! -f "$INTRINSICS" ]]; then
+          echo "Flex-π runtime or release artifacts are missing." >&2
+          echo "Run ./scripts/setup_flexpi_libero.sh --check for details." >&2
+          exit 1
+        fi
+        export PYTHONNOUSERSITE=1
+        export DIFFSYNTH_MODEL_BASE_PATH="$FLEXPI_DIR/checkpoints"
+        export LIBERO_CONFIG_PATH="${LIBERO_CONFIG_PATH:-$FLEXPI_DIR/.libero-config}"
+        export PYTHONPATH="$FLEXPI_DIR/third_party/LIBERO:$FLEXPI_DIR/src${PYTHONPATH:+:$PYTHONPATH}"
+        COMMAND=(
+          "$PYTHON" "$PROJECT_DIR/showcase/serve_flexpi_policy.py"
+          --port "$PORT"
+          --upstream-root "$FLEXPI_DIR"
+          --checkpoint "$CHECKPOINT"
+          --config "$CONFIG"
+          --stats "$STATS"
+          --intrinsics "$INTRINSICS"
+        )
+        if [[ -n "${FLEXPI_ARTIFACT_DIR:-}" ]]; then
+          COMMAND+=(--artifact-dir "$FLEXPI_ARTIFACT_DIR")
+        fi
+        exec "${COMMAND[@]}"
+        ;;
       *)
-        echo "Unsupported LIBERO model: $MODEL (choose pi05 or fastwam)" >&2
+        echo "Unsupported LIBERO model: $MODEL (choose pi05, fastwam, or flexpi)" >&2
         exit 2
         ;;
     esac

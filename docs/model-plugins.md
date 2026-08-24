@@ -34,6 +34,7 @@ or GR00T directly.
 |---|---|---|---|---:|
 | `pi05` | LIBERO | WebSocket | 2 cameras + 8D state + prompt | 10 × 7D |
 | `fastwam` | LIBERO | localhost HTTP | 2 cameras + 8D state + prompt | 32 × 7D |
+| `flexpi` | LIBERO | localhost HTTP | 2 RGB + 2 metric-depth cameras + 8D state + prompt | 32 × 7D |
 | `pi05` | RoboCasa | WebSocket | 3 cameras + 16D state + prompt | 50 × 12D |
 | `groot-n1.5` | RoboCasa | ZeroMQ | 3 cameras + named state fields + language annotation | 16 × 12D |
 
@@ -51,6 +52,15 @@ then validates a finite 32×7 response. The server applies the released
 two-camera preprocessing and dataset statistics. It caches text embeddings,
 but re-encodes the current image at every policy query. This distinction is a
 required correctness invariant for closed-loop validation.
+
+Flex-π also runs in its own pinned Python 3.10 / CUDA 12.8 / MuJoCo 3.3.2
+environment. Its lossless HTTP boundary adds aligned uint16 millimetre depth.
+The client can switch the same checkpoint between `action-only` and
+`full-joint` between rollouts. The latter returns future RGB along with the
+DINO, pointmap, and action streams. The dashboard withholds that future until
+the matching real action prefix completes, then publishes temporally aligned
+clips and mean RGB PSNR. This is evidence about the checkpoint's learned
+dynamics, not an independent model comparison.
 
 ## Adding another model
 

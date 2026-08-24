@@ -7,10 +7,10 @@
 Simulator and model are independent CLI choices. The current compatibility
 matrix is:
 
-| Simulator | `pi05` | `fastwam` | `groot-n1.5` |
-|---|---:|---:|---:|
-| LIBERO | ✓ | experimental | — |
-| RoboCasa365 | ✓ | — | ✓ |
+| Simulator | `pi05` | `fastwam` | `flexpi` | `groot-n1.5` |
+|---|---:|---:|---:|---:|
+| LIBERO | ✓ | experimental | experimental | — |
+| RoboCasa365 | ✓ | — | — | ✓ |
 
 RoboCasa also has an independent predictor selector. Direct execution
 (`--world-model none`) is the default. The optional `robocasa-sim` choice is a
@@ -28,6 +28,9 @@ with GR00T-specific setup and measured results in
 [the N1.5 notes](docs/groot-n1.5.md). The bounded Fast-WAM integration and its
 validation gates are documented in
 [the dated Fast-WAM experiment note](notes/2026-08-19-fastwam-libero-validation.md).
+The stacked Flex-π experiment, exact depth/camera contract, and validation
+gates are in
+[the Flex-π world-action note](notes/2026-08-24-flexpi-libero-world-action-validation.md).
 
 Quick RoboCasa checks:
 
@@ -72,7 +75,7 @@ or bypass it entirely:
 ```
 
 This repository is a reproducible local deployment of π0.5, experimental
-Fast-WAM, and NVIDIA Isaac GR00T N1.5 in the LIBERO and RoboCasa
+Fast-WAM and Flex-π, and NVIDIA Isaac GR00T N1.5 in the LIBERO and RoboCasa
 robot-manipulation simulators. It uses
 pinned upstream integrations, robosuite, MuJoCo, and the workstation's NVIDIA
 GPU. Simulation rendering is headless through EGL; each rollout is saved as an
@@ -88,8 +91,9 @@ integrity details.
 ## Status
 
 - Upstream sources: Physical Intelligence OpenPI and RoboCasa's NVIDIA Isaac GR00T fork
-- Pinned revisions: Git submodules, `UPSTREAM_COMMIT`, and the Fast-WAM setup revision gate
-- Models: `pi05_libero`, experimental `fastwam_libero_uncond_2cam224`,
+- Pinned revisions: Git submodules, `UPSTREAM_COMMIT`, and Fast-WAM/Flex-π setup revision gates
+- Models: `pi05_libero`, experimental `fastwam_libero_uncond_2cam224` and
+  `flexpi_libero_stream_dropout`,
   `pi05_pretrain_human300`, and `gr00t_n1.5_robocasa365_120k`
 - Policy runtimes: isolated JAX/CUDA and PyTorch/CUDA environments
 - Simulator runtimes: Python 3.8 LIBERO, Python 3.11 RoboCasa/OpenPI, and Python 3.12 RoboCasa/GR00T
@@ -115,7 +119,7 @@ The showcase opens a local browser console displaying:
   from the lower-resolution observations used by the policy pipeline;
 - the active language command and episode progress;
 - the profile-specific action chunk (10×7D LIBERO π0.5, 32×7D LIBERO
-  Fast-WAM, 50×12D RoboCasa π0.5, or 16×12D RoboCasa GR00T);
+  Fast-WAM/Flex-π, 50×12D RoboCasa π0.5, or 16×12D RoboCasa GR00T);
 - cold/startup and warm inference latency;
 - GPU utilization, VRAM, power, and temperature;
 - task success and the local policy endpoint;
@@ -161,6 +165,35 @@ preview.
 ./scripts/run_interactive_showcase.sh \
   --backend libero --model fastwam --task-id 2
 ```
+
+Flex-π uses its own pinned Python 3.10, CUDA 12.8, MuJoCo 3.3.2 environment.
+The setup fetches the 12 GB release checkpoint, required VAE/T5/DINO assets,
+and only four tiny camera-intrinsics files from the training dataset—not the
+roughly 12 GB demonstration dataset. Start with action-only, then select
+full-joint in the browser between rollouts. Full-joint generates RGB, DINO,
+pointmap, and action futures from the same checkpoint; its RGB future is shown
+beside real execution only after the matching action prefix has completed.
+
+```bash
+./scripts/setup_flexpi_libero.sh
+
+# Lower-memory behavior baseline
+./scripts/run_interactive_showcase.sh \
+  --backend libero --model flexpi --task-suite libero_spatial --task-id 0
+
+# Start directly in the world-action regime
+./scripts/run_interactive_showcase.sh \
+  --backend libero --model flexpi --flexpi-mode full-joint \
+  --task-suite libero_spatial --task-id 0
+```
+
+The predicted clip is an output of the same joint denoising pass that produced
+the executed action chunk. It is a temporally aligned world-action diagnostic,
+not an independent planner, counterfactual action search, or simulator oracle.
+On the local 24 GB RTX PRO 5000 validation GPU, both modes fit: action-only
+reserved 13.24 GiB at a 1.29-second model pass, while full-joint reserved 16.45
+GiB at a 2.98-second model pass. These are bounded single-query measurements;
+see the dated Flex-π note for the exact protocol and startup timings.
 
 ### Choosing a Fast-WAM LIBERO task suite
 
@@ -218,9 +251,12 @@ Every run is retained under a timestamped `showcase-runs/` directory, and
 - `videos/*.mp4`: simulator rollouts;
 - `previews/*.mp4` and `preview-audit.jsonl`: paired prediction/actual outcomes,
   non-mutation evidence, and final-state comparisons;
-- `policy-inference/request-*.json` plus matching `*-input.png`: Fast-WAM's
-  exact current two-camera input, normalized/denormalized action chunk, prompt
-  hash, staging latency, and peak CUDA allocation for each replan;
+- `policy-inference/request-*.json`: policy mode, prompt, output shape, timing,
+  peak CUDA allocation, and generated-frame count for each Flex-π request;
+- `previews/latest_policy_{prediction,actual}.mp4`: Flex-π's delayed,
+  action-index-aligned future and actual clips after the real prefix executes;
+- Fast-WAM request artifacts additionally retain its exact two-camera input,
+  normalized/denormalized action chunk, prompt hash, and staging timings;
 - `client.log`, `server.log`, and `dashboard.log`: runtime trails.
 
 Review the last session or build an MP4 reel with:
@@ -235,8 +271,10 @@ Useful showcase controls:
 | Environment variable | Default | Purpose |
 |---|---:|---|
 | `BACKEND` | `libero` | Select `libero` or `robocasa` |
-| `MODEL` | `pi05` | Select `pi05`, `fastwam`, or `groot-n1.5` |
+| `MODEL` | `pi05` | Select `pi05`, `fastwam`, `flexpi`, or `groot-n1.5` |
 | `FASTWAM_DIR` | sibling checkout | Pinned Fast-WAM source/runtime and release weights |
+| `FLEXPI_DIR` | sibling checkout | Pinned Flex-π source/runtime and release weights |
+| `FLEXPI_MODE` | `action-only` | Select `action-only` or `full-joint` for Flex-π |
 | `LIBERO_OPENPI_DIR` | local/fallback checkout | OpenPI source containing the LIBERO simulator client |
 | `LIBERO_CLIENT_PYTHON` | OpenPI LIBERO venv | Explicit simulator Python, useful from a worktree |
 | `POLICY_PORT` | `8000` | Local policy port (`PI05_PORT` remains a legacy alias) |
@@ -480,6 +518,8 @@ you want a single rollout.
 - Model assets are kept in `cache/openpi`, not in `~/.cache/openpi`.
 - Fast-WAM uses a separately pinned sibling checkout and its isolated Python
   3.10 environment; release weights remain outside this repository.
+- Flex-π uses a second pinned sibling checkout and exact MuJoCo 3.3.2 runtime;
+  its checkpoint and shared Wan/DINO assets also remain outside this repository.
 - The upstream checkout is intentionally left unmodified. Local orchestration
   lives in this folder's `scripts` directory.
 - `results/README.md` is the publishable location for sanitized validation
@@ -529,4 +569,6 @@ configured directory so the harmless warning does not obscure rollout results.
 - Official LIBERO example: <https://github.com/Physical-Intelligence/openpi/tree/main/examples/libero>
 - Official Fast-WAM repository: <https://github.com/yuantianyuan01/FastWAM>
 - Fast-WAM paper: <https://arxiv.org/abs/2603.16666>
+- Official Flex-π repository: <https://github.com/geyan21/flex-pi>
+- Flex-π paper: <https://arxiv.org/abs/2608.10860>
 - Recent local reproduction: <https://note.com/npaka/n/n1eb56d6be1c7?hl=en>

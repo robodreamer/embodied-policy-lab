@@ -88,6 +88,13 @@ POLICIES = {
         transport="http",
         runtime_directory="../upstream-fastwam",
     ),
+    "flexpi": PolicySpec(
+        key="flexpi",
+        display_name="Flex-π",
+        runtime="local PyTorch/CUDA · flexible world-action profile",
+        transport="http",
+        runtime_directory="../upstream-flexpi",
+    ),
 }
 
 
@@ -105,6 +112,14 @@ PROFILES = {
         policy="fastwam",
         model_name="fastwam_libero_uncond_2cam224",
         checkpoint="checkpoints/fastwam_release/libero_uncond_2cam224.pt",
+        action_horizon=32,
+        default_replan_steps=10,
+    ),
+    ("libero", "flexpi"): ProfileSpec(
+        backend="libero",
+        policy="flexpi",
+        model_name="flexpi_libero_stream_dropout",
+        checkpoint="runs/flexpi-libero/checkpoints/weights/step_010860.pt",
         action_horizon=32,
         default_replan_steps=10,
     ),
@@ -145,6 +160,9 @@ MODEL_ALIASES = {
     "gr00t_n1.5": "groot-n1.5",
     "fast-wam": "fastwam",
     "fast_wam": "fastwam",
+    "flex-pi": "flexpi",
+    "flex_pi": "flexpi",
+    "flex-π": "flexpi",
 }
 
 
