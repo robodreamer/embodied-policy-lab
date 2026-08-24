@@ -77,6 +77,18 @@ else
   exit 1
 fi
 
+tracked_changes="$(
+  git -C "$FASTWAM_ROOT" status --porcelain \
+    --untracked-files=no --ignore-submodules=none
+)"
+if [[ -z "$tracked_changes" ]]; then
+  echo "ok      tracked source and submodule worktrees are clean"
+else
+  echo "wrong   tracked source or submodule worktree has local changes:" >&2
+  printf '%s\n' "$tracked_changes" >&2
+  status=1
+fi
+
 RELEASE_DIR="$FASTWAM_ROOT/checkpoints/fastwam_release"
 CHECKPOINT="$RELEASE_DIR/libero_uncond_2cam224.pt"
 STATS="$RELEASE_DIR/libero_uncond_2cam224_dataset_stats.json"

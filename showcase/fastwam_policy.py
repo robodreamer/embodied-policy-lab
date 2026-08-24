@@ -56,6 +56,21 @@ def _git_revision(path: pathlib.Path) -> str:
     ).strip()
 
 
+def _git_tracked_dirty(path: pathlib.Path) -> bool:
+    status = subprocess.check_output(
+        [
+            "git",
+            "status",
+            "--porcelain",
+            "--untracked-files=no",
+            "--ignore-submodules=none",
+        ],
+        cwd=path,
+        text=True,
+    )
+    return bool(status.strip())
+
+
 def _verify_sha256(path: pathlib.Path, expected: str) -> None:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -167,6 +182,11 @@ class StagedFastWamPolicy:
                 f"Fast-WAM upstream revision is {revision}, expected "
                 f"{EXPECTED_UPSTREAM_REVISION}"
             )
+        if _git_tracked_dirty(self.upstream_root):
+            raise ValueError(
+                "Fast-WAM upstream has tracked source or submodule changes; "
+                "use a clean pinned checkout for validated inference"
+            )
         for path in (self.checkpoint, self.stats_path):
             if not path.is_file():
                 raise FileNotFoundError(path)
@@ -218,6 +238,7 @@ class StagedFastWamPolicy:
             "schema_version": 1,
             "model": "fastwam_libero_uncond_2cam224",
             "upstream_revision": EXPECTED_UPSTREAM_REVISION,
+            "upstream_tracked_dirty": False,
             "checkpoint": str(self.checkpoint),
             "stats": str(self.stats_path),
             "action_horizon": ACTION_HORIZON,
