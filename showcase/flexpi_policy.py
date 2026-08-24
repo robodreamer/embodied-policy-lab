@@ -101,6 +101,10 @@ class FlexPiPolicy:
         artifact_dir: pathlib.Path | None = None,
         prompt_cache_size: int = 8,
     ) -> None:
+        def startup(message: str) -> None:
+            print(f"FLEXPI_STARTUP: {message}", flush=True)
+
+        startup("Validating the pinned source and release files")
         self.upstream_root = upstream_root.resolve()
         self.checkpoint = checkpoint.resolve()
         self.config_path = config.resolve()
@@ -139,6 +143,7 @@ class FlexPiPolicy:
         )
         os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
+        startup("Importing the Flex-pi runtime")
         import torch
         from experiments.libero import eval_libero_single as upstream_eval
         from experiments.libero.libero_utils import invert_gripper_action
@@ -172,6 +177,7 @@ class FlexPiPolicy:
             }
 
         started = time.perf_counter()
+        startup("Preparing preprocessing and normalization")
         self.processor = instantiate(self.cfg.data.train.processor).eval()
         self.processor.set_normalizer_from_stats(
             load_dataset_stats_from_json(str(self.stats_path))
@@ -179,12 +185,15 @@ class FlexPiPolicy:
         # Instantiate and deserialize on CPU.  Excluding T5 from model.to(cuda)
         # is required to leave enough of this workstation's 24 GB VRAM for the
         # future-stream denoising path.
+        startup("Building the model on CPU")
         self.model = instantiate(
             self.cfg.model, model_dtype=torch.bfloat16, device="cpu"
         )
+        startup("Deserializing the 12 GB checkpoint on CPU")
         self.model.load_checkpoint(str(self.checkpoint))
         self.model.eval()
         self.model.offload_text_encoder = True
+        startup("Moving denoising and visual components to CUDA; keeping T5 on CPU")
         self.model.to("cuda")
         self.model.device = torch.device("cuda")
         # Mirror the official evaluator's inference initialization. With
@@ -195,6 +204,7 @@ class FlexPiPolicy:
                 torch_compile=False,
                 quantization=None,
             )
+        startup("Installing inference settings and camera intrinsics")
         intrinsics_tensor = upstream_eval._load_eval_camera_intrinsics(self.cfg)
         self.model.set_camera_intrinsics(intrinsics_tensor.to("cuda"))
         self.input_height, self.input_width = map(
@@ -203,6 +213,7 @@ class FlexPiPolicy:
         self.num_video_frames = upstream_eval._get_num_video_frames(self.cfg)
         self.depth_target_hw = upstream_eval._per_cam_depth_target_hw(self.cfg)
         self.load_seconds = time.perf_counter() - started
+        startup(f"Model ready after {self.load_seconds:.1f} seconds")
 
     @property
     def metadata(self) -> dict[str, Any]:

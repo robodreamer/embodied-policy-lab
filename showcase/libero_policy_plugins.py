@@ -272,8 +272,10 @@ FLEXPI_MODES = (
     },
     {
         "key": "full-joint",
-        "display_name": "Full joint world-action",
-        "description": "Jointly denoise RGB, DINO, pointmap and action futures.",
+        "display_name": "World-action co-generation",
+        "description": (
+            "Co-generate RGB, DINO, pointmap and end-effector action futures."
+        ),
     },
 )
 
@@ -312,7 +314,7 @@ class FlexPiLiberoClient:
         host: str,
         port: int,
         timeout_seconds: float = 900.0,
-        mode: str = "action-only",
+        mode: str = "full-joint",
     ):
         self.spec = backend_registry.get_policy("flexpi")
         self.profile = backend_registry.get_profile("libero", "flexpi")
@@ -431,7 +433,7 @@ def create_libero_policy_client(
     host: str,
     port: int,
     *,
-    flexpi_mode: str = "action-only",
+    flexpi_mode: str = "full-joint",
 ) -> LiberoPolicyClient:
     key = backend_registry.normalize_model(model)
     backend_registry.require_compatible("libero", key)

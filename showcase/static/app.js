@@ -473,7 +473,7 @@ async function configureControls() {
       });
       pendingCommand = {id: result.command.id, action: "set_policy_mode", policyMode: requested};
       setControlNote(requested === "full-joint"
-        ? "Full-joint world-action generation is staged. Its visual future appears only after the matching real action prefix executes."
+        ? "World-action co-generation is staged. Its visual future appears only after the matching real action prefix executes."
         : "Fast action-only inference is staged; no visual future will be generated.");
       updateControls(lastState);
     } catch (error) { setControlNote(error.message, true); }
@@ -761,7 +761,7 @@ async function updateState() {
     const preview = policyComparisonReady ? policyPreview : independentPreview;
     $("previewCard").classList.toggle("hidden", !comparisonReady);
     $("previewCardLabel").innerHTML = policyComparisonReady
-      ? '<span>02</span> FLEX-π JOINT FUTURE VS COMPLETED EXECUTION'
+      ? '<span>02</span> FLEX-π WORLD-ACTION PREDICTION VS COMPLETED EXECUTION'
       : (isSimulatorOracle
         ? '<span>02</span> SIMULATOR ORACLE REPLAY VS COMPLETED EXECUTION'
         : '<span>02</span> LEARNED PREDICTION VS COMPLETED EXECUTION');

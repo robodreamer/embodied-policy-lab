@@ -21,6 +21,12 @@ def test_flexpi_profile_matches_released_libero_contract():
         backend_registry.get_profile("robocasa", "flexpi")
 
 
+def test_flexpi_defaults_to_world_action_cogeneration():
+    client = FlexPiLiberoClient("127.0.0.1", 8000)
+    assert client.mode == "full-joint"
+    assert client.available_modes[1]["display_name"] == "World-action co-generation"
+
+
 def test_depth_transport_is_lossless_uint16_millimetres():
     depth = np.arange(256 * 256, dtype=np.uint16).reshape(256, 256)
     payload = _uint16_payload(depth, name="external_depth")

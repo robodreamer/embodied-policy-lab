@@ -78,7 +78,7 @@ def handler_for(policy: FlexPiPolicy) -> type[BaseHTTPRequestHandler]:
                     ),
                     state=payload["state"],
                     task=payload["prompt"],
-                    mode=payload.get("mode", "action-only"),
+                    mode=payload.get("mode", "full-joint"),
                 )
                 self._json(200, result)
             except (KeyError, TypeError, ValueError) as error:

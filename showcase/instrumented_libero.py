@@ -61,7 +61,7 @@ class Args:
     seed: int = 7
     realtime_delay_ms: int = 35
     network_audit: bool = True
-    flexpi_mode: str = "action-only"
+    flexpi_mode: str = "full-joint"
 
 
 def _timestamp():

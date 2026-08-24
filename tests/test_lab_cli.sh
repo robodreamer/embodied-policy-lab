@@ -56,7 +56,7 @@ grep -F -- "--backend libero --model fastwam" <<<"$fastwam_output" >/dev/null
 
 flexpi_output="$("$PROJECT_DIR/lab" \
   --backend libero --model flexpi --mode interactive \
-  --task-id 0 --default --dry-run -- --flexpi-mode full-joint)"
+  --task-id 0 --default --dry-run)"
 grep -F "Model: flexpi" <<<"$flexpi_output" >/dev/null
 grep -F -- "--backend libero --model flexpi" <<<"$flexpi_output" >/dev/null
 grep -F -- "--flexpi-mode full-joint" <<<"$flexpi_output" >/dev/null

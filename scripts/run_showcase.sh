@@ -15,7 +15,7 @@ Usage:
 Backend, model, and task options:
   --backend libero|robocasa       Simulator backend (default: libero)
   --model pi05|fastwam|flexpi|groot-n1.5 Local policy plugin (default: pi05)
-  --flexpi-mode MODE              action-only (default) or full-joint
+  --flexpi-mode MODE              full-joint (default for Flex-pi) or action-only
   --world-model NAME              none (default) or robocasa-sim oracle baseline
   --compare-world-model           Compare prediction after each real action prefix
   --no-compare-world-model        Run normally without comparison (default)
@@ -90,7 +90,7 @@ LOCAL_LLM_NUM_GPU="${LOCAL_LLM_NUM_GPU:-0}"
 SESSION_DIR="${SESSION_DIR:-}"
 FASTWAM_DIR="${FASTWAM_DIR:-}"
 FLEXPI_DIR="${FLEXPI_DIR:-}"
-FLEXPI_MODE="${FLEXPI_MODE:-action-only}"
+FLEXPI_MODE="${FLEXPI_MODE:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -278,6 +278,13 @@ else
   NUM_STEPS_WAIT=10
 fi
 
+if [[ -z "$FLEXPI_MODE" ]]; then
+  if [[ "$MODEL" == "flexpi" ]]; then
+    FLEXPI_MODE="full-joint"
+  else
+    FLEXPI_MODE="action-only"
+  fi
+fi
 FLEXPI_MODE="${FLEXPI_MODE,,}"
 FLEXPI_MODE="${FLEXPI_MODE//_/-}"
 case "$FLEXPI_MODE" in
@@ -459,7 +466,15 @@ update_large_model_startup_status() {
   local elapsed_seconds="$1"
   local detail
   if [[ "$MODEL" == "flexpi" ]]; then
-    detail="Loading Flex-π checkpoint and frozen visual/text components - ${elapsed_seconds}s elapsed. A clean cache can take much longer while required assets download."
+    local startup_phase=""
+    if [[ -f "$SESSION_DIR/server.log" ]]; then
+      startup_phase="$(sed -n 's/^FLEXPI_STARTUP: //p' "$SESSION_DIR/server.log" | tail -n 1)"
+    fi
+    if [[ -n "$startup_phase" ]]; then
+      detail="${startup_phase} — ${elapsed_seconds}s elapsed. Normal cached startup is about 95–105 seconds."
+    else
+      detail="Starting Flex-π — ${elapsed_seconds}s elapsed. Normal cached startup is about 95–105 seconds."
+    fi
   elif (( elapsed_seconds < 120 )); then
     detail="Deserializing the 12 GB Fast-WAM checkpoint on CPU - ${elapsed_seconds}s elapsed; typical startup is 90-120 seconds. GPU activity starts with the first policy request."
   else
@@ -570,8 +585,8 @@ if model == "fastwam":
     )
 elif model == "flexpi":
     startup_message = (
-        "Loading the 12 GB Flex-π release plus VAE, T5 and DINOv3 assets. "
-        "The first clean setup downloads about 25 GB; subsequent starts use the cache."
+        "Starting Flex-π world-action co-generation. Cached model startup normally "
+        "takes about 95–105 seconds; phased progress will appear here."
     )
 else:
     startup_message = "Loading policy weights into local accelerator memory"
@@ -609,7 +624,7 @@ state = {
     "policy_mode": flexpi_mode if model == "flexpi" else "action-only",
     "available_policy_modes": ([
         {"key": "action-only", "display_name": "Action only", "description": "Fast action path without generated futures."},
-        {"key": "full-joint", "display_name": "Full joint world-action", "description": "Generate RGB, DINO, pointmap, and actions together."},
+        {"key": "full-joint", "display_name": "World-action co-generation", "description": "Co-generate RGB, DINO, pointmap, and end-effector actions in one model pass."},
     ] if model == "flexpi" else []),
     "camera_count": len(simulator.cameras),
     "model_image_width": 512 if model == "flexpi" else 224,

@@ -61,7 +61,7 @@ def test_dashboard_exposes_flexpi_mode_and_delayed_joint_future():
     assert 'id="policyModeSelect"' in html
     assert 'action: "set_policy_mode"' in javascript
     assert "policy_prediction_status === \"ready\"" in javascript
-    assert "FLEX-π JOINT FUTURE VS COMPLETED EXECUTION" in javascript
+    assert "FLEX-π WORLD-ACTION PREDICTION VS COMPLETED EXECUTION" in javascript
     assert "REVEALED AFTER EXECUTION" in javascript
 
 

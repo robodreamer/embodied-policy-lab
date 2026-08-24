@@ -18,8 +18,8 @@
     },
     {
       "key": "full-joint",
-      "display_name": "Full joint world-action",
-      "description": "Generate RGB, DINO, pointmap, and actions together."
+      "display_name": "World-action co-generation",
+      "description": "Co-generate RGB, DINO, pointmap, and end-effector actions in one model pass."
     }
   ],
   "world_model": "none",

@@ -169,21 +169,22 @@ preview.
 Flex-π uses its own pinned Python 3.10, CUDA 12.8, MuJoCo 3.3.2 environment.
 The setup fetches the 12 GB release checkpoint, required VAE/T5/DINO assets,
 and only four tiny camera-intrinsics files from the training dataset—not the
-roughly 12 GB demonstration dataset. Start with action-only, then select
-full-joint in the browser between rollouts. Full-joint generates RGB, DINO,
-pointmap, and action futures from the same checkpoint; its RGB future is shown
-beside real execution only after the matching action prefix has completed.
+roughly 12 GB demonstration dataset. Selecting Flex-π defaults to world-action
+co-generation: RGB, DINO, pointmap, and end-effector action futures come from
+the same checkpoint pass. Its RGB future is shown beside real execution only
+after the matching action prefix has completed. Action-only remains available
+as an explicit lower-memory mode.
 
 ```bash
 ./scripts/setup_flexpi_libero.sh
 
-# Lower-memory behavior baseline
+# Default: world-action co-generation
 ./scripts/run_interactive_showcase.sh \
   --backend libero --model flexpi --task-suite libero_spatial --task-id 0
 
-# Start directly in the world-action regime
+# Explicit lower-memory action-only baseline
 ./scripts/run_interactive_showcase.sh \
-  --backend libero --model flexpi --flexpi-mode full-joint \
+  --backend libero --model flexpi --flexpi-mode action-only \
   --task-suite libero_spatial --task-id 0
 ```
 
@@ -274,7 +275,7 @@ Useful showcase controls:
 | `MODEL` | `pi05` | Select `pi05`, `fastwam`, `flexpi`, or `groot-n1.5` |
 | `FASTWAM_DIR` | sibling checkout | Pinned Fast-WAM source/runtime and release weights |
 | `FLEXPI_DIR` | sibling checkout | Pinned Flex-π source/runtime and release weights |
-| `FLEXPI_MODE` | `action-only` | Select `action-only` or `full-joint` for Flex-π |
+| `FLEXPI_MODE` | `full-joint` | Flex-π world-action co-generation; use `action-only` for the lower-memory path |
 | `LIBERO_OPENPI_DIR` | local/fallback checkout | OpenPI source containing the LIBERO simulator client |
 | `LIBERO_CLIENT_PYTHON` | OpenPI LIBERO venv | Explicit simulator Python, useful from a worktree |
 | `POLICY_PORT` | `8000` | Local policy port (`PI05_PORT` remains a legacy alias) |

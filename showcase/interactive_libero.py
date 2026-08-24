@@ -35,7 +35,7 @@ class Args:
     realtime_delay_ms: int = 35
     network_audit: bool = True
     initial_prompt: str = ""
-    flexpi_mode: str = "action-only"
+    flexpi_mode: str = "full-joint"
     auto_start: bool = False
 
 

@@ -32,10 +32,13 @@ integration exposes two endpoints of that spectrum:
 
 | Mode | Generated streams | Purpose |
 |---|---|---|
-| `action-only` | 32×7 action chunk | Lower-memory closed-loop policy baseline |
-| `full-joint` | RGB + DINOv3 + pointmap + 32×7 actions | World-action behavior and visual-dynamics validation |
+| `action-only` | 32×7 action chunk | Explicit lower-memory closed-loop policy baseline |
+| World-action co-generation (`full-joint` internally) | RGB + DINOv3 + pointmap + 32×7 actions | Default world-action behavior and visual-dynamics validation |
 
-The full-joint path jointly denoises future stream tokens. It does not generate
+The co-generation path jointly denoises future stream tokens. Here, “joint” is
+an upstream inference term for joint multimodal generation; the actions remain
+7D end-effector deltas plus gripper control, not robot joint-space commands.
+It does not generate
 many action candidates, render each candidate, and choose the best one. The
 future RGB and action chunk are correlated outputs of one model pass, so the
 UI calls this a policy-owned world-action prediction rather than an independent
@@ -117,14 +120,14 @@ cd /home/andypark/Projects/playground/git-worktrees/embodied-policy-lab-fastwam
 ./scripts/setup_flexpi_libero.sh
 ./scripts/setup_flexpi_libero.sh --check
 
-# Begin with the bounded action-only gate:
+# Default world-action co-generation:
 ./scripts/run_interactive_showcase.sh \
   --backend libero --model flexpi --task-suite libero_spatial --task-id 0 \
   --max-policy-steps 20
 
-# Full-joint can be selected in the browser, or at launch:
+# Explicit lower-memory action-only baseline:
 ./scripts/run_interactive_showcase.sh \
-  --backend libero --model flexpi --flexpi-mode full-joint \
+  --backend libero --model flexpi --flexpi-mode action-only \
   --task-suite libero_spatial --task-id 0 --max-policy-steps 20
 ```
 
@@ -145,7 +148,9 @@ UMT5/tokenizer, DINOv3 weights, and four published intrinsics files are present;
 | Full-joint, one query + one executed action | Pass; finite 32×7 output + 9 RGB future frames | 2.980 s inference; 5.796 s total with 2.783 s cold prompt encoding | 15.33 GiB allocated / 16.45 GiB reserved |
 | Delayed 10-action visual comparison | Pass; reveal only after execution | 2.866 s inference; 5.727 s total | 3 aligned frames, mean RGB PSNR 31.164 dB |
 
-Cached model startup was 100.6–102.8 seconds. One-second `nvidia-smi`
+Cached model startup measured 95.5–102.8 seconds. The dashboard now reports
+the active initialization phase and this expected range while it waits; the
+resident server is reused across rollouts. One-second `nvidia-smi`
 telemetry observed 14,671 MiB process-level memory for action-only and 17,961
 MiB for full-joint; those totals include CUDA context/driver allocations that
 PyTorch's allocator counters do not. Full-joint therefore fits this machine

@@ -50,7 +50,7 @@ robocasa  pi05          ready / default
 robocasa  groot-n1.5    ready
 libero    pi05          ready
 libero    fastwam       experimental / staged 24 GB profile
-libero    flexpi        experimental / action-only + full-joint modes
+libero    flexpi        experimental / world-action co-generation (default) + action-only
 libero    groot-n1.5    incompatible
 
 PREDICTOR / BASELINE  BACKEND    STATUS
@@ -230,6 +230,9 @@ main() {
     --task-set "$task_set"
     --task-id "$task_id"
   )
+  if [[ "$model" == "flexpi" ]]; then
+    command+=(--flexpi-mode "${FLEXPI_MODE:-full-joint}")
+  fi
   if [[ "$mode" == "batch" ]]; then
     command[0]="$PROJECT_DIR/scripts/run_showcase.sh"
     command+=(--batch --trials "$trials")

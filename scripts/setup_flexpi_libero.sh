@@ -160,5 +160,5 @@ print("LIBERO suites:", sorted(benchmark.get_benchmark_dict()))
 PY
 
 echo "Flex-π + LIBERO prerequisites are ready."
-echo "Action-only: ./scripts/run_interactive_showcase.sh --backend libero --model flexpi --task-id 0"
-echo "Full joint:  ./scripts/run_interactive_showcase.sh --backend libero --model flexpi --flexpi-mode full-joint --task-id 0"
+echo "World-action co-generation (default): ./scripts/run_interactive_showcase.sh --backend libero --model flexpi --task-id 0"
+echo "Action-only: ./scripts/run_interactive_showcase.sh --backend libero --model flexpi --flexpi-mode action-only --task-id 0"

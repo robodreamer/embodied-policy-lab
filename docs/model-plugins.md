@@ -55,9 +55,10 @@ required correctness invariant for closed-loop validation.
 
 Flex-π also runs in its own pinned Python 3.10 / CUDA 12.8 / MuJoCo 3.3.2
 environment. Its lossless HTTP boundary adds aligned uint16 millimetre depth.
-The client can switch the same checkpoint between `action-only` and
-`full-joint` between rollouts. The latter returns future RGB along with the
-DINO, pointmap, and action streams. The dashboard withholds that future until
+The client defaults to world-action co-generation (`full-joint` internally)
+and can switch to `action-only` between rollouts. Co-generation returns future
+RGB along with the DINO, pointmap, and end-effector action streams. The
+dashboard withholds that future until
 the matching real action prefix completes, then publishes temporally aligned
 clips and mean RGB PSNR. This is evidence about the checkpoint's learned
 dynamics, not an independent model comparison.
