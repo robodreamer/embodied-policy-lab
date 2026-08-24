@@ -37,6 +37,12 @@ except ImportError:  # Direct script execution adds showcase/ to sys.path.
         validate_action_chunk,
     )
 
+__all__ = [
+    "CAMERA_KEYS",
+    "robot_state_from_observation",
+    "validate_action_chunk",
+]
+
 
 def timestamp() -> str:
     return datetime.datetime.now(datetime.timezone.utc).astimezone().isoformat()
