@@ -50,7 +50,6 @@ class Args:
     model: str = "pi05"
     host: str = "127.0.0.1"
     port: int = 8000
-    resize_size: int = 224
     replan_steps: int = 5
     task_suite_name: str = "libero_spatial"
     task_ids: str = "0"
@@ -175,8 +174,7 @@ def _depth_mm(obs, env):
     return result
 
 
-def _prepare_observation(obs, resize_size, prompt, client, env=None):
-    del resize_size  # Each policy client owns its exact input preprocessing contract.
+def _prepare_observation(obs, prompt, client, env=None):
     external, wrist = _display_images(obs)
     robot_state = np.concatenate(
         (
@@ -373,7 +371,7 @@ def evaluate(args):
                         continue
 
                     external, wrist, robot_state, model_input = _prepare_observation(
-                        obs, args.resize_size, task_description, client, env
+                        obs, task_description, client, env
                     )
                     if not args.benchmark_mode:
                         state.frames(external, wrist)
@@ -461,7 +459,7 @@ def evaluate(args):
                     if done:
                         if not args.benchmark_mode or args.save_videos:
                             final_external, final_wrist, _, _ = _prepare_observation(
-                                obs, args.resize_size, task_description, client, env
+                                obs, task_description, client, env
                             )
                             if not args.benchmark_mode:
                                 state.frames(final_external, final_wrist)

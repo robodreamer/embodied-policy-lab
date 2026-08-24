@@ -219,7 +219,7 @@ left intact because changing it would invalidate the released checkpoints.
 # Provisional estimate: 2 tasks × 3 trials in every suite and configuration
 ./scripts/benchmark_wam_libero.py --profile pilot
 
-# Published LIBERO protocol: 40 tasks × 50 trials for each configuration
+# Full matched local protocol: 40 tasks × 50 trials for each configuration
 ./scripts/benchmark_wam_libero.py --profile paper
 
 # Review commands without launching models
@@ -231,8 +231,10 @@ Results are written beneath `benchmark-runs/wam-libero-*/` as
 configuration and suite. The `paper` profile is 6,000 complete episodes in
 total and is therefore a long experiment. Resume an interrupted fixed output
 directory with `--output-dir PATH --resume`. Smoke results are labelled wiring
-checks and pilot results are labelled provisional; only the complete paper
-profile is allowed to report a paper-protocol reproduction.
+checks and pilot results are labelled provisional. The complete `paper`
+profile covers the full task/trial matrix, but deliberately uses one shared
+local budget schedule. It is therefore a matched local comparison, not a
+reproduction of either project's complete paper protocol.
 
 ### Choosing a Fast-WAM LIBERO task suite
 

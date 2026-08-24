@@ -20,12 +20,19 @@ from typing import Any
 PROJECT_DIR = pathlib.Path(__file__).resolve().parents[1]
 RUN_SHOWCASE = PROJECT_DIR / "scripts" / "run_showcase.sh"
 SUITES = ("libero_spatial", "libero_object", "libero_goal", "libero_10")
+# Shared local comparison budgets published by Flex-π. Fast-WAM's native
+# evaluator instead uses 400/400/400/700; therefore even the full profile below
+# is a matched local protocol, not a reproduction of Fast-WAM's paper protocol.
 SUITE_BUDGETS = {
     "libero_spatial": 220,
     "libero_object": 280,
     "libero_goal": 300,
     "libero_10": 520,
 }
+TASKS_PER_SUITE = 10
+PAPER_TRIALS_PER_TASK = 50
+REPLAN_STEPS = 10
+PROTOCOL_NAME = "matched-flexpi-libero-local-v1"
 CONFIGS = (
     {"key": "fastwam", "model": "fastwam", "mode": "action-only"},
     {"key": "flexpi-action", "model": "flexpi", "mode": "action-only"},
@@ -93,7 +100,7 @@ def _profile_defaults(profile: str) -> dict[str, Any]:
         return {
             "suites": SUITES,
             "task_ids": "all",
-            "trials": 50,
+            "trials": PAPER_TRIALS_PER_TASK,
             "max_policy_steps": None,
             "latency_warmups": 3,
             "latency_calls": 20,
@@ -103,8 +110,16 @@ def _profile_defaults(profile: str) -> dict[str, Any]:
 
 def _task_count(task_ids: str) -> int:
     if task_ids.strip().lower() == "all":
-        return 10
-    return len({int(value.strip()) for value in task_ids.split(",")})
+        return TASKS_PER_SUITE
+    values = [int(value.strip()) for value in task_ids.split(",")]
+    if len(values) != len(set(values)):
+        raise ValueError("task IDs must not contain duplicates")
+    invalid = [value for value in values if value < 0 or value >= TASKS_PER_SUITE]
+    if invalid:
+        raise ValueError(
+            f"task IDs must be in [0, {TASKS_PER_SUITE}): {invalid}"
+        )
+    return len(values)
 
 
 def build_plan(
@@ -143,6 +158,8 @@ def build_plan(
     unknown_suites = sorted(set(selected_suites) - set(SUITES))
     if unknown_suites:
         raise ValueError(f"Unsupported suites: {', '.join(unknown_suites)}")
+    if len(selected_suites) != len(set(selected_suites)):
+        raise ValueError("benchmark suites must not contain duplicates")
 
     selected_configs = [
         config for config in CONFIGS if not config_keys or config["key"] in config_keys
@@ -175,7 +192,7 @@ def build_plan(
                 "--seed",
                 str(seed),
                 "--replan-steps",
-                "10",
+                str(REPLAN_STEPS),
                 "--max-policy-steps",
                 str(suite_max_steps),
                 "--benchmark-mode",
@@ -205,6 +222,8 @@ def build_plan(
                     "trials_per_task": selected_trials,
                     "expected_episodes": _task_count(selected_task_ids)
                     * selected_trials,
+                    "seed": seed,
+                    "replan_steps": REPLAN_STEPS,
                     "max_policy_steps": suite_max_steps,
                     "latency_probe_warmups": probe_warmups,
                     "latency_probe_calls": probe_calls,
@@ -225,9 +244,50 @@ def _read_json(path: pathlib.Path) -> dict[str, Any] | None:
 
 def _session_complete(run: dict[str, Any]) -> bool:
     state = _read_json(pathlib.Path(run["session_dir"]) / "state.json") or {}
-    return state.get("phase") == "complete" and int(state.get("episodes") or 0) == int(
-        run["expected_episodes"]
+    expected_task_ids = (
+        list(range(TASKS_PER_SUITE))
+        if run["task_ids"].strip().lower() == "all"
+        else [int(value.strip()) for value in run["task_ids"].split(",")]
     )
+    expected = {
+        "suite": run["suite"],
+        "task_ids": expected_task_ids,
+        "seed": int(run["seed"]),
+        "replan_steps": int(run["replan_steps"]),
+        "max_steps": int(run["max_policy_steps"]),
+        "model_plugin": run["model"],
+        "policy_mode": run["mode"],
+    }
+    return (
+        state.get("phase") == "complete"
+        and int(state.get("episodes") or 0) == int(run["expected_episodes"])
+        and all(state.get(key) == value for key, value in expected.items())
+    )
+
+
+def _same_run_spec(planned: dict[str, Any], recorded: dict[str, Any]) -> bool:
+    fields = (
+        "config",
+        "model",
+        "mode",
+        "suite",
+        "task_ids",
+        "expected_episodes",
+        "max_policy_steps",
+        "seed",
+        "replan_steps",
+        "common_libero_runtime",
+    )
+    return all(planned.get(field) == recorded.get(field) for field in fields)
+
+
+def _manifest_runs(path: pathlib.Path) -> dict[tuple[str, str], dict[str, Any]]:
+    manifest = _read_json(path) or {}
+    return {
+        (run["config"], run["suite"]): run
+        for run in manifest.get("runs", [])
+        if isinstance(run, dict) and run.get("config") and run.get("suite")
+    }
 
 
 def _wait_for_session_lock(timeout_seconds: float = 30.0) -> None:
@@ -262,8 +322,13 @@ def execute_plan(
 ) -> list[dict[str, Any]]:
     output_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = output_dir / "benchmark-manifest.json"
+    prior_runs = _manifest_runs(manifest_path) if resume else {}
     statuses = []
-    for run_index, run in enumerate(plan, start=1):
+    for run_index, planned_run in enumerate(plan, start=1):
+        run = planned_run
+        recorded = prior_runs.get((planned_run["config"], planned_run["suite"]))
+        if recorded and _same_run_spec(planned_run, recorded):
+            run = {**planned_run, **recorded}
         if resume and _session_complete(run):
             statuses.append({**run, "status": "skipped_complete", "returncode": 0})
             continue
@@ -296,8 +361,9 @@ def execute_plan(
         manifest_path.write_text(
             json.dumps(
                 {
-                    "schema_version": 1,
+                    "schema_version": 2,
                     "profile": profile,
+                    "protocol": PROTOCOL_NAME,
                     "updated_at": datetime.datetime.now(
                         datetime.timezone.utc
                     ).isoformat(),
@@ -410,18 +476,33 @@ def collect_results(runs: list[dict[str, Any]], *, profile: str) -> dict[str, An
             "suites": {record["suite"]: record for record in selected},
         }
 
-    complete_paper_protocol = (
+    expected_pairs = {
+        (config["key"], suite) for config in CONFIGS for suite in SUITES
+    }
+    observed_pairs = {(record["config"], record["suite"]) for record in records}
+    expected_config_contract = {
+        config["key"]: (config["model"], config["mode"]) for config in CONFIGS
+    }
+    complete_matched_protocol = (
         bool(records)
         and profile == "paper"
+        and observed_pairs == expected_pairs
+        and len(records) == len(expected_pairs)
+        and len({record["seed"] for record in records}) == 1
         and all(
             record["phase"] == "complete"
             and record["task_ids"] == "all"
-            and record["trials_per_task"] == 50
-            and record["episodes"] == 500
+            and record["task_count"] == TASKS_PER_SUITE
+            and record["trials_per_task"] == PAPER_TRIALS_PER_TASK
+            and record["episodes"]
+            == TASKS_PER_SUITE * PAPER_TRIALS_PER_TASK
             and record["max_policy_steps"] == SUITE_BUDGETS[record["suite"]]
+            and record["replan_steps"] == REPLAN_STEPS
+            and record["common_libero_runtime"] is True
+            and (record["model"], record["mode"])
+            == expected_config_contract[record["config"]]
             for record in records
         )
-        and len(records) == len(CONFIGS) * len(SUITES)
     )
 
     def aggregate_rate(key: str) -> float | None:
@@ -439,8 +520,8 @@ def collect_results(runs: list[dict[str, Any]], *, profile: str) -> dict[str, An
     action_latency = server_latency("flexpi-action")
     joint_latency = server_latency("flexpi-joint")
     behavior_qualifier = (
-        "paper_protocol"
-        if complete_paper_protocol
+        "matched_local_protocol"
+        if complete_matched_protocol
         else ("wiring_only" if profile == "smoke" else "provisional")
     )
     compare_behavior = profile != "smoke"
@@ -501,7 +582,19 @@ def collect_results(runs: list[dict[str, Any]], *, profile: str) -> dict[str, An
     return {
         "schema_version": 1,
         "profile": profile,
-        "complete_paper_protocol": complete_paper_protocol,
+        "protocol": {
+            "name": PROTOCOL_NAME,
+            "complete": complete_matched_protocol,
+            "scope": "matched local LIBERO inference protocol",
+            "fastwam_native_suite_budgets": {
+                "libero_spatial": 400,
+                "libero_object": 400,
+                "libero_goal": 400,
+                "libero_10": 700,
+            },
+            "shared_suite_budgets": SUITE_BUDGETS,
+        },
+        "complete_matched_protocol": complete_matched_protocol,
         "published_libero_success_pct": PUBLISHED_LIBERO,
         "published_latency_ms": PUBLISHED_LATENCY_MS,
         "records": records,
@@ -523,8 +616,10 @@ def render_report(results: dict[str, Any]) -> str:
         f"Profile: `{results['profile']}`",
         "",
         (
-            "Status: **complete paper-protocol reproduction**"
-            if results["complete_paper_protocol"]
+            "Status: **complete matched local protocol** — this covers the full "
+            "local task/trial matrix under the shared Flex-π suite budgets; it "
+            "is not a reproduction of either paper's complete evaluation."
+            if results["complete_matched_protocol"]
             else (
                 "Status: **wiring validation only** — the smoke profile is too "
                 "short to evaluate behavioral claims."
@@ -589,7 +684,8 @@ def render_report(results: dict[str, Any]) -> str:
             "## Scope limits",
             "",
             "- `smoke` validates wiring only. `pilot` gives provisional estimates; "
-            "only `paper` covers 40 tasks × 50 rollouts per configuration.",
+            "the `paper` profile covers 40 tasks × 50 rollouts per configuration "
+            "but remains a matched local protocol rather than a paper reproduction.",
             "- Released checkpoints can test inference-time modes, but not "
             "video-co-training, cross-modality-training, or data-scaling ablations "
             "that require retraining.",

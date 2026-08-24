@@ -16,7 +16,11 @@ from flexpi_policy import (
     STATS_FILENAME,
     FlexPiPolicy,
 )
-from libero_policy_plugins import decode_uint8_payload, decode_uint16_payload
+from libero_policy_plugins import (
+    _uint8_payload,
+    decode_uint8_payload,
+    decode_uint16_payload,
+)
 
 MAX_REQUEST_BYTES = 8 * 1024 * 1024
 
@@ -55,7 +59,7 @@ def handler_for(policy: FlexPiPolicy) -> type[BaseHTTPRequestHandler]:
                 self._json(404, {"error": "not found"})
 
         def do_POST(self) -> None:
-            if self.path != "/infer":
+            if self.path not in ("/infer", "/preprocess"):
                 self._json(404, {"error": "not found"})
                 return
             try:
@@ -67,6 +71,22 @@ def handler_for(policy: FlexPiPolicy) -> type[BaseHTTPRequestHandler]:
                 payload = json.loads(self.rfile.read(length).decode("utf-8"))
                 if payload.get("schema_version") != 1:
                     raise ValueError("Unsupported request schema_version")
+                include_prediction_frames = payload.get(
+                    "include_prediction_frames", False
+                )
+                if not isinstance(include_prediction_frames, bool):
+                    raise ValueError("include_prediction_frames must be a JSON boolean")
+                if self.path == "/preprocess":
+                    composite = policy.preprocess_composite(
+                        external=decode_uint8_payload(
+                            payload["external"], name="external"
+                        ),
+                        wrist=decode_uint8_payload(payload["wrist"], name="wrist"),
+                    )
+                    self._json(
+                        200, {"composite": _uint8_payload(composite, name="composite")}
+                    )
+                    return
                 result = policy.infer(
                     external=decode_uint8_payload(payload["external"], name="external"),
                     wrist=decode_uint8_payload(payload["wrist"], name="wrist"),
@@ -79,6 +99,7 @@ def handler_for(policy: FlexPiPolicy) -> type[BaseHTTPRequestHandler]:
                     state=payload["state"],
                     task=payload["prompt"],
                     mode=payload.get("mode", "full-joint"),
+                    include_prediction_frames=include_prediction_frames,
                 )
                 self._json(200, result)
             except (KeyError, TypeError, ValueError) as error:

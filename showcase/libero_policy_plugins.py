@@ -9,7 +9,6 @@ isolated from the simulator client.
 from __future__ import annotations
 
 import base64
-import io
 import json
 import urllib.error
 import urllib.request
@@ -20,8 +19,20 @@ from PIL import Image
 
 try:
     from . import backend_registry
+    from .flexpi_contracts import (
+        COMPOSITE_HEIGHT,
+        COMPOSITE_WIDTH,
+        FLEXPI_MODES,
+        normalize_flexpi_mode,
+    )
 except ImportError:  # Direct script execution adds showcase/ to sys.path.
     import backend_registry
+    from flexpi_contracts import (
+        COMPOSITE_HEIGHT,
+        COMPOSITE_WIDTH,
+        FLEXPI_MODES,
+        normalize_flexpi_mode,
+    )
 
 
 class LiberoPolicyClient(Protocol):
@@ -53,7 +64,12 @@ class LiberoPolicyClient(Protocol):
         depth: dict[str, np.ndarray] | None = None,
     ) -> dict[str, Any]: ...
 
-    def infer(self, observation: dict[str, Any]) -> dict[str, Any]: ...
+    def infer(
+        self,
+        observation: dict[str, Any],
+        *,
+        include_prediction_frames: bool = False,
+    ) -> dict[str, Any]: ...
 
 
 def _uint8_payload(value: Any, *, name: str) -> dict[str, Any]:
@@ -183,7 +199,13 @@ class Pi05LiberoClient(_FixedModeClient):
             _resize_with_pad(external), _resize_with_pad(wrist), state, prompt
         )
 
-    def infer(self, observation: dict[str, Any]) -> dict[str, Any]:
+    def infer(
+        self,
+        observation: dict[str, Any],
+        *,
+        include_prediction_frames: bool = False,
+    ) -> dict[str, Any]:
+        del include_prediction_frames
         return self._client.infer(observation)
 
 
@@ -210,7 +232,13 @@ class FastWamLiberoClient(_FixedModeClient):
             _resize_with_pad(external), _resize_with_pad(wrist), state, prompt
         )
 
-    def infer(self, observation: dict[str, Any]) -> dict[str, Any]:
+    def infer(
+        self,
+        observation: dict[str, Any],
+        *,
+        include_prediction_frames: bool = False,
+    ) -> dict[str, Any]:
+        del include_prediction_frames
         required = (
             "observation/image",
             "observation/wrist_image",
@@ -264,49 +292,10 @@ class FastWamLiberoClient(_FixedModeClient):
         return result
 
 
-FLEXPI_MODES = (
-    {
-        "key": "action-only",
-        "display_name": "Action only",
-        "description": "Fast KV-cache path; visual futures are not generated.",
-    },
-    {
-        "key": "full-joint",
-        "display_name": "World-action co-generation",
-        "description": (
-            "Co-generate RGB, DINO, pointmap and end-effector action futures."
-        ),
-    },
-)
-
-
-def normalize_flexpi_mode(mode: str) -> str:
-    key = str(mode).strip().lower().replace("_", "-")
-    aliases = {
-        "action": "action-only",
-        "fast": "action-only",
-        "joint": "full-joint",
-        "full": "full-joint",
-    }
-    key = aliases.get(key, key)
-    supported = {item["key"] for item in FLEXPI_MODES}
-    if key not in supported:
-        raise ValueError(
-            f"Unknown Flex-π mode {mode!r}; choose one of: {', '.join(sorted(supported))}"
-        )
-    return key
-
-
-def _decode_prediction_frame(encoded: str) -> np.ndarray:
-    raw = base64.b64decode(encoded, validate=True)
-    with Image.open(io.BytesIO(raw)) as image:
-        return np.asarray(image.convert("RGB"), dtype=np.uint8)
-
-
 class FlexPiLiberoClient:
     requires_depth = True
-    model_image_width = 512
-    model_image_height = 448
+    model_image_width = COMPOSITE_WIDTH
+    model_image_height = COMPOSITE_HEIGHT
     available_modes = FLEXPI_MODES
 
     def __init__(
@@ -342,24 +331,43 @@ class FlexPiLiberoClient:
         }
         return result
 
-    @staticmethod
-    def compose_preview(external: np.ndarray, wrist: np.ndarray) -> np.ndarray:
-        """Render the released wrist-top 448x512 composite for diagnostics."""
-
-        wrist_tile = np.asarray(
-            Image.fromarray(np.asarray(wrist, dtype=np.uint8)).resize(
-                (512, 288), Image.Resampling.BILINEAR
-            )
+    def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        request = urllib.request.Request(
+            f"{self.endpoint}{path}",
+            data=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
         )
-        external_tile = np.asarray(
-            Image.fromarray(np.asarray(external, dtype=np.uint8)).resize(
-                (256, 160), Image.Resampling.BILINEAR
-            )
-        )
-        bottom = np.concatenate((external_tile, np.zeros_like(external_tile)), axis=1)
-        return np.ascontiguousarray(np.concatenate((wrist_tile, bottom), axis=0))
+        try:
+            with urllib.request.urlopen(
+                request, timeout=self.timeout_seconds
+            ) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as error:
+            detail = error.read().decode("utf-8", errors="replace")
+            raise RuntimeError(
+                f"Flex-π server returned HTTP {error.code}: {detail}"
+            ) from error
 
-    def infer(self, observation: dict[str, Any]) -> dict[str, Any]:
+    def compose_preview(self, external: np.ndarray, wrist: np.ndarray) -> np.ndarray:
+        """Ask the pinned Flex-π runtime for its exact upstream input composite."""
+
+        result = self._post(
+            "/preprocess",
+            {
+                "schema_version": 1,
+                "external": _uint8_payload(external, name="external"),
+                "wrist": _uint8_payload(wrist, name="wrist"),
+            },
+        )
+        return decode_uint8_payload(result["composite"], name="composite")
+
+    def infer(
+        self,
+        observation: dict[str, Any],
+        *,
+        include_prediction_frames: bool = False,
+    ) -> dict[str, Any]:
         required = (
             "observation/image",
             "observation/wrist_image",
@@ -377,6 +385,7 @@ class FlexPiLiberoClient:
         payload = {
             "schema_version": 1,
             "mode": self.mode,
+            "include_prediction_frames": bool(include_prediction_frames),
             "prompt": str(observation["prompt"]),
             "state": state.tolist(),
             "external": _uint8_payload(
@@ -390,22 +399,7 @@ class FlexPiLiberoClient:
             ),
             "wrist_depth": _uint16_payload(depth["wrist"], name="wrist_depth"),
         }
-        request = urllib.request.Request(
-            f"{self.endpoint}/infer",
-            data=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(
-                request, timeout=self.timeout_seconds
-            ) as response:
-                result = json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as error:
-            detail = error.read().decode("utf-8", errors="replace")
-            raise RuntimeError(
-                f"Flex-π server returned HTTP {error.code}: {detail}"
-            ) from error
+        result = self._post("/infer", payload)
         if "actions" not in result:
             raise ValueError("Flex-π response is missing the 'actions' field")
         actions = np.asarray(result["actions"], dtype=np.float32)
@@ -419,11 +413,16 @@ class FlexPiLiberoClient:
         result["actions"] = actions
         prediction = result.get("prediction")
         if isinstance(prediction, dict):
+            encoded_input = prediction.pop("input_frame", None)
+            if isinstance(encoded_input, dict):
+                result["prediction_input_frame"] = decode_uint8_payload(
+                    encoded_input, name="prediction_input_frame"
+                )
             encoded_frames = prediction.pop("frames", [])
             result["prediction_frames"] = [
-                _decode_prediction_frame(item["jpeg"])
+                decode_uint8_payload(item, name="prediction_frame")
                 for item in encoded_frames
-                if isinstance(item, dict) and item.get("jpeg")
+                if isinstance(item, dict)
             ]
         return result
 

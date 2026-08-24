@@ -121,7 +121,7 @@ contract.
 ## How to run and review
 
 ```bash
-cd /home/andypark/Projects/playground/git-worktrees/embodied-policy-lab-fastwam
+cd /path/to/embodied-policy-lab
 
 # Full setup/download, then a non-mutating diagnostic:
 ./scripts/setup_flexpi_libero.sh

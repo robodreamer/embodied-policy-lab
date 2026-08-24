@@ -79,7 +79,7 @@ and GPU telemetry inside each session directory.
 
 | Claim | Can this runner test it? | Evidence |
 |---|---|---|
-| Flex-π action-only/full-joint standard LIBERO success vs Fast-WAM | Yes, with the complete `paper` profile | Same 40 tasks, 50 trials, budgets, seed policy, simulator runtime, and action prefix |
+| Flex-π action-only/full-joint standard LIBERO success vs Fast-WAM | Yes, as a matched local comparison with the complete `paper` profile | Same 40 tasks, 50 trials, shared local budgets, seed policy, simulator runtime, and action prefix |
 | Flex-π action-only is faster than Fast-WAM locally | Yes, directionally | Repeated warm calls through each released local server |
 | Cost of Flex-π joint generation vs action-only | Yes | Same checkpoint/runtime with only inference mode changed |
 | Published absolute RTX 5090 latency | No | Different GPU and optimization/compilation stack |
@@ -88,11 +88,13 @@ and GPU telemetry inside each session directory.
 | RoboTwin, LIBERO-Plus, and real-robot results | No | They are outside this LIBERO simulator setup |
 
 A smoke result is marked **wiring only**, and a pilot result is marked
-**provisional**. Only a complete 12-session `paper` run with 500 episodes per
-session is labelled a paper-protocol reproduction. Even then, a failure to
-match the published rate is evidence about this reproduction, not proof that
-the paper's result is false; upstream commits, assets, hardware numerics, and
-initial-state handling must be audited before interpreting a discrepancy.
+**provisional**. A complete 12-session `paper` run with 500 episodes per
+session is labelled a **complete matched local protocol**. It is not a direct
+paper reproduction: this harness uses Flex-π's shared 220/280/300/520 suite
+budgets, whereas Fast-WAM's native evaluator uses 400/400/400/700. A failure
+to match a published rate is evidence about this local integration, not proof
+that a paper's result is false; upstream commits, assets, hardware numerics,
+and initial-state handling must be audited before interpreting a discrepancy.
 
 ## Bounded local validation
 

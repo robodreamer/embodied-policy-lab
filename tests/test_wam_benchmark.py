@@ -1,8 +1,11 @@
 import json
 
+import pytest
+
 from showcase.wam_benchmark import SUITE_BUDGETS
 from showcase.wam_benchmark import build_plan
 from showcase.wam_benchmark import collect_results
+from showcase.wam_benchmark import execute_plan
 from showcase.wam_benchmark import render_report
 
 
@@ -42,6 +45,49 @@ def test_paper_plan_matches_flexpi_libero_protocol(tmp_path):
         )
 
 
+@pytest.mark.parametrize("task_ids", ("0,0", "10", "-1"))
+def test_plan_rejects_ambiguous_or_invalid_task_ids(tmp_path, task_ids):
+    with pytest.raises(ValueError, match="task IDs"):
+        build_plan(profile="smoke", output_dir=tmp_path, task_ids=task_ids)
+
+
+def test_plan_rejects_duplicate_suites(tmp_path):
+    with pytest.raises(ValueError, match="suites must not contain duplicates"):
+        build_plan(
+            profile="pilot",
+            output_dir=tmp_path,
+            suites=("libero_spatial", "libero_spatial"),
+        )
+
+
+@pytest.mark.parametrize(
+    ("common_runtime", "expected_complete"), ((True, True), (False, False))
+)
+def test_full_matrix_requires_the_shared_runtime(
+    tmp_path, common_runtime, expected_complete
+):
+    plan = build_plan(
+        profile="paper", output_dir=tmp_path, common_runtime=common_runtime
+    )
+    for run in plan:
+        session = tmp_path / "sessions" / run["config"] / run["suite"]
+        session.mkdir(parents=True)
+        (session / "state.json").write_text(
+            json.dumps(
+                {
+                    "phase": "complete",
+                    "successes": run["expected_episodes"],
+                    "episodes": run["expected_episodes"],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    results = collect_results(plan, profile="paper")
+
+    assert results["complete_matched_protocol"] is expected_complete
+
+
 def test_result_report_keeps_smoke_claims_provisional(tmp_path):
     plan = build_plan(profile="smoke", output_dir=tmp_path)
     observed = {
@@ -76,7 +122,7 @@ def test_result_report_keeps_smoke_claims_provisional(tmp_path):
     results = collect_results(plan, profile="smoke")
     report = render_report(results)
 
-    assert results["complete_paper_protocol"] is False
+    assert results["complete_matched_protocol"] is False
     behavior_claim = results["claims"]["flexpi_joint_vs_fastwam_libero"]
     assert behavior_claim["status"] == "wiring_only"
     assert behavior_claim["observed_delta_points"] is None
@@ -86,3 +132,51 @@ def test_result_report_keeps_smoke_claims_provisional(tmp_path):
     ]
     assert "wiring validation only" in report
     assert "not_testable_from_released_inference_checkpoints" in report
+
+
+def test_resume_reuses_a_completed_retry_directory(tmp_path, monkeypatch):
+    plan = build_plan(
+        profile="smoke", output_dir=tmp_path, config_keys=("fastwam",)
+    )
+    planned = plan[0]
+    canonical = tmp_path / "sessions" / "fastwam" / "libero_spatial"
+    canonical.mkdir(parents=True)
+    (canonical / "partial.txt").write_text("interrupted", encoding="utf-8")
+    retry = canonical.with_name("libero_spatial-retry-prior")
+    retry.mkdir()
+    state = {
+        "phase": "complete",
+        "suite": planned["suite"],
+        "task_ids": [2],
+        "seed": planned["seed"],
+        "replan_steps": planned["replan_steps"],
+        "max_steps": planned["max_policy_steps"],
+        "model_plugin": planned["model"],
+        "policy_mode": planned["mode"],
+        "episodes": planned["expected_episodes"],
+    }
+    (retry / "state.json").write_text(json.dumps(state), encoding="utf-8")
+    retry_run = {**planned, "session_dir": str(retry)}
+    retry_run["command"] = list(planned["command"])
+    retry_run["command"][retry_run["command"].index("--session-dir") + 1] = str(
+        retry
+    )
+    (tmp_path / "benchmark-manifest.json").write_text(
+        json.dumps({"runs": [{**retry_run, "status": "complete"}]}),
+        encoding="utf-8",
+    )
+
+    def unexpected_run(*args, **kwargs):
+        raise AssertionError("a matching completed retry must not be relaunched")
+
+    monkeypatch.setattr("showcase.wam_benchmark.subprocess.run", unexpected_run)
+    statuses = execute_plan(
+        plan,
+        output_dir=tmp_path,
+        profile="smoke",
+        resume=True,
+        keep_going=False,
+    )
+
+    assert statuses[0]["status"] == "skipped_complete"
+    assert statuses[0]["session_dir"] == str(retry)

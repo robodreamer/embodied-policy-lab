@@ -115,8 +115,7 @@ article { border: 1px solid var(--line); background: linear-gradient(145deg, rgb
 .card-label span { color: var(--acid); margin-right: 10px; }
 .camera-quality { margin: 0 0 0 auto; color: var(--cyan); font-size: 8px; white-space: nowrap; }
 .camera-frame { position: relative; aspect-ratio: var(--camera-aspect, 16 / 10); overflow: hidden; background: #050705; }
-.camera-frame img { display: block; width: 100%; height: 100%; object-fit: cover; image-rendering: auto; }
-.camera-frame.wrist img { filter: saturate(.82) contrast(1.05); }
+.camera-frame img { display: block; width: 100%; height: 100%; object-fit: contain; image-rendering: auto; }
 .reticle { position: absolute; inset: 12px; border: 1px solid rgba(184,255,54,.18); background: linear-gradient(90deg, transparent 49.85%, rgba(184,255,54,.12) 50%, transparent 50.15%), linear-gradient(transparent 49.85%, rgba(184,255,54,.12) 50%, transparent 50.15%); }
 .live-tag { position: absolute; top: 18px; right: 18px; font-size: 9px; color: var(--acid); background: rgba(5,8,6,.78); padding: 6px 8px; }
 .live-tag.paused { color: var(--amber); }

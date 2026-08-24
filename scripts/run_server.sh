@@ -82,7 +82,7 @@ case "$BACKEND" in
         if [[ -z "${FLEXPI_DIR:-}" ]]; then
           for candidate in "$PROJECT_DIR/../upstream-flexpi" \
             "$PROJECT_DIR/../../upstream-flexpi"; do
-            if [[ -d "$candidate/.git" ]]; then
+            if git -C "$candidate" rev-parse --git-dir >/dev/null 2>&1; then
               FLEXPI_DIR="$(cd "$candidate" && pwd)"
               break
             fi

@@ -99,9 +99,10 @@ def test_flexpi_comparison_is_revealed_only_after_rollout_completion():
     capture = client.index('policy_prediction_status="buffered_for_post_rollout"')
     rollout_close = client.index("env.close()")
     reveal = client.index(
-        'completed_policy_prediction["revealed_after_rollout"] = True'
+        "completed_policy_prediction = _save_policy_prediction", rollout_close
     )
     assert capture < rollout_close < reveal
+    assert '"revealed_after_rollout": True' in client
     assert "completed_policy_prefixes.append(matched_prefix)" in client
     assert "latest_policy_timeline.json" in client
     assert "latest_policy_prediction_external.mp4" in client
@@ -119,6 +120,20 @@ def test_dashboard_opens_before_heavy_policy_startup():
     assert dashboard_start < policy_start
     assert '"phase": "initializing"' in launcher
     assert "Loading policy weights into local accelerator memory" in launcher
+
+
+def test_libero_live_views_preserve_source_aspect_and_color():
+    javascript = (ROOT / "showcase" / "static" / "app.js").read_text(
+        encoding="utf-8"
+    )
+    stylesheet = (ROOT / "showcase" / "static" / "style.css").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'state.backend === "libero" ? sourceWidth : viewerWidth' in javascript
+    assert 'state.backend === "libero" ? sourceHeight : viewerHeight' in javascript
+    assert "object-fit: contain" in stylesheet
+    assert ".camera-frame.wrist img { filter:" not in stylesheet
 
 
 def test_fastwam_startup_reports_cpu_progress_and_expected_duration():

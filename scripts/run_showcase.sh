@@ -211,7 +211,7 @@ case "$BACKEND" in
         if [[ -z "$FLEXPI_DIR" ]]; then
           for candidate in "$PROJECT_DIR/../upstream-flexpi" \
             "$PROJECT_DIR/../../upstream-flexpi"; do
-            if [[ -d "$candidate/.git" ]]; then
+            if git -C "$candidate" rev-parse --git-dir >/dev/null 2>&1; then
               FLEXPI_DIR="$(cd "$candidate" && pwd)"
               break
             fi
@@ -320,16 +320,19 @@ if [[ -z "$FLEXPI_MODE" ]]; then
     FLEXPI_MODE="action-only"
   fi
 fi
-FLEXPI_MODE="${FLEXPI_MODE,,}"
-FLEXPI_MODE="${FLEXPI_MODE//_/-}"
-case "$FLEXPI_MODE" in
-  action|fast) FLEXPI_MODE="action-only" ;;
-  joint|full) FLEXPI_MODE="full-joint" ;;
-esac
-if [[ "$FLEXPI_MODE" != "action-only" && "$FLEXPI_MODE" != "full-joint" ]]; then
-  echo "--flexpi-mode must be action-only or full-joint." >&2
-  exit 2
-fi
+FLEXPI_MODE="$(python3 - "$PROJECT_DIR" "$FLEXPI_MODE" <<'PY'
+import sys
+
+sys.path.insert(0, sys.argv[1])
+from showcase.flexpi_contracts import normalize_flexpi_mode
+
+try:
+    print(normalize_flexpi_mode(sys.argv[2]))
+except ValueError as error:
+    print(error, file=sys.stderr)
+    raise SystemExit(2)
+PY
+)"
 if [[ "$MODEL" != "flexpi" && "$FLEXPI_MODE" != "action-only" ]]; then
   echo "--flexpi-mode applies only to --model flexpi." >&2
   exit 2
@@ -614,6 +617,11 @@ flexpi_mode = sys.argv[15]
 sys.path.insert(0, str(project_dir))
 
 from showcase import backend_registry
+from showcase.flexpi_contracts import (
+    COMPOSITE_HEIGHT,
+    COMPOSITE_WIDTH,
+    FLEXPI_MODES,
+)
 from showcase import world_model_registry
 
 simulator, policy = backend_registry.require_compatible(backend, model)
@@ -635,8 +643,9 @@ if model == "fastwam":
     )
 elif model == "flexpi":
     startup_message = (
-        "Starting Flex-π world-action co-generation. Cached model startup normally "
-        "takes about 95–105 seconds; phased progress will appear here."
+        "Starting Flex-π world-action co-generation; phased progress will appear here."
+        if flexpi_mode == "full-joint"
+        else "Starting Flex-π action-only inference; phased progress will appear here."
     )
 else:
     startup_message = "Loading policy weights into local accelerator memory"
@@ -672,13 +681,10 @@ state = {
     "action_dimension": simulator.action_dimension,
     "action_horizon": profile.action_horizon,
     "policy_mode": flexpi_mode if model == "flexpi" else "action-only",
-    "available_policy_modes": ([
-        {"key": "action-only", "display_name": "Action only", "description": "Fast action path without generated futures."},
-        {"key": "full-joint", "display_name": "World-action co-generation", "description": "Co-generate RGB, DINO, pointmap, and end-effector actions in one model pass."},
-    ] if model == "flexpi" else []),
+    "available_policy_modes": list(FLEXPI_MODES) if model == "flexpi" else [],
     "camera_count": len(simulator.cameras),
-    "model_image_width": 512 if model == "flexpi" else 224,
-    "model_image_height": 448 if model == "flexpi" else 224,
+    "model_image_width": COMPOSITE_WIDTH if model == "flexpi" else 224,
+    "model_image_height": COMPOSITE_HEIGHT if model == "flexpi" else 224,
     "viewer_width": viewer_width,
     "viewer_height": viewer_height,
     "episodes": 0,

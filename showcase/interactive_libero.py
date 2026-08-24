@@ -15,6 +15,7 @@ import numpy as np
 import tyro
 
 import instrumented_libero as core
+from flexpi_contracts import REPLAY_FPS, split_prediction_frame
 from libero_policy_plugins import create_libero_policy_client
 
 
@@ -23,7 +24,6 @@ class Args:
     model: str = "pi05"
     host: str = "127.0.0.1"
     port: int = 8000
-    resize_size: int = 224
     replan_steps: int = 5
     task_suite_name: str = "libero_spatial"
     task_id: int = 0
@@ -123,8 +123,10 @@ def _save_policy_prediction(session_dir, prefixes):
     output_dir.mkdir(parents=True, exist_ok=True)
     raw_predicted_path = output_dir / "latest_policy_prediction_raw_composite.mp4"
     raw_actual_path = output_dir / "latest_policy_actual_raw_composite.mp4"
-    imageio.mimwrite(raw_predicted_path, predicted, fps=2, macro_block_size=1)
-    imageio.mimwrite(raw_actual_path, actual, fps=2, macro_block_size=1)
+    imageio.mimwrite(
+        raw_predicted_path, predicted, fps=REPLAY_FPS, macro_block_size=1
+    )
+    imageio.mimwrite(raw_actual_path, actual, fps=REPLAY_FPS, macro_block_size=1)
 
     # Flex-pi's released LIBERO checkpoint uses a model tensor layout rather
     # than a presentation layout: 512x288 wrist on top, 256x160 external at
@@ -132,33 +134,34 @@ def _save_policy_prediction(session_dir, prefixes):
     # Preserve that exact tensor above for audit, but split the useful external
     # and wrist regions for the dashboard so the black slot is not mistaken
     # for corruption.
-    wrist_height = 288
-    external_height = 160
-    external_width = 256
-    display_predicted = [np.asarray(frame)[:wrist_height, :512] for frame in predicted]
-    display_actual = [np.asarray(frame)[:wrist_height, :512] for frame in actual]
-    external_predicted = [
-        np.asarray(frame)[
-            wrist_height : wrist_height + external_height, :external_width
-        ]
-        for frame in predicted
-    ]
-    external_actual = [
-        np.asarray(frame)[
-            wrist_height : wrist_height + external_height, :external_width
-        ]
-        for frame in actual
-    ]
+    split_predicted = [split_prediction_frame(frame) for frame in predicted]
+    split_actual = [split_prediction_frame(frame) for frame in actual]
+    external_predicted = [external for external, _ in split_predicted]
+    display_predicted = [wrist for _, wrist in split_predicted]
+    external_actual = [external for external, _ in split_actual]
+    display_actual = [wrist for _, wrist in split_actual]
     predicted_path = output_dir / "latest_policy_prediction.mp4"
     actual_path = output_dir / "latest_policy_actual.mp4"
     external_predicted_path = output_dir / "latest_policy_prediction_external.mp4"
     external_actual_path = output_dir / "latest_policy_actual_external.mp4"
-    imageio.mimwrite(predicted_path, display_predicted, fps=2, macro_block_size=1)
-    imageio.mimwrite(actual_path, display_actual, fps=2, macro_block_size=1)
     imageio.mimwrite(
-        external_predicted_path, external_predicted, fps=2, macro_block_size=1
+        predicted_path, display_predicted, fps=REPLAY_FPS, macro_block_size=1
     )
-    imageio.mimwrite(external_actual_path, external_actual, fps=2, macro_block_size=1)
+    imageio.mimwrite(
+        actual_path, display_actual, fps=REPLAY_FPS, macro_block_size=1
+    )
+    imageio.mimwrite(
+        external_predicted_path,
+        external_predicted,
+        fps=REPLAY_FPS,
+        macro_block_size=1,
+    )
+    imageio.mimwrite(
+        external_actual_path,
+        external_actual,
+        fps=REPLAY_FPS,
+        macro_block_size=1,
+    )
     timeline = []
     frame_offset = 0
     action_offset = 0
@@ -190,11 +193,14 @@ def _save_policy_prediction(session_dir, prefixes):
         "wrist_rgb_psnr_db": _clip_psnr(display_predicted, display_actual),
         "external_rgb_psnr_db": _clip_psnr(external_predicted, external_actual),
         "raw_composite_rgb_psnr_db": _clip_psnr(predicted, actual),
+        "metric_input": "lossless exact Flex-π upstream preprocessing",
+        "replay_fps": REPLAY_FPS,
+        "replay_fps_semantics": "presentation speed; use timeline for action offsets",
         "display_views": ["external", "wrist"],
-        "display_width": 512,
-        "display_height": wrist_height,
-        "external_display_width": external_width,
-        "external_display_height": external_height,
+        "display_width": display_predicted[0].shape[1],
+        "display_height": display_predicted[0].shape[0],
+        "external_display_width": external_predicted[0].shape[1],
+        "external_display_height": external_predicted[0].shape[0],
         "external_prediction": str(external_predicted_path),
         "external_actual": str(external_actual_path),
         "raw_composite_prediction": str(raw_predicted_path),
@@ -202,7 +208,7 @@ def _save_policy_prediction(session_dir, prefixes):
         "timeline": str(timeline_path),
         "caveat": metadata.get("caveat"),
         "matched_prefixes_completed": True,
-        "revealed_after_rollout": False,
+        "revealed_after_rollout": True,
     }
 
 
@@ -574,7 +580,7 @@ def run(args):
                 continue
 
             external, wrist, robot_state, model_input = core._prepare_observation(
-                obs, args.resize_size, active_prompt, client, env
+                obs, active_prompt, client, env
             )
             state.frames(external, wrist)
             replay_images.append(external)
@@ -606,7 +612,9 @@ def run(args):
                     model_request_id=request_id,
                 )
                 inference_started = time.perf_counter()
-                policy_response = client.infer(model_input)
+                policy_response = client.infer(
+                    model_input, include_prediction_frames=True
+                )
                 action_chunk = np.asarray(policy_response["actions"])
                 inference_latency = (time.perf_counter() - inference_started) * 1000.0
                 action_chunk_sha256 = hashlib.sha256(action_chunk.tobytes()).hexdigest()
@@ -637,10 +645,19 @@ def run(args):
                 prediction_frames = policy_response.get("prediction_frames") or []
                 prediction_metadata = policy_response.get("prediction") or {}
                 if prediction_frames:
-                    interval = int(prediction_metadata.get("frame_interval_actions", 4))
+                    if "frame_interval_actions" not in prediction_metadata:
+                        raise ValueError(
+                            "Flex-π prediction omitted frame_interval_actions"
+                        )
+                    interval = int(prediction_metadata["frame_interval_actions"])
+                    if interval < 1:
+                        raise ValueError("Flex-π prediction frame interval must be positive")
+                    input_frame = policy_response.get("prediction_input_frame")
+                    if input_frame is None:
+                        input_frame = client.compose_preview(external, wrist)
                     pending_policy_prediction = {
                         "predicted": prediction_frames,
-                        "actual": [client.compose_preview(external, wrist)],
+                        "actual": [input_frame],
                         "capture_steps": set(
                             range(interval, args.replan_steps + 1, interval)
                         ),
@@ -696,7 +713,7 @@ def run(args):
             step += 1
             if done and attempt_evaluation_mode == "scored":
                 final_external, final_wrist, _, _ = core._prepare_observation(
-                    obs, args.resize_size, active_prompt, client, env
+                    obs, active_prompt, client, env
                 )
                 state.frames(final_external, final_wrist)
                 replay_images.append(final_external)
@@ -716,9 +733,6 @@ def run(args):
         completed_policy_prediction = _save_policy_prediction(
             args.session_dir, completed_policy_prefixes
         )
-        if completed_policy_prediction:
-            completed_policy_prediction = dict(completed_policy_prediction)
-            completed_policy_prediction["revealed_after_rollout"] = True
         if auto_start_next:
             # A reset/task switch immediately begins another rollout. Keep the
             # prior prefix as an artifact, but do not flash its result between

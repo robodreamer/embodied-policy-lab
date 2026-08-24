@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import base64
 import collections
-import io
+import hashlib
 import json
 import os
 import pathlib
@@ -23,11 +23,31 @@ from typing import Any
 import numpy as np
 from PIL import Image
 
+try:
+    from .flexpi_contracts import (
+        DEFAULT_FRAME_INTERVAL_ACTIONS,
+        FLEXPI_MODES,
+        normalize_flexpi_mode,
+        prediction_layout,
+    )
+except ImportError:  # Direct script execution adds showcase/ to sys.path.
+    from flexpi_contracts import (
+        DEFAULT_FRAME_INTERVAL_ACTIONS,
+        FLEXPI_MODES,
+        normalize_flexpi_mode,
+        prediction_layout,
+    )
+
 EXPECTED_UPSTREAM_REVISION = "20c1b2b71ea35a415d5d47c39b04443cfadad7a1"
 CHECKPOINT_REPOSITORY = "flex-pi/flexpi-libero"
+CHECKPOINT_REVISION = "f853cb49331aa0ab8124cbd1e1fb3a56e07a2523"
 CHECKPOINT_FILENAME = "checkpoints/weights/step_010860.pt"
 CONFIG_FILENAME = "config.yaml"
 STATS_FILENAME = "dataset_stats.json"
+CHECKPOINT_SHA256 = "1aca314666ffdd62ca1cb5b0e0b0e5f836b68b81b1ef455ae1641ddd12386211"
+CONFIG_SHA256 = "46b00bf570f63bbe3465b9e81c476c8b9874c25fa278d74499fb4d1dc34e8650"
+STATS_SHA256 = "8a7a12f54844e0ea1cb009d1e7db460be38dc39c6376e425c5cd2f428ef59880"
+INTRINSICS_SHA256 = "f3acb280d90b37eaafc45ed435039721a8069ddbfc70bfb9dcaa3d29bbd184f2"
 PROMPT_TEMPLATE = (
     "A video recorded from a robot's point of view executing the following "
     "instruction: {task}"
@@ -36,13 +56,25 @@ PROMPT_PREFIX = PROMPT_TEMPLATE.partition("{task}")[0]
 ACTION_HORIZON = 32
 INFERENCE_STEPS = 4
 MODEL_SEED = 42
-SUPPORTED_MODES = ("action-only", "full-joint")
+SUPPORTED_MODES = tuple(item["key"] for item in FLEXPI_MODES)
 
 
 def _git_revision(path: pathlib.Path) -> str:
     return subprocess.check_output(
         ["git", "rev-parse", "HEAD"], cwd=path, text=True
     ).strip()
+
+
+def _verify_sha256(path: pathlib.Path, expected: str) -> None:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(8 * 1024 * 1024), b""):
+            digest.update(chunk)
+    actual = digest.hexdigest()
+    if actual != expected:
+        raise ValueError(
+            f"Artifact checksum mismatch for {path}: got {actual}, expected {expected}"
+        )
 
 
 def format_prompt(task: str) -> str:
@@ -65,25 +97,13 @@ def axis_angle_to_quaternion(axis_angle: np.ndarray) -> np.ndarray:
     return np.asarray((*xyz, np.cos(angle / 2.0)), dtype=np.float32)
 
 
-def _normalize_mode(mode: str) -> str:
-    key = str(mode).strip().lower().replace("_", "-")
-    key = {"action": "action-only", "fast": "action-only", "joint": "full-joint"}.get(
-        key, key
-    )
-    if key not in SUPPORTED_MODES:
-        raise ValueError(f"Unsupported Flex-π mode {mode!r}; choose {SUPPORTED_MODES}")
-    return key
-
-
-def _jpeg_payload(frame: Image.Image | np.ndarray) -> dict[str, Any]:
+def _rgb_payload(frame: Image.Image | np.ndarray) -> dict[str, Any]:
     image = frame if isinstance(frame, Image.Image) else Image.fromarray(np.asarray(frame))
-    image = image.convert("RGB")
-    stream = io.BytesIO()
-    image.save(stream, format="JPEG", quality=90)
+    array = np.ascontiguousarray(np.asarray(image.convert("RGB"), dtype=np.uint8))
     return {
-        "jpeg": base64.b64encode(stream.getvalue()).decode("ascii"),
-        "width": image.width,
-        "height": image.height,
+        "shape": list(array.shape),
+        "dtype": "uint8",
+        "data": base64.b64encode(array.tobytes()).decode("ascii"),
     }
 
 
@@ -132,6 +152,13 @@ class FlexPiPolicy:
         ):
             if not path.is_file():
                 raise FileNotFoundError(path)
+        for path, expected in (
+            (self.checkpoint, CHECKPOINT_SHA256),
+            (self.config_path, CONFIG_SHA256),
+            (self.stats_path, STATS_SHA256),
+            (self.intrinsics_path, INTRINSICS_SHA256),
+        ):
+            _verify_sha256(path, expected)
         if self.artifact_dir:
             self.artifact_dir.mkdir(parents=True, exist_ok=True)
 
@@ -145,6 +172,8 @@ class FlexPiPolicy:
 
         startup("Importing the Flex-pi runtime")
         import torch
+
+        unpatched_torch_load = torch.load
         from experiments.libero import eval_libero_single as upstream_eval
         from experiments.libero.libero_utils import invert_gripper_action
         from flexpi.datasets.lerobot.utils.normalizer import (
@@ -152,6 +181,17 @@ class FlexPiPolicy:
         )
         from hydra.utils import instantiate
         from omegaconf import OmegaConf, open_dict
+
+        # Importing the evaluator enables unrestricted pickle loading for
+        # LIBERO init-state files. This policy server never loads those files,
+        # so restore a checkpoint-safe default before any model asset is read.
+        def weights_only_load(*args: Any, **kwargs: Any) -> Any:
+            if kwargs.get("weights_only") is False:
+                raise ValueError("Flex-π policy assets must use weights_only=True")
+            kwargs["weights_only"] = True
+            return unpatched_torch_load(*args, **kwargs)
+
+        torch.load = weights_only_load
 
         if not torch.cuda.is_available():
             raise RuntimeError("Flex-π requires a CUDA device")
@@ -212,6 +252,15 @@ class FlexPiPolicy:
         )
         self.num_video_frames = upstream_eval._get_num_video_frames(self.cfg)
         self.depth_target_hw = upstream_eval._per_cam_depth_target_hw(self.cfg)
+        self.frame_interval_actions = int(
+            self.cfg.data.train.action_video_freq_ratio
+        )
+        if self.frame_interval_actions != DEFAULT_FRAME_INTERVAL_ACTIONS:
+            raise ValueError(
+                "Flex-π release frame interval drifted: "
+                f"got {self.frame_interval_actions}, expected "
+                f"{DEFAULT_FRAME_INTERVAL_ACTIONS}"
+            )
         self.load_seconds = time.perf_counter() - started
         startup(f"Model ready after {self.load_seconds:.1f} seconds")
 
@@ -222,6 +271,7 @@ class FlexPiPolicy:
             "model": "flexpi_libero_stream_dropout",
             "upstream_revision": EXPECTED_UPSTREAM_REVISION,
             "checkpoint_repository": CHECKPOINT_REPOSITORY,
+            "checkpoint_revision": CHECKPOINT_REVISION,
             "checkpoint": str(self.checkpoint),
             "config": str(self.config_path),
             "stats": str(self.stats_path),
@@ -233,6 +283,7 @@ class FlexPiPolicy:
             "dtype": "bfloat16",
             "text_encoder": "CPU offload with prompt-context cache",
             "supported_modes": list(SUPPORTED_MODES),
+            "prediction_layout": prediction_layout(),
             "load_seconds": round(self.load_seconds, 3),
             "requests": self._request_count,
         }
@@ -280,6 +331,28 @@ class FlexPiPolicy:
             raise RuntimeError("Released Flex-π config did not produce per-camera inputs")
         return image, proprio, per_cam
 
+    def _tensor_to_rgb(self, image: Any) -> np.ndarray:
+        tensor = image.detach()[0].float().clamp(-1.0, 1.0)
+        array = (
+            ((tensor.permute(1, 2, 0) + 1.0) * 127.5)
+            .clamp(0, 255)
+            .to(dtype=self.torch.uint8)
+            .cpu()
+            .numpy()
+        )
+        return np.ascontiguousarray(array)
+
+    def preprocess_composite(
+        self, *, external: np.ndarray, wrist: np.ndarray
+    ) -> np.ndarray:
+        """Return the exact normalized-then-quantized model input composite."""
+
+        with self._lock:
+            image, _, _ = self._model_observation(
+                external, wrist, np.zeros(8, dtype=np.float32)
+            )
+            return self._tensor_to_rgb(image)
+
     def _depth_inputs(
         self, external_depth: np.ndarray, wrist_depth: np.ndarray
     ) -> dict[str, Any]:
@@ -320,6 +393,7 @@ class FlexPiPolicy:
         state: np.ndarray,
         task: str,
         mode: str,
+        include_prediction_frames: bool = False,
     ) -> dict[str, Any]:
         with self._lock:
             return self._infer_locked(
@@ -330,11 +404,13 @@ class FlexPiPolicy:
                 state=state,
                 task=task,
                 mode=mode,
+                include_prediction_frames=include_prediction_frames,
             )
 
     def _infer_locked(self, **request: Any) -> dict[str, Any]:
         started = time.perf_counter()
-        mode = _normalize_mode(request["mode"])
+        mode = normalize_flexpi_mode(request["mode"])
+        include_prediction_frames = bool(request.get("include_prediction_frames"))
         state = np.asarray(request["state"], dtype=np.float32)
         if state.shape != (8,) or not np.isfinite(state).all():
             raise ValueError(f"State must be finite [8], got {state.shape}")
@@ -347,6 +423,7 @@ class FlexPiPolicy:
         image, proprio, per_cam = self._model_observation(
             request["external"], request["wrist"], state
         )
+        input_composite = self._tensor_to_rgb(image) if include_prediction_frames else None
         per_cam_depth = self._depth_inputs(
             request["external_depth"], request["wrist_depth"]
         )
@@ -409,7 +486,6 @@ class FlexPiPolicy:
             "prompt_seconds": round(prompt_seconds, 4),
             "prompt_cache_hit": cache_hit,
             "inference_seconds": round(inference_seconds, 4),
-            "total_seconds": round(time.perf_counter() - started, 4),
             "cuda_peak_allocated_bytes": int(self.torch.cuda.max_memory_allocated()),
             "cuda_peak_reserved_bytes": int(self.torch.cuda.max_memory_reserved()),
         }
@@ -421,16 +497,26 @@ class FlexPiPolicy:
             "timing": timing,
         }
         if frames:
+            encode_started = time.perf_counter()
             result["prediction"] = {
                 "kind": "joint_rgb_dino_pointmap",
-                "frame_interval_actions": int(self.cfg.data.train.action_video_freq_ratio),
+                "frame_interval_actions": self.frame_interval_actions,
                 "generated_frame_count": len(frames),
-                "frames": [_jpeg_payload(frame) for frame in frames],
+                "layout": prediction_layout(),
                 "caveat": (
                     "Flex-π jointly denoises future visual and action tokens; this is "
                     "not an independently scored counterfactual planner."
                 ),
             }
+            if include_prediction_frames:
+                result["prediction"]["input_frame"] = _rgb_payload(input_composite)
+                result["prediction"]["frames"] = [
+                    _rgb_payload(frame) for frame in frames
+                ]
+            timing["presentation_encode_seconds"] = round(
+                time.perf_counter() - encode_started, 4
+            )
+        timing["total_seconds"] = round(time.perf_counter() - started, 4)
         if self.artifact_dir:
             artifact = self.artifact_dir / f"request-{request_id:06d}.json"
             artifact.write_text(
