@@ -70,8 +70,11 @@ def test_dashboard_exposes_flexpi_mode_and_delayed_joint_future():
 
     assert 'id="policyModeSelect"' in html
     assert 'id="actualVideoLabel"' in html
+    assert 'id="actualExternalVideo"' in html
+    assert 'id="previewExternalVideo"' in html
     assert html.index('id="externalFrame"') < html.index('id="previewCard"')
     assert html.index('id="wristFrame"') < html.index('id="previewCard"')
+    assert html.index('id="actualExternalVideo"') < html.index('id="actualVideo"')
     assert 'action: "set_policy_mode"' in javascript
     assert (
         'const rolloutFinished = ["awaiting_command", "stopped", "complete"]'
@@ -83,12 +86,15 @@ def test_dashboard_exposes_flexpi_mode_and_delayed_joint_future():
     assert "REVEALED AFTER ROLLOUT" in javascript
     assert 'classList.toggle("policy-view", policyComparisonReady)' in javascript
     assert "GENERATED WRIST FUTURE" in javascript
+    assert "external_rgb_psnr_db" in javascript
+    assert "policy_prediction_external_video_url" in javascript
     assert "full-rollout sample timeline" in javascript
     assert ".play().catch(() => {})" not in javascript
 
 
 def test_flexpi_comparison_is_revealed_only_after_rollout_completion():
     client = (ROOT / "showcase" / "interactive_libero.py").read_text(encoding="utf-8")
+    server = (ROOT / "showcase" / "dashboard_server.py").read_text(encoding="utf-8")
 
     capture = client.index('policy_prediction_status="buffered_for_post_rollout"')
     rollout_close = client.index("env.close()")
@@ -98,6 +104,9 @@ def test_flexpi_comparison_is_revealed_only_after_rollout_completion():
     assert capture < rollout_close < reveal
     assert "completed_policy_prefixes.append(matched_prefix)" in client
     assert "latest_policy_timeline.json" in client
+    assert "latest_policy_prediction_external.mp4" in client
+    assert 'route == "/previews/latest_policy_prediction_external.mp4"' in server
+    assert 'route == "/previews/latest_policy_actual_external.mp4"' in server
     assert 'policy_prediction_status="compiling_full_rollout"' in client
     assert "latest_policy_prediction.mp4?attempt={attempt_number}" in client
 

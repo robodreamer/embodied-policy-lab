@@ -17,6 +17,7 @@ import pathlib
 import time
 
 import imageio
+
 # Flex-π's Python 3.10 / torch>=2.6 runtime needs its official LIBERO setup
 # hook before importing the benchmark package. It pins the active checkout's
 # data paths and permits the trusted NumPy-backed benchmark init-state files.
@@ -62,6 +63,10 @@ class Args:
     realtime_delay_ms: int = 35
     network_audit: bool = True
     flexpi_mode: str = "full-joint"
+    benchmark_mode: bool = False
+    save_videos: bool = True
+    latency_probe_warmups: int = 0
+    latency_probe_calls: int = 0
 
 
 def _timestamp():
@@ -183,7 +188,9 @@ def _prepare_observation(obs, resize_size, prompt, client, env=None):
     depth = None
     if client.requires_depth:
         if env is None:
-            raise ValueError("A live LIBERO environment is required for depth conversion")
+            raise ValueError(
+                "A live LIBERO environment is required for depth conversion"
+            )
         depth = _depth_mm(obs, env)
     model_input = client.prepare_observation(
         external, wrist, robot_state, str(prompt), depth=depth
@@ -199,8 +206,64 @@ def _display_images(obs):
     return np.asarray(external, dtype=np.uint8), np.asarray(wrist, dtype=np.uint8)
 
 
+def _latency_probe(client, model_input, warmups, calls):
+    """Measure repeated warm calls on one observation without stepping the robot."""
+
+    wall_ms = []
+    server_total_ms = []
+    denoise_core_ms = []
+    peak_allocated = []
+    peak_reserved = []
+    for call_index in range(warmups + calls):
+        started = time.perf_counter()
+        response = client.infer(model_input)
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
+        if call_index < warmups:
+            continue
+        timing = response.get("timing") or {}
+        wall_ms.append(elapsed_ms)
+        if timing.get("total_seconds") is not None:
+            server_total_ms.append(float(timing["total_seconds"]) * 1000.0)
+        core_seconds = timing.get(
+            "inference_seconds", timing.get("action_inference_seconds")
+        )
+        if core_seconds is not None:
+            denoise_core_ms.append(float(core_seconds) * 1000.0)
+        peak_allocated.append(int(timing.get("cuda_peak_allocated_bytes") or 0))
+        peak_reserved.append(int(timing.get("cuda_peak_reserved_bytes") or 0))
+
+    def stats(values):
+        if not values:
+            return None
+        return {
+            "mean_ms": round(float(np.mean(values)), 3),
+            "median_ms": round(float(np.median(values)), 3),
+            "p95_ms": round(float(np.percentile(values, 95)), 3),
+        }
+
+    return {
+        "warmup_calls": warmups,
+        "timed_calls": calls,
+        "observation_reused": True,
+        "batch_size": 1,
+        "wall_round_trip": stats(wall_ms),
+        "server_total": stats(server_total_ms),
+        "denoise_core": stats(denoise_core_ms),
+        "max_cuda_allocated_bytes": max(peak_allocated, default=0),
+        "max_cuda_reserved_bytes": max(peak_reserved, default=0),
+    }
+
+
 def evaluate(args):
+    if args.latency_probe_warmups < 0 or args.latency_probe_calls < 0:
+        raise ValueError("Latency probe counts must be non-negative")
     np.random.seed(args.seed)
+    try:
+        import mujoco
+
+        mujoco_version = mujoco.__version__
+    except (ImportError, AttributeError):
+        mujoco_version = "unknown"
     started_at = _timestamp()
     suite = benchmark.get_benchmark_dict()[args.task_suite_name]()
     task_ids = _parse_task_ids(args.task_ids, suite.n_tasks)
@@ -214,6 +277,7 @@ def evaluate(args):
     model_request_count = 0
     total_episodes = 0
     total_successes = 0
+    latency_probe_result = None
     max_steps = (
         args.max_policy_steps
         if args.max_policy_steps > 0
@@ -226,6 +290,8 @@ def evaluate(args):
             "phase": "initializing",
             "backend": "libero",
             "simulator": "LIBERO / robosuite / MuJoCo",
+            "mujoco_version": mujoco_version,
+            "libero_source": str(pathlib.Path(benchmark.__file__).resolve()),
             "model_plugin": client.spec.key,
             "model": client.profile.model_name,
             "model_display_name": client.spec.display_name,
@@ -233,6 +299,8 @@ def evaluate(args):
             "policy_transport": client.spec.transport,
             "policy_endpoint": client.endpoint,
             "network_audit": args.network_audit,
+            "benchmark_mode": args.benchmark_mode,
+            "save_videos": args.save_videos,
             "suite": args.task_suite_name,
             "task_ids": task_ids,
             "total_tasks": len(task_ids),
@@ -307,8 +375,26 @@ def evaluate(args):
                     external, wrist, robot_state, model_input = _prepare_observation(
                         obs, args.resize_size, task_description, client, env
                     )
-                    state.frames(external, wrist)
-                    replay_images.append(external)
+                    if not args.benchmark_mode:
+                        state.frames(external, wrist)
+                    if args.save_videos:
+                        replay_images.append(external)
+
+                    if latency_probe_result is None and args.latency_probe_calls:
+                        latency_probe_result = _latency_probe(
+                            client,
+                            model_input,
+                            args.latency_probe_warmups,
+                            args.latency_probe_calls,
+                        )
+                        latency_probe_path = (
+                            pathlib.Path(args.session_dir) / "latency-probe.json"
+                        )
+                        latency_probe_path.write_text(
+                            json.dumps(latency_probe_result, indent=2) + "\n",
+                            encoding="utf-8",
+                        )
+                        state.update(latency_probe=latency_probe_result)
 
                     inference_latency = None
                     if not action_plan:
@@ -359,43 +445,51 @@ def evaluate(args):
                         )
 
                     action = np.asarray(action_plan.popleft())
-                    state.update(
-                        step=step - args.num_steps_wait,
-                        progress=min(
-                            1.0, float(step - args.num_steps_wait) / max_steps
-                        ),
-                        current_action=np.round(action, 5).tolist(),
-                        robot_state=np.round(robot_state, 5).tolist(),
-                    )
+                    if not args.benchmark_mode:
+                        state.update(
+                            step=step - args.num_steps_wait,
+                            progress=min(
+                                1.0, float(step - args.num_steps_wait) / max_steps
+                            ),
+                            current_action=np.round(action, 5).tolist(),
+                            robot_state=np.round(robot_state, 5).tolist(),
+                        )
                     obs, _, done, _ = env.step(action.tolist())
                     if args.realtime_delay_ms > 0:
                         time.sleep(args.realtime_delay_ms / 1000.0)
                     step += 1
                     if done:
-                        final_external, final_wrist, _, _ = _prepare_observation(
-                            obs, args.resize_size, task_description, client, env
-                        )
-                        state.frames(final_external, final_wrist)
-                        replay_images.append(final_external)
+                        if not args.benchmark_mode or args.save_videos:
+                            final_external, final_wrist, _, _ = _prepare_observation(
+                                obs, args.resize_size, task_description, client, env
+                            )
+                            if not args.benchmark_mode:
+                                state.frames(final_external, final_wrist)
+                            if args.save_videos:
+                                replay_images.append(final_external)
                         total_successes += 1
                         break
 
                 total_episodes += 1
                 suffix = "success" if done else "failure"
                 task_segment = task_description.replace(" ", "_")
-                output_video = video_path / "rollout_{}_{}.mp4".format(
-                    task_segment, suffix
-                )
-                imageio.mimwrite(
-                    output_video, [np.asarray(frame) for frame in replay_images], fps=10
-                )
+                output_video = None
+                if args.save_videos and replay_images:
+                    output_video = video_path / "rollout_{}_{}.mp4".format(
+                        task_segment, suffix
+                    )
+                    imageio.mimwrite(
+                        output_video,
+                        [np.asarray(frame) for frame in replay_images],
+                        fps=10,
+                    )
                 state.update(
                     phase="task_complete",
                     task_success=bool(done),
                     successes=total_successes,
                     episodes=total_episodes,
                     success_rate=round(total_successes / total_episodes, 4),
-                    last_video=str(output_video),
+                    last_video=str(output_video) if output_video else None,
                     progress=1.0,
                 )
                 logging.info(
@@ -424,6 +518,7 @@ def evaluate(args):
             p95_inference_latency_ms=round(float(np.percentile(warm_latencies, 95)), 2)
             if warm_latencies
             else None,
+            latency_probe=latency_probe_result,
         )
         logging.info("Total success rate: %.3f", total_successes / total_episodes)
     except Exception as error:

@@ -31,6 +31,8 @@ validation gates are documented in
 The stacked Flex-π experiment, exact depth/camera contract, and validation
 gates are in
 [the Flex-π world-action note](notes/2026-08-24-flexpi-libero-world-action-validation.md).
+The matched headless evaluation protocol and its claim boundaries are in
+[the Fast-WAM/Flex-π benchmark note](notes/2026-08-24-fastwam-flexpi-headless-libero-benchmark.md).
 
 Quick RoboCasa checks:
 
@@ -174,8 +176,8 @@ co-generation: RGB, DINO, pointmap, and end-effector action futures come from
 the same checkpoint pass. Matched RGB evidence from every completed action
 prefix is collected silently while the policy runs, compiled into a replayable
 full-rollout timeline, and shown below the live camera views only after the
-complete rollout ends. Action-only remains available as an explicit
-lower-memory mode.
+complete rollout ends. The external comparison is shown above the wrist
+comparison. Action-only remains available as an explicit lower-memory mode.
 
 ```bash
 ./scripts/setup_flexpi_libero.sh
@@ -197,6 +199,37 @@ On the local 24 GB RTX PRO 5000 validation GPU, both modes fit: action-only
 reserved 13.24 GiB at a 1.29-second model pass, while full-joint reserved 16.45
 GiB at a 2.98-second model pass. These are bounded single-query measurements;
 see the dated Flex-π note for the exact protocol and startup timings.
+
+### Matched headless WAM benchmark
+
+The headless runner compares the released Fast-WAM action path, Flex-π
+action-only mode, and Flex-π full-joint world-action mode under the same local
+LIBERO/MuJoCo runtime, task IDs, seed, action-prefix length, and rollout
+budgets. It records closed-loop success, 95% Wilson intervals, repeated warm
+latency, and peak GPU memory. The policy-specific observation preprocessing is
+left intact because changing it would invalidate the released checkpoints.
+
+```bash
+# Wiring check: one short episode per configuration
+./scripts/benchmark_wam_libero.py --profile smoke
+
+# Provisional estimate: 2 tasks × 3 trials in every suite and configuration
+./scripts/benchmark_wam_libero.py --profile pilot
+
+# Published LIBERO protocol: 40 tasks × 50 trials for each configuration
+./scripts/benchmark_wam_libero.py --profile paper
+
+# Review commands without launching models
+./scripts/benchmark_wam_libero.py --profile paper --plan-only
+```
+
+Results are written beneath `benchmark-runs/wam-libero-*/` as
+`benchmark-report.md`, `benchmark-results.json`, and one auditable session per
+configuration and suite. The `paper` profile is 6,000 complete episodes in
+total and is therefore a long experiment. Resume an interrupted fixed output
+directory with `--output-dir PATH --resume`. Smoke results are labelled wiring
+checks and pilot results are labelled provisional; only the complete paper
+profile is allowed to report a paper-protocol reproduction.
 
 ### Choosing a Fast-WAM LIBERO task suite
 
@@ -259,6 +292,8 @@ Every run is retained under a timestamped `showcase-runs/` directory, and
 - `previews/latest_policy_{prediction,actual}.mp4`: Flex-π's delayed,
   action-index-aligned wrist-view timelines across every completed rollout
   prefix;
+- `previews/latest_policy_{prediction,actual}_external.mp4`: the corresponding
+  external-camera timelines, displayed above the wrist comparison;
 - `previews/latest_policy_{prediction,actual}_raw_composite.mp4`: the exact
   448×512 model tensors, including the synthetic black third-camera slot;
 - `previews/latest_policy_timeline.json`: frame and action offsets for every

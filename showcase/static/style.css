@@ -101,7 +101,8 @@ main { max-width: 1800px; margin: auto; }
 .comparison-video figcaption { min-height: 31px; padding: 9px 11px; border-bottom: 1px solid var(--line); color: var(--cyan); font-size: 9px; letter-spacing: .1em; }
 .comparison-video.predicted figcaption { color: var(--amber); }
 .comparison-video video { display: block; width: 100%; aspect-ratio: var(--camera-aspect, 16 / 10); object-fit: contain; background: #050705; }
-.preview-card.policy-view .comparison-video video { aspect-ratio: 16 / 9; object-fit: cover; object-position: top center; }
+.preview-card.policy-view .comparison-video.external video { aspect-ratio: 16 / 10; object-fit: contain; }
+.preview-card.policy-view .comparison-video.wrist video { aspect-ratio: 16 / 9; object-fit: contain; }
 .preview-decision { padding: 20px; background: #0c100d; }
 .preview-decision > small { color: var(--amber); }
 .preview-decision > strong { display: block; margin: 7px 0 10px; font: 600 20px/1.2 Inter, Arial, sans-serif; }

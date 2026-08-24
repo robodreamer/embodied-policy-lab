@@ -40,6 +40,11 @@ Session options:
   --batch                         Start automatically and exit after --trials
   --auto-start                    Start the initial interactive rollout immediately
   --realtime-delay-ms MS          Delay after each simulator action
+  --benchmark-mode                Reduce per-step UI/file work for headless evaluation
+  --save-videos / --no-save-videos
+                                  Keep or omit rollout videos (default: keep)
+  --latency-probe-warmups COUNT   Repeated-observation warmups before the first rollout
+  --latency-probe-calls COUNT     Timed repeated-observation policy calls
   --policy-port PORT              Local policy server port
   --dashboard-port PORT           Browser dashboard port
   --hold-open / --no-hold-open    Keep or close the dashboard after completion
@@ -91,6 +96,11 @@ SESSION_DIR="${SESSION_DIR:-}"
 FASTWAM_DIR="${FASTWAM_DIR:-}"
 FLEXPI_DIR="${FLEXPI_DIR:-}"
 FLEXPI_MODE="${FLEXPI_MODE:-}"
+BENCHMARK_MODE="${BENCHMARK_MODE:-0}"
+SAVE_VIDEOS="${SAVE_VIDEOS:-1}"
+LATENCY_PROBE_WARMUPS="${LATENCY_PROBE_WARMUPS:-0}"
+LATENCY_PROBE_CALLS="${LATENCY_PROBE_CALLS:-0}"
+LIBERO_BENCHMARK_RUNTIME="${LIBERO_BENCHMARK_RUNTIME:-native}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -121,6 +131,12 @@ while [[ $# -gt 0 ]]; do
     --policy-port) POLICY_PORT="${2:?--policy-port requires a value}"; shift 2 ;;
     --dashboard-port) DASHBOARD_PORT="${2:?--dashboard-port requires a value}"; shift 2 ;;
     --realtime-delay-ms) REALTIME_DELAY_MS="${2:?--realtime-delay-ms requires a value}"; shift 2 ;;
+    --benchmark-mode) BENCHMARK_MODE=1; shift ;;
+    --no-benchmark-mode) BENCHMARK_MODE=0; shift ;;
+    --save-videos) SAVE_VIDEOS=1; shift ;;
+    --no-save-videos) SAVE_VIDEOS=0; shift ;;
+    --latency-probe-warmups) LATENCY_PROBE_WARMUPS="${2:?--latency-probe-warmups requires a value}"; shift 2 ;;
+    --latency-probe-calls) LATENCY_PROBE_CALLS="${2:?--latency-probe-calls requires a value}"; shift 2 ;;
     --session-dir) SESSION_DIR="${2:?--session-dir requires a value}"; shift 2 ;;
     --interactive) INTERACTIVE=1; shift ;;
     --batch) INTERACTIVE=0; shift ;;
@@ -145,6 +161,7 @@ case "$MODEL" in
   fast-wam|fast_wam) MODEL="fastwam" ;;
   flex-pi|flex_pi|flex-π) MODEL="flexpi" ;;
 esac
+
 case "$WORLD_MODEL" in
   off|direct) WORLD_MODEL="none" ;;
   sim|simulator|simulator-oracle) WORLD_MODEL="robocasa-sim" ;;
@@ -259,6 +276,24 @@ case "$BACKEND" in
     ;;
 esac
 
+if [[ "$BACKEND" == "libero" && "$LIBERO_BENCHMARK_RUNTIME" == "flexpi" && \
+  "$MODEL" == "fastwam" ]]; then
+  if [[ -z "$FLEXPI_DIR" ]]; then
+    for candidate in "$PROJECT_DIR/../upstream-flexpi" \
+      "$PROJECT_DIR/../../upstream-flexpi"; do
+      if git -C "$candidate" rev-parse --git-dir >/dev/null 2>&1; then
+        FLEXPI_DIR="$(cd "$candidate" && pwd)"
+        break
+      fi
+    done
+  fi
+  if [[ -z "$FLEXPI_DIR" || ! -x "$FLEXPI_DIR/.venv/bin/python" ]]; then
+    echo "The common Flex-π LIBERO runtime is not set up." >&2
+    exit 1
+  fi
+  CLIENT_PYTHON="$FLEXPI_DIR/.venv/bin/python"
+fi
+
 read -r DEFAULT_REPLAN_STEPS ACTION_HORIZON < <(
   python3 - "$PROJECT_DIR" "$BACKEND" "$MODEL" <<'PY'
 import pathlib
@@ -307,12 +342,27 @@ if [[ "$MODEL" == "groot-n1.5" ]]; then
 fi
 
 for integer_value in "$TRIALS_PER_TASK" "$SEED" "$REPLAN_STEPS" "$MAX_POLICY_STEPS" "$POLICY_PORT" \
-  "$DASHBOARD_PORT" "$REALTIME_DELAY_MS" "$VIEWER_WIDTH" "$VIEWER_HEIGHT"; do
+  "$DASHBOARD_PORT" "$REALTIME_DELAY_MS" "$VIEWER_WIDTH" "$VIEWER_HEIGHT" \
+  "$LATENCY_PROBE_WARMUPS" "$LATENCY_PROBE_CALLS"; do
   if [[ ! "$integer_value" =~ ^[0-9]+$ ]]; then
     echo "Expected a non-negative integer, got: $integer_value" >&2
     exit 2
   fi
 done
+if [[ "$BENCHMARK_MODE" != "0" && "$BENCHMARK_MODE" != "1" ]] || \
+  [[ "$SAVE_VIDEOS" != "0" && "$SAVE_VIDEOS" != "1" ]]; then
+  echo "BENCHMARK_MODE and SAVE_VIDEOS must be 0 or 1." >&2
+  exit 2
+fi
+if [[ "$BENCHMARK_MODE" == "1" && "$INTERACTIVE" == "1" ]]; then
+  echo "--benchmark-mode requires --batch." >&2
+  exit 2
+fi
+if [[ "$LIBERO_BENCHMARK_RUNTIME" != "native" && \
+  "$LIBERO_BENCHMARK_RUNTIME" != "flexpi" ]]; then
+  echo "LIBERO_BENCHMARK_RUNTIME must be native or flexpi." >&2
+  exit 2
+fi
 if [[ "$TRIALS_PER_TASK" == "0" ]] || [[ "$REPLAN_STEPS" == "0" ]]; then
   echo "--trials and --replan-steps must be positive." >&2
   exit 2
@@ -739,7 +789,7 @@ export MUJOCO_GL="${MUJOCO_GL:-egl}"
 export PYOPENGL_PLATFORM="${PYOPENGL_PLATFORM:-egl}"
 
 if [[ "$BACKEND" == "libero" ]]; then
-  if [[ "$MODEL" == "flexpi" ]]; then
+  if [[ "$MODEL" == "flexpi" || "$LIBERO_BENCHMARK_RUNTIME" == "flexpi" ]]; then
     export PYTHONNOUSERSITE=1
     export LIBERO_CONFIG_PATH="$FLEXPI_DIR/.libero-config"
     export PYTHONPATH="$FLEXPI_DIR/third_party/LIBERO:$FLEXPI_DIR/src${PYTHONPATH:+:$PYTHONPATH}"
@@ -789,6 +839,16 @@ if [[ "$BACKEND" == "libero" ]]; then
       --seed "$SEED"
       --realtime-delay-ms "$REALTIME_DELAY_MS"
       --flexpi-mode "$FLEXPI_MODE"
+    )
+    if [[ "$BENCHMARK_MODE" == "1" ]]; then
+      CLIENT_COMMAND+=(--benchmark-mode)
+    fi
+    if [[ "$SAVE_VIDEOS" == "0" ]]; then
+      CLIENT_COMMAND+=(--no-save-videos)
+    fi
+    CLIENT_COMMAND+=(
+      --latency-probe-warmups "$LATENCY_PROBE_WARMUPS"
+      --latency-probe-calls "$LATENCY_PROBE_CALLS"
     )
   fi
 else

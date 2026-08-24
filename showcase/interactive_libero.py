@@ -129,15 +129,36 @@ def _save_policy_prediction(session_dir, prefixes):
     # Flex-pi's released LIBERO checkpoint uses a model tensor layout rather
     # than a presentation layout: 512x288 wrist on top, 256x160 external at
     # bottom-left, and an intentionally black synthetic third-camera slot.
-    # Preserve that exact tensor above for audit, but show the useful wrist
-    # view in the dashboard so the black slot is not mistaken for corruption.
+    # Preserve that exact tensor above for audit, but split the useful external
+    # and wrist regions for the dashboard so the black slot is not mistaken
+    # for corruption.
     wrist_height = 288
+    external_height = 160
+    external_width = 256
     display_predicted = [np.asarray(frame)[:wrist_height, :512] for frame in predicted]
     display_actual = [np.asarray(frame)[:wrist_height, :512] for frame in actual]
+    external_predicted = [
+        np.asarray(frame)[
+            wrist_height : wrist_height + external_height, :external_width
+        ]
+        for frame in predicted
+    ]
+    external_actual = [
+        np.asarray(frame)[
+            wrist_height : wrist_height + external_height, :external_width
+        ]
+        for frame in actual
+    ]
     predicted_path = output_dir / "latest_policy_prediction.mp4"
     actual_path = output_dir / "latest_policy_actual.mp4"
+    external_predicted_path = output_dir / "latest_policy_prediction_external.mp4"
+    external_actual_path = output_dir / "latest_policy_actual_external.mp4"
     imageio.mimwrite(predicted_path, display_predicted, fps=2, macro_block_size=1)
     imageio.mimwrite(actual_path, display_actual, fps=2, macro_block_size=1)
+    imageio.mimwrite(
+        external_predicted_path, external_predicted, fps=2, macro_block_size=1
+    )
+    imageio.mimwrite(external_actual_path, external_actual, fps=2, macro_block_size=1)
     timeline = []
     frame_offset = 0
     action_offset = 0
@@ -166,10 +187,16 @@ def _save_policy_prediction(session_dir, prefixes):
         "frame_interval_actions": prefixes[-1]["interval"],
         "executed_actions": sum(prefix["executed"] for prefix in prefixes),
         "mean_rgb_psnr_db": _clip_psnr(display_predicted, display_actual),
+        "wrist_rgb_psnr_db": _clip_psnr(display_predicted, display_actual),
+        "external_rgb_psnr_db": _clip_psnr(external_predicted, external_actual),
         "raw_composite_rgb_psnr_db": _clip_psnr(predicted, actual),
-        "display_view": "wrist",
+        "display_views": ["external", "wrist"],
         "display_width": 512,
         "display_height": wrist_height,
+        "external_display_width": external_width,
+        "external_display_height": external_height,
+        "external_prediction": str(external_predicted_path),
+        "external_actual": str(external_actual_path),
         "raw_composite_prediction": str(raw_predicted_path),
         "raw_composite_actual": str(raw_actual_path),
         "timeline": str(timeline_path),
@@ -243,6 +270,8 @@ def run(args):
             "policy_prediction_result": None,
             "policy_prediction_video_url": None,
             "policy_actual_video_url": None,
+            "policy_prediction_external_video_url": None,
+            "policy_actual_external_video_url": None,
             "model_image_width": client.model_image_width,
             "model_image_height": client.model_image_height,
             "camera_observation_width": core.LIBERO_ENV_RESOLUTION,
@@ -448,6 +477,8 @@ def run(args):
             policy_prediction_result=None,
             policy_prediction_video_url=None,
             policy_actual_video_url=None,
+            policy_prediction_external_video_url=None,
+            policy_actual_external_video_url=None,
         )
         logging.info(
             "Interactive attempt %d, task %d: %s",
@@ -782,6 +813,17 @@ def run(args):
             ),
             policy_actual_video_url=(
                 f"/previews/latest_policy_actual.mp4?attempt={attempt_number}"
+                if completed_policy_prediction
+                else None
+            ),
+            policy_prediction_external_video_url=(
+                "/previews/latest_policy_prediction_external.mp4"
+                f"?attempt={attempt_number}"
+                if completed_policy_prediction
+                else None
+            ),
+            policy_actual_external_video_url=(
+                f"/previews/latest_policy_actual_external.mp4?attempt={attempt_number}"
                 if completed_policy_prediction
                 else None
             ),

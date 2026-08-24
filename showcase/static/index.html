@@ -162,11 +162,19 @@
         <div id="previewCardLabel" class="card-label"><span>05</span> PREDICTOR OUTPUT VS COMPLETED EXECUTION</div>
         <div class="preview-layout">
           <div class="comparison-media-grid">
-            <figure class="comparison-video">
+            <figure id="actualExternalComparison" class="comparison-video external policy-external hidden">
+              <figcaption>ACTUAL EXTERNAL EXECUTION</figcaption>
+              <video id="actualExternalVideo" controls muted playsinline preload="metadata"></video>
+            </figure>
+            <figure id="predictedExternalComparison" class="comparison-video external predicted policy-external hidden">
+              <figcaption>FLEX-π GENERATED EXTERNAL FUTURE</figcaption>
+              <video id="previewExternalVideo" controls muted playsinline preload="metadata"></video>
+            </figure>
+            <figure class="comparison-video wrist">
               <figcaption id="actualVideoLabel">ACTUAL POLICY EXECUTION</figcaption>
               <video id="actualVideo" controls muted playsinline preload="metadata"></video>
             </figure>
-            <figure class="comparison-video predicted">
+            <figure class="comparison-video wrist predicted">
               <figcaption id="predictedVideoLabel">PREDICTOR OUTPUT</figcaption>
               <video id="previewVideo" controls muted playsinline preload="metadata"></video>
             </figure>

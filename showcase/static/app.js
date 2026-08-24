@@ -16,6 +16,8 @@ let comparisonDirty = false;
 let policyModeDirty = false;
 let lastPreviewUrl = "";
 let lastActualUrl = "";
+let lastExternalPreviewUrl = "";
+let lastExternalActualUrl = "";
 
 function format(value, digits = 0) {
   return value !== null && value !== "" && Number.isFinite(Number(value))
@@ -776,8 +778,15 @@ async function updateState() {
     );
     const comparisonReady = independentComparisonReady || policyComparisonReady;
     const preview = policyComparisonReady ? policyPreview : independentPreview;
+    const externalComparisonReady = Boolean(
+      policyComparisonReady
+      && state.policy_prediction_external_video_url
+      && state.policy_actual_external_video_url
+    );
     $("previewCard").classList.toggle("hidden", !comparisonReady);
     $("previewCard").classList.toggle("policy-view", policyComparisonReady);
+    $("actualExternalComparison").classList.toggle("hidden", !externalComparisonReady);
+    $("predictedExternalComparison").classList.toggle("hidden", !externalComparisonReady);
     $("previewCardLabel").innerHTML = policyComparisonReady
       ? '<span>05</span> FLEX-π POST-ROLLOUT WORLD-ACTION CHECK'
       : (isSimulatorOracle
@@ -805,17 +814,21 @@ async function updateState() {
       ? ` · MAX ΔQPOS ${Number(preview.state_comparison.max_qpos_error).toExponential(2)} · MAX ΔQVEL ${Number(preview.state_comparison.max_qvel_error).toExponential(2)}`
       : "";
     $("previewEvidence").textContent = policyComparisonReady
-      ? `${preview.display_view === "wrist" ? "WRIST" : "RAW COMPOSITE"} RGB PSNR ${format(preview.mean_rgb_psnr_db, 2)} dB · ${preview.frame_interval_actions || "—"} ACTIONS BETWEEN FRAMES · REVEALED AFTER ROLLOUT`
+      ? `EXTERNAL RGB PSNR ${format(preview.external_rgb_psnr_db, 2)} dB · WRIST RGB PSNR ${format(preview.wrist_rgb_psnr_db ?? preview.mean_rgb_psnr_db, 2)} dB · ${preview.frame_interval_actions || "—"} ACTIONS BETWEEN FRAMES · REVEALED AFTER ROLLOUT`
       : (preview.live_state_unchanged
         ? `${matchLabel}${stateError} · PREDICTED ${preview.predicted_state_sha256 || "—"} · ACTUAL ${preview.actual_state_sha256 || "—"} · ${format(preview.duration_ms, 1)} ms`
         : "No completed comparison evidence recorded yet");
     $("previewHelp").textContent = policyComparisonReady
-      ? "This is the replayable full-rollout sample timeline, not only the final second. The dashboard shows the aspect-correct wrist stream; exact raw Flex-π composites and prefix offsets remain in the session artifacts."
+      ? "This is the replayable full-rollout sample timeline, not only the final second. External comparison is above wrist comparison; exact raw Flex-π composites and prefix offsets remain in the session artifacts."
       : "Playback does not loop automatically, so each clip represents one finite action prefix.";
     const previewUrl = policyComparisonReady
       ? state.policy_prediction_video_url : (state.preview_video_url || "");
     const actualUrl = policyComparisonReady
       ? state.policy_actual_video_url : (state.actual_video_url || "");
+    const externalPreviewUrl = policyComparisonReady
+      ? state.policy_prediction_external_video_url : "";
+    const externalActualUrl = policyComparisonReady
+      ? state.policy_actual_external_video_url : "";
     if (previewUrl && previewUrl !== lastPreviewUrl) {
       lastPreviewUrl = previewUrl;
       $("previewVideo").src = previewUrl;
@@ -827,6 +840,18 @@ async function updateState() {
       $("actualVideo").src = actualUrl;
       $("actualVideo").currentTime = 0;
       $("actualVideo").load();
+    }
+    if (externalPreviewUrl && externalPreviewUrl !== lastExternalPreviewUrl) {
+      lastExternalPreviewUrl = externalPreviewUrl;
+      $("previewExternalVideo").src = externalPreviewUrl;
+      $("previewExternalVideo").currentTime = 0;
+      $("previewExternalVideo").load();
+    }
+    if (externalActualUrl && externalActualUrl !== lastExternalActualUrl) {
+      lastExternalActualUrl = externalActualUrl;
+      $("actualExternalVideo").src = externalActualUrl;
+      $("actualExternalVideo").currentTime = 0;
+      $("actualExternalVideo").load();
     }
     const runningProgress = state.phase === "running" ? Math.max(0, Math.min(1, Number(state.progress) || 0)) : 0;
     $("progressBar").style.transform = `scaleX(${runningProgress})`;

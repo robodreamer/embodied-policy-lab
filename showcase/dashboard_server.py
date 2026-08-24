@@ -520,6 +520,16 @@ def main():
                     session_dir / "previews" / "latest_policy_actual.mp4",
                     "video/mp4",
                 )
+            elif route == "/previews/latest_policy_prediction_external.mp4":
+                self._file(
+                    session_dir / "previews" / "latest_policy_prediction_external.mp4",
+                    "video/mp4",
+                )
+            elif route == "/previews/latest_policy_actual_external.mp4":
+                self._file(
+                    session_dir / "previews" / "latest_policy_actual_external.mp4",
+                    "video/mp4",
+                )
             else:
                 super().do_GET()
 

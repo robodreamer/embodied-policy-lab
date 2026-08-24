@@ -59,10 +59,11 @@ The client defaults to world-action co-generation (`full-joint` internally)
 and can switch to `action-only` between rollouts. Co-generation returns future
 RGB along with the DINO, pointmap, and end-effector action streams. The
 dashboard buffers every matched prefix privately, compiles a full-rollout
-sample timeline, and publishes its wrist-view clips and mean RGB PSNR below the
-live cameras only after the complete rollout ends. Exact 448×512 composites and
-per-prefix offsets remain as artifacts. This is evidence about the checkpoint's
-learned dynamics, not an independent model comparison.
+sample timeline, and publishes external-camera clips above wrist-camera clips,
+with per-view RGB PSNR, below the live cameras only after the complete rollout
+ends. Exact 448×512 composites and per-prefix offsets remain as artifacts. This
+is evidence about the checkpoint's learned dynamics, not an independent model
+comparison.
 
 ## Integrated WAM policy tradeoffs
 
@@ -97,6 +98,14 @@ claims are justified. Use Fast-WAM when control throughput and minimal runtime
 surface are the priority. Use Flex-π full-joint when the experiment needs
 visible learned-dynamics evidence, and compare it with Flex-π action-only to
 isolate the added cost and behavioral value of co-generation.
+
+For a matched closed-loop comparison, use
+`./scripts/benchmark_wam_libero.py --profile smoke|pilot|paper`. The runner
+shares the Flex-π LIBERO/MuJoCo 3.3.2 simulator runtime across both policies,
+freezes task IDs, seeds, 10-action replanning, and suite budgets, and reports
+success confidence intervals, warm batch-1 latency, and peak VRAM. Details and
+claim limits are in
+[the dated benchmark note](../notes/2026-08-24-fastwam-flexpi-headless-libero-benchmark.md).
 
 ## Adding another model
 
