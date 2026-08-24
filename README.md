@@ -171,9 +171,11 @@ The setup fetches the 12 GB release checkpoint, required VAE/T5/DINO assets,
 and only four tiny camera-intrinsics files from the training dataset—not the
 roughly 12 GB demonstration dataset. Selecting Flex-π defaults to world-action
 co-generation: RGB, DINO, pointmap, and end-effector action futures come from
-the same checkpoint pass. Matched RGB evidence is collected silently while the
-policy runs and shown only after the complete rollout ends. Action-only remains
-available as an explicit lower-memory mode.
+the same checkpoint pass. Matched RGB evidence from every completed action
+prefix is collected silently while the policy runs, compiled into a replayable
+full-rollout timeline, and shown below the live camera views only after the
+complete rollout ends. Action-only remains available as an explicit
+lower-memory mode.
 
 ```bash
 ./scripts/setup_flexpi_libero.sh
@@ -255,7 +257,12 @@ Every run is retained under a timestamped `showcase-runs/` directory, and
 - `policy-inference/request-*.json`: policy mode, prompt, output shape, timing,
   peak CUDA allocation, and generated-frame count for each Flex-π request;
 - `previews/latest_policy_{prediction,actual}.mp4`: Flex-π's delayed,
-  action-index-aligned future and actual clips after the real prefix executes;
+  action-index-aligned wrist-view timelines across every completed rollout
+  prefix;
+- `previews/latest_policy_{prediction,actual}_raw_composite.mp4`: the exact
+  448×512 model tensors, including the synthetic black third-camera slot;
+- `previews/latest_policy_timeline.json`: frame and action offsets for every
+  replan prefix in the compiled comparison;
 - Fast-WAM request artifacts additionally retain its exact two-camera input,
   normalized/denormalized action chunk, prompt hash, and staging timings;
 - `client.log`, `server.log`, and `dashboard.log`: runtime trails.

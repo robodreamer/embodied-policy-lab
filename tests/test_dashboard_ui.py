@@ -69,24 +69,37 @@ def test_dashboard_exposes_flexpi_mode_and_delayed_joint_future():
     javascript = (STATIC / "app.js").read_text(encoding="utf-8")
 
     assert 'id="policyModeSelect"' in html
+    assert 'id="actualVideoLabel"' in html
+    assert html.index('id="externalFrame"') < html.index('id="previewCard"')
+    assert html.index('id="wristFrame"') < html.index('id="previewCard"')
     assert 'action: "set_policy_mode"' in javascript
-    assert 'const rolloutFinished = ["awaiting_command", "stopped", "complete"]' in javascript
+    assert (
+        'const rolloutFinished = ["awaiting_command", "stopped", "complete"]'
+        in javascript
+    )
     assert "rolloutFinished\n      && state.policy_prediction_status" in javascript
-    assert "policy_prediction_status === \"ready\"" in javascript
+    assert 'policy_prediction_status === "ready"' in javascript
     assert "FLEX-π POST-ROLLOUT WORLD-ACTION CHECK" in javascript
     assert "REVEALED AFTER ROLLOUT" in javascript
-    assert '.play().catch(() => {})' not in javascript
+    assert 'classList.toggle("policy-view", policyComparisonReady)' in javascript
+    assert "GENERATED WRIST FUTURE" in javascript
+    assert "full-rollout sample timeline" in javascript
+    assert ".play().catch(() => {})" not in javascript
 
 
 def test_flexpi_comparison_is_revealed_only_after_rollout_completion():
-    client = (ROOT / "showcase" / "interactive_libero.py").read_text(
-        encoding="utf-8"
-    )
+    client = (ROOT / "showcase" / "interactive_libero.py").read_text(encoding="utf-8")
 
-    capture = client.index('policy_prediction_status="captured_for_post_rollout"')
+    capture = client.index('policy_prediction_status="buffered_for_post_rollout"')
     rollout_close = client.index("env.close()")
-    reveal = client.index('completed_policy_prediction["revealed_after_rollout"] = True')
+    reveal = client.index(
+        'completed_policy_prediction["revealed_after_rollout"] = True'
+    )
     assert capture < rollout_close < reveal
+    assert "completed_policy_prefixes.append(matched_prefix)" in client
+    assert "latest_policy_timeline.json" in client
+    assert 'policy_prediction_status="compiling_full_rollout"' in client
+    assert "latest_policy_prediction.mp4?attempt={attempt_number}" in client
 
 
 def test_dashboard_opens_before_heavy_policy_startup():

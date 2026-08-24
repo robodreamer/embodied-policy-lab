@@ -127,32 +127,9 @@
         <p id="controlNote">Choose a task and instruction, then start. Aborted and mixed-prompt attempts are excluded from per-prompt rates.</p>
       </section>
 
-      <section id="previewCard" class="preview-card hidden" aria-live="polite">
-        <div id="previewCardLabel" class="card-label"><span>02</span> PREDICTOR OUTPUT VS COMPLETED EXECUTION</div>
-        <div class="preview-layout">
-          <div class="comparison-media-grid">
-            <figure class="comparison-video">
-              <figcaption>ACTUAL POLICY EXECUTION</figcaption>
-              <video id="actualVideo" controls muted playsinline preload="metadata"></video>
-            </figure>
-            <figure class="comparison-video predicted">
-              <figcaption id="predictedVideoLabel">PREDICTOR OUTPUT</figcaption>
-              <video id="previewVideo" controls muted playsinline preload="metadata"></video>
-            </figure>
-          </div>
-          <div class="preview-decision">
-            <small id="previewKind">SELECTED PREDICTOR</small>
-            <strong id="previewTitle">Completed action-prefix comparison</strong>
-            <p id="previewDescription">Both clips start from the same simulator state and use the same actions. This card is revealed only after the real prefix completes.</p>
-            <code id="previewEvidence">No completed comparison recorded yet</code>
-            <p id="previewHelp">Playback does not loop automatically, so each clip represents one finite action prefix.</p>
-          </div>
-        </div>
-      </section>
-
       <section class="hero-grid">
         <article class="camera-card primary">
-          <div class="card-label"><span>03</span> EXTERNAL CAMERA · LIVE SIMULATOR STATE <small id="externalCameraMeta" class="camera-quality">—</small></div>
+          <div class="card-label"><span>02</span> EXTERNAL CAMERA · LIVE SIMULATOR STATE <small id="externalCameraMeta" class="camera-quality">—</small></div>
           <div class="camera-frame">
             <img id="externalFrame" alt="External camera feed">
             <div class="reticle"></div>
@@ -160,14 +137,14 @@
           </div>
         </article>
         <article class="camera-card">
-          <div class="card-label"><span>04</span> WRIST CAMERA · LIVE SIMULATOR STATE <small id="wristCameraMeta" class="camera-quality">—</small></div>
+          <div class="card-label"><span>03</span> WRIST CAMERA · LIVE SIMULATOR STATE <small id="wristCameraMeta" class="camera-quality">—</small></div>
           <div class="camera-frame wrist">
             <img id="wristFrame" alt="Wrist camera feed">
             <div class="reticle"></div>
           </div>
         </article>
         <article class="command-card">
-          <div class="card-label"><span>05</span> APPLIED INSTRUCTION</div>
+          <div class="card-label"><span>04</span> APPLIED INSTRUCTION</div>
           <blockquote id="prompt">Waiting for an instruction…</blockquote>
           <div class="applied-meta"><span id="appliedSource" class="source-chip">—</span><span id="appliedState">Not yet sent</span></div>
           <code id="promptProof" class="prompt-proof">No synchronous model request recorded yet</code>
@@ -179,6 +156,29 @@
           <div class="progress-track"><div id="progressBar"></div></div>
           <div class="progress-label"><span id="progressLabel">ROLLOUT PROGRESS</span><span id="progressText">Waiting</span></div>
         </article>
+      </section>
+
+      <section id="previewCard" class="preview-card hidden" aria-live="polite">
+        <div id="previewCardLabel" class="card-label"><span>05</span> PREDICTOR OUTPUT VS COMPLETED EXECUTION</div>
+        <div class="preview-layout">
+          <div class="comparison-media-grid">
+            <figure class="comparison-video">
+              <figcaption id="actualVideoLabel">ACTUAL POLICY EXECUTION</figcaption>
+              <video id="actualVideo" controls muted playsinline preload="metadata"></video>
+            </figure>
+            <figure class="comparison-video predicted">
+              <figcaption id="predictedVideoLabel">PREDICTOR OUTPUT</figcaption>
+              <video id="previewVideo" controls muted playsinline preload="metadata"></video>
+            </figure>
+          </div>
+          <div class="preview-decision">
+            <small id="previewKind">SELECTED PREDICTOR</small>
+            <strong id="previewTitle">Completed rollout comparison</strong>
+            <p id="previewDescription">Both clips use the same sampled action timeline and are revealed only after the real rollout completes.</p>
+            <code id="previewEvidence">No completed comparison recorded yet</code>
+            <p id="previewHelp">Playback does not loop automatically, so each clip represents one finite rollout.</p>
+          </div>
+        </div>
       </section>
 
       <section class="metric-grid">

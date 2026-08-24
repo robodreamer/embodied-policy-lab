@@ -58,10 +58,45 @@ environment. Its lossless HTTP boundary adds aligned uint16 millimetre depth.
 The client defaults to world-action co-generation (`full-joint` internally)
 and can switch to `action-only` between rollouts. Co-generation returns future
 RGB along with the DINO, pointmap, and end-effector action streams. The
-dashboard saves each matched prefix privately, retains the final comparison,
-and publishes its clips and mean RGB PSNR only after the complete rollout ends.
-This is evidence about the checkpoint's learned dynamics, not an independent
-model comparison.
+dashboard buffers every matched prefix privately, compiles a full-rollout
+sample timeline, and publishes its wrist-view clips and mean RGB PSNR below the
+live cameras only after the complete rollout ends. Exact 448×512 composites and
+per-prefix offsets remain as artifacts. This is evidence about the checkpoint's
+learned dynamics, not an independent model comparison.
+
+## Integrated WAM policy tradeoffs
+
+Fast-WAM and Flex-π are the two executable world-action policy plugins in this
+repository. π0.5 and GR00T N1.5 are VLA policy baselines; the RoboCasa simulator
+oracle is a deterministic diagnostic; none of those three should be described
+as an integrated learned WAM.
+
+| Dimension | Fast-WAM | Flex-π |
+|---|---|---|
+| Test-time path | Uses the video-trained representation to denoise actions, but skips explicit future-video generation | Selectable action-only or joint denoising of actions and future world streams |
+| World output visible here | None from the validated released action path | RGB future plus internal DINO semantic and 3D pointmap streams in `full-joint` mode |
+| Observation contract | Two 224×224 RGB cameras + 8D state + language | Two 256×256 RGB cameras, aligned metric depth and intrinsics + 8D state + language |
+| Action contract | 32×7 end-effector/gripper chunk; 10 denoising steps | 32×7 end-effector/gripper chunk; 4 Euler steps |
+| Local 24 GB result | 14,288 MiB process peak; warm live requests about 1.6–1.86 s | 14,671 MiB action-only or 17,961 MiB full-joint process peak; measured model pass 1.291 s or 2.980 s |
+| Strongest use in this lab | Lower-compute WAM-derived control baseline and closed-loop task evaluation | Same-checkpoint action-only/joint ablation plus post-rollout dynamics inspection |
+| Main limitation | No generated future to inspect or score at inference | More sensors, assets, memory, and latency; generated future is correlated evidence, not an independent action scorer |
+
+The [Fast-WAM paper](https://arxiv.org/abs/2603.16666) asks whether the cost of
+future imagination is necessary at test time and retains video co-training
+while removing future rendering from the deployed policy. The
+[Flex-π paper](https://arxiv.org/abs/2608.10860) instead uses stream dropout and
+cross-modality forcing so one checkpoint can operate with different subsets of
+RGB, DINO, pointmap, and action streams. In full-joint mode, Flex-π does **not**
+render several candidate actions and select the best-looking video. Its action
+and future tokens are correlated outputs of one denoising process.
+
+The local numbers above are bounded hardware/contract gates, not a fair policy
+leaderboard. Fast-WAM has one recorded successful full-budget initial state;
+Flex-π still needs matched full-suite rollouts before behavior or success-rate
+claims are justified. Use Fast-WAM when control throughput and minimal runtime
+surface are the priority. Use Flex-π full-joint when the experiment needs
+visible learned-dynamics evidence, and compare it with Flex-π action-only to
+isolate the added cost and behavioral value of co-generation.
 
 ## Adding another model
 

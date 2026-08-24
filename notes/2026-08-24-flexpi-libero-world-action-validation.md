@@ -91,10 +91,15 @@ rollouts. For full-joint inference:
    ten-action replan prefix.
 2. Execute the returned actions normally; prediction never gates execution.
 3. Capture actual composites at the same indices.
-4. After a prefix completes, save the matched clips privately without changing
-   the live execution layout.
-5. Once the entire rollout ends, reveal the final matched comparison and report
-   mean pixel PSNR as a reproducible alignment smoke metric.
+4. After each prefix completes, buffer its matched samples privately without
+   changing the live execution layout.
+5. Once the entire rollout ends, concatenate all completed prefixes into one
+   non-looping replay timeline and reveal it below the external and wrist live
+   views.
+6. Present an aspect-correct 512×288 wrist comparison; retain the exact 448×512
+   model composites and a JSON map of frame/action offsets for audit.
+7. Report wrist and raw-composite mean pixel PSNR as reproducible alignment
+   smoke metrics.
 
 PSNR is intentionally not treated as a robot-success metric. The main policy
 measure remains closed-loop LIBERO task success. The visual comparison checks
@@ -134,7 +139,10 @@ cd /home/andypark/Projects/playground/git-worktrees/embodied-policy-lab-fastwam
 
 Review `showcase-runs/latest/state.json`, `inference-audit.jsonl`, `gpu.csv`,
 `server.log`, the rollout under `videos/`, per-request metadata under
-`policy-inference/`, and `previews/latest_policy_{prediction,actual}.mp4`.
+`policy-inference/`, the wrist-view full-rollout comparison at
+`previews/latest_policy_{prediction,actual}.mp4`, the exact model layouts at
+`previews/latest_policy_{prediction,actual}_raw_composite.mp4`, and prefix
+offsets in `previews/latest_policy_timeline.json`.
 
 ## Current local status
 

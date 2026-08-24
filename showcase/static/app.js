@@ -777,19 +777,23 @@ async function updateState() {
     const comparisonReady = independentComparisonReady || policyComparisonReady;
     const preview = policyComparisonReady ? policyPreview : independentPreview;
     $("previewCard").classList.toggle("hidden", !comparisonReady);
+    $("previewCard").classList.toggle("policy-view", policyComparisonReady);
     $("previewCardLabel").innerHTML = policyComparisonReady
-      ? '<span>02</span> FLEX-π POST-ROLLOUT WORLD-ACTION CHECK'
+      ? '<span>05</span> FLEX-π POST-ROLLOUT WORLD-ACTION CHECK'
       : (isSimulatorOracle
-        ? '<span>02</span> SIMULATOR ORACLE REPLAY VS COMPLETED EXECUTION'
-        : '<span>02</span> LEARNED PREDICTION VS COMPLETED EXECUTION');
+        ? '<span>05</span> SIMULATOR ORACLE REPLAY VS COMPLETED EXECUTION'
+        : '<span>05</span> LEARNED PREDICTION VS COMPLETED EXECUTION');
     $("predictedVideoLabel").textContent = policyComparisonReady
-      ? "FLEX-π GENERATED FUTURE"
+      ? "FLEX-π GENERATED WRIST FUTURE"
       : (isSimulatorOracle ? "SIMULATOR ORACLE REPLAY" : "LEARNED PREDICTION");
+    $("actualVideoLabel").textContent = policyComparisonReady
+      ? "ACTUAL WRIST EXECUTION"
+      : "ACTUAL POLICY EXECUTION";
     $("previewKind").textContent = policyComparisonReady
       ? `${modelDisplayName} · ${String(preview.kind || "joint_world_action").replaceAll("_", " ").toUpperCase()}`
       : `${worldModelDisplayName} · ${String(state.world_model_prediction_kind || "preview").replaceAll("_", " ").toUpperCase()}`;
     $("previewTitle").textContent = policyComparisonReady
-      ? `${preview.frame_count || "—"} aligned frames from the final ${preview.executed_actions || "—"}-action prefix`
+      ? `${preview.frame_count || "—"} aligned frames across ${preview.prefix_count || "—"} executed action prefixes`
       : `${preview.previewed_steps || state.replan_steps || "—"}-step ${isSimulatorOracle ? "oracle replay" : "prediction"} and execution`;
     $("previewDescription").textContent = preview.caveat
       ? `${preview.caveat} Both clips were withheld until the rollout ended.`
@@ -801,10 +805,13 @@ async function updateState() {
       ? ` · MAX ΔQPOS ${Number(preview.state_comparison.max_qpos_error).toExponential(2)} · MAX ΔQVEL ${Number(preview.state_comparison.max_qvel_error).toExponential(2)}`
       : "";
     $("previewEvidence").textContent = policyComparisonReady
-      ? `MEAN RGB PSNR ${format(preview.mean_rgb_psnr_db, 2)} dB · ${preview.frame_interval_actions || "—"} ACTIONS BETWEEN FRAMES · REVEALED AFTER ROLLOUT`
+      ? `${preview.display_view === "wrist" ? "WRIST" : "RAW COMPOSITE"} RGB PSNR ${format(preview.mean_rgb_psnr_db, 2)} dB · ${preview.frame_interval_actions || "—"} ACTIONS BETWEEN FRAMES · REVEALED AFTER ROLLOUT`
       : (preview.live_state_unchanged
         ? `${matchLabel}${stateError} · PREDICTED ${preview.predicted_state_sha256 || "—"} · ACTUAL ${preview.actual_state_sha256 || "—"} · ${format(preview.duration_ms, 1)} ms`
         : "No completed comparison evidence recorded yet");
+    $("previewHelp").textContent = policyComparisonReady
+      ? "This is the replayable full-rollout sample timeline, not only the final second. The dashboard shows the aspect-correct wrist stream; exact raw Flex-π composites and prefix offsets remain in the session artifacts."
+      : "Playback does not loop automatically, so each clip represents one finite action prefix.";
     const previewUrl = policyComparisonReady
       ? state.policy_prediction_video_url : (state.preview_video_url || "");
     const actualUrl = policyComparisonReady

@@ -96,29 +96,85 @@ def _clip_psnr(predicted, actual):
     return round(float(np.mean(values)), 3) if values else None
 
 
-def _save_policy_prediction(session_dir, pending):
-    """Save a matched Flex-π prefix without revealing it during the rollout."""
+def _matched_policy_prefix(pending):
+    """Return one aligned Flex-π prefix, or None if no future was executed."""
 
     count = min(len(pending["predicted"]), len(pending["actual"]))
     if count < 2:
         return None
-    predicted = pending["predicted"][:count]
-    actual = pending["actual"][:count]
+    return {
+        "predicted": pending["predicted"][:count],
+        "actual": pending["actual"][:count],
+        "interval": pending["interval"],
+        "executed": pending["executed"],
+        "metadata": pending["metadata"],
+        "mode": pending["mode"],
+    }
+
+
+def _save_policy_prediction(session_dir, prefixes):
+    """Compile all matched Flex-π prefixes without revealing them mid-rollout."""
+
+    if not prefixes:
+        return None
+    predicted = [frame for prefix in prefixes for frame in prefix["predicted"]]
+    actual = [frame for prefix in prefixes for frame in prefix["actual"]]
     output_dir = pathlib.Path(session_dir) / "previews"
     output_dir.mkdir(parents=True, exist_ok=True)
+    raw_predicted_path = output_dir / "latest_policy_prediction_raw_composite.mp4"
+    raw_actual_path = output_dir / "latest_policy_actual_raw_composite.mp4"
+    imageio.mimwrite(raw_predicted_path, predicted, fps=2, macro_block_size=1)
+    imageio.mimwrite(raw_actual_path, actual, fps=2, macro_block_size=1)
+
+    # Flex-pi's released LIBERO checkpoint uses a model tensor layout rather
+    # than a presentation layout: 512x288 wrist on top, 256x160 external at
+    # bottom-left, and an intentionally black synthetic third-camera slot.
+    # Preserve that exact tensor above for audit, but show the useful wrist
+    # view in the dashboard so the black slot is not mistaken for corruption.
+    wrist_height = 288
+    display_predicted = [np.asarray(frame)[:wrist_height, :512] for frame in predicted]
+    display_actual = [np.asarray(frame)[:wrist_height, :512] for frame in actual]
     predicted_path = output_dir / "latest_policy_prediction.mp4"
     actual_path = output_dir / "latest_policy_actual.mp4"
-    imageio.mimwrite(predicted_path, predicted, fps=2, macro_block_size=1)
-    imageio.mimwrite(actual_path, actual, fps=2, macro_block_size=1)
+    imageio.mimwrite(predicted_path, display_predicted, fps=2, macro_block_size=1)
+    imageio.mimwrite(actual_path, display_actual, fps=2, macro_block_size=1)
+    timeline = []
+    frame_offset = 0
+    action_offset = 0
+    for prefix_index, prefix in enumerate(prefixes, start=1):
+        prefix_frames = len(prefix["predicted"])
+        timeline.append(
+            {
+                "prefix": prefix_index,
+                "start_frame": frame_offset,
+                "end_frame_exclusive": frame_offset + prefix_frames,
+                "start_action": action_offset,
+                "executed_actions": prefix["executed"],
+                "frame_interval_actions": prefix["interval"],
+            }
+        )
+        frame_offset += prefix_frames
+        action_offset += prefix["executed"]
+    timeline_path = output_dir / "latest_policy_timeline.json"
+    timeline_path.write_text(json.dumps(timeline, indent=2) + "\n", encoding="utf-8")
+    metadata = prefixes[-1]["metadata"]
     return {
-        "kind": pending["metadata"].get("kind", "joint_world_action"),
-        "mode": pending["mode"],
-        "frame_count": count,
-        "frame_interval_actions": pending["interval"],
-        "executed_actions": pending["executed"],
-        "mean_rgb_psnr_db": _clip_psnr(predicted, actual),
-        "caveat": pending["metadata"].get("caveat"),
-        "matched_prefix_completed": True,
+        "kind": metadata.get("kind", "joint_world_action"),
+        "mode": prefixes[-1]["mode"],
+        "prefix_count": len(prefixes),
+        "frame_count": len(predicted),
+        "frame_interval_actions": prefixes[-1]["interval"],
+        "executed_actions": sum(prefix["executed"] for prefix in prefixes),
+        "mean_rgb_psnr_db": _clip_psnr(display_predicted, display_actual),
+        "raw_composite_rgb_psnr_db": _clip_psnr(predicted, actual),
+        "display_view": "wrist",
+        "display_width": 512,
+        "display_height": wrist_height,
+        "raw_composite_prediction": str(raw_predicted_path),
+        "raw_composite_actual": str(raw_actual_path),
+        "timeline": str(timeline_path),
+        "caveat": metadata.get("caveat"),
+        "matched_prefixes_completed": True,
         "revealed_after_rollout": False,
     }
 
@@ -275,9 +331,7 @@ def run(args):
 
     should_stop = False
     startup_command = (
-        {"id": "auto-start", "action": "start_rollout"}
-        if args.auto_start
-        else None
+        {"id": "auto-start", "action": "start_rollout"} if args.auto_start else None
     )
     while not should_stop and attempt_number == 0:
         command = startup_command or inbox.read()
@@ -362,6 +416,7 @@ def run(args):
         abort_reason = None
         step = 0
         pending_policy_prediction = None
+        completed_policy_prefixes = []
         completed_policy_prediction = None
         attempt_number += 1
         attempt_started = time.perf_counter()
@@ -428,6 +483,7 @@ def run(args):
                     active_prompt = prompt_override or canonical_prompt
                     action_plan.clear()
                     pending_policy_prediction = None
+                    completed_policy_prefixes = []
                     completed_policy_prediction = None
                     state.update(
                         prompt=active_prompt,
@@ -550,9 +606,7 @@ def run(args):
                 prediction_frames = policy_response.get("prediction_frames") or []
                 prediction_metadata = policy_response.get("prediction") or {}
                 if prediction_frames:
-                    interval = int(
-                        prediction_metadata.get("frame_interval_actions", 4)
-                    )
+                    interval = int(prediction_metadata.get("frame_interval_actions", 4))
                     pending_policy_prediction = {
                         "predicted": prediction_frames,
                         "actual": [client.compose_preview(external, wrist)],
@@ -598,13 +652,11 @@ def run(args):
                         client.compose_preview(actual_external, actual_wrist)
                     )
                 if done or not action_plan:
-                    published = _save_policy_prediction(
-                        args.session_dir, pending_policy_prediction
-                    )
-                    if published:
-                        completed_policy_prediction = published
+                    matched_prefix = _matched_policy_prefix(pending_policy_prediction)
+                    if matched_prefix:
+                        completed_policy_prefixes.append(matched_prefix)
                         state.update(
-                            policy_prediction_status="captured_for_post_rollout"
+                            policy_prediction_status="buffered_for_post_rollout"
                         )
                     pending_policy_prediction = None
             selected_goal_reached = selected_goal_reached or bool(done)
@@ -619,8 +671,20 @@ def run(args):
                 replay_images.append(final_external)
                 break
 
+        if pending_policy_prediction is not None:
+            matched_prefix = _matched_policy_prefix(pending_policy_prediction)
+            if matched_prefix:
+                completed_policy_prefixes.append(matched_prefix)
         env.close()
         duration = time.perf_counter() - attempt_started
+        if completed_policy_prefixes:
+            state.update(
+                policy_prediction_status="compiling_full_rollout",
+                command_message="Compiling the post-rollout Flex-π replay",
+            )
+        completed_policy_prediction = _save_policy_prediction(
+            args.session_dir, completed_policy_prefixes
+        )
         if completed_policy_prediction:
             completed_policy_prediction = dict(completed_policy_prediction)
             completed_policy_prediction["revealed_after_rollout"] = True
@@ -712,12 +776,12 @@ def run(args):
             ),
             policy_prediction_result=completed_policy_prediction,
             policy_prediction_video_url=(
-                "/previews/latest_policy_prediction.mp4"
+                f"/previews/latest_policy_prediction.mp4?attempt={attempt_number}"
                 if completed_policy_prediction
                 else None
             ),
             policy_actual_video_url=(
-                "/previews/latest_policy_actual.mp4"
+                f"/previews/latest_policy_actual.mp4?attempt={attempt_number}"
                 if completed_policy_prediction
                 else None
             ),
