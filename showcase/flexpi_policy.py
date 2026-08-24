@@ -48,6 +48,14 @@ CHECKPOINT_SHA256 = "1aca314666ffdd62ca1cb5b0e0b0e5f836b68b81b1ef455ae1641ddd123
 CONFIG_SHA256 = "46b00bf570f63bbe3465b9e81c476c8b9874c25fa278d74499fb4d1dc34e8650"
 STATS_SHA256 = "8a7a12f54844e0ea1cb009d1e7db460be38dc39c6376e425c5cd2f428ef59880"
 INTRINSICS_SHA256 = "f3acb280d90b37eaafc45ed435039721a8069ddbfc70bfb9dcaa3d29bbd184f2"
+VAE_SHA256 = "0e913a2ca571c75fcb63385a8edadcca73454af5842596cb1ad11e4142590996"
+T5_SHA256 = "d92de679881d38af9c89eff7bb1b6d6c9d96cb2b69831e4027e9ecabdd38eb23"
+DINO_REVISION = "c6a5fb7d12bbd3cf3b0079253141c3332aaed7da"
+DINO_SHA256 = "1f9ed8a2378d65e24bb710ba522ac9fa7be4e036d7aefb4384ce022833926332"
+TOKENIZER_JSON_SHA256 = "6e197b4d3dbd71da14b4eb255f4fa91c9c1f2068b20a2de2472967ca3d22602b"
+TOKENIZER_MODEL_SHA256 = "e3909a67b780650b35cf529ac782ad2b6b26e6d1f849d3fbb6a872905f452458"
+TOKENIZER_CONFIG_SHA256 = "ed9a3a8b0faa71a70a32847e0435fe036e6e112d4df4edb7bb48a921e344dc05"
+TOKENIZER_SPECIAL_SHA256 = "7b8a9f5040adb67b5805abdfd42c1f8d0f3d0e711f10726580eb3789cd0ad61d"
 PROMPT_TEMPLATE = (
     "A video recorded from a robot's point of view executing the following "
     "instruction: {task}"
@@ -179,6 +187,62 @@ class FlexPiPolicy:
             (self.intrinsics_path, INTRINSICS_SHA256),
         ):
             _verify_sha256(path, expected)
+        hf_cache = pathlib.Path(
+            os.environ.get(
+                "HF_HUB_CACHE",
+                pathlib.Path(
+                    os.environ.get(
+                        "HF_HOME",
+                        pathlib.Path(
+                            os.environ.get(
+                                "XDG_CACHE_HOME",
+                                pathlib.Path.home() / ".cache",
+                            )
+                        )
+                        / "huggingface",
+                    )
+                )
+                / "hub",
+            )
+        )
+        tokenizer_root = (
+            self.upstream_root
+            / "checkpoints/Wan-AI/Wan2.1-T2V-1.3B/google/umt5-xxl"
+        )
+        self.auxiliary_assets = {
+            "wan22_vae": (
+                self.upstream_root
+                / "checkpoints/DiffSynth-Studio/Wan-Series-Converted-Safetensors/Wan2.2_VAE.safetensors",
+                VAE_SHA256,
+            ),
+            "umt5_encoder": (
+                self.upstream_root
+                / "checkpoints/DiffSynth-Studio/Wan-Series-Converted-Safetensors/models_t5_umt5-xxl-enc-bf16.safetensors",
+                T5_SHA256,
+            ),
+            "tokenizer_json": (tokenizer_root / "tokenizer.json", TOKENIZER_JSON_SHA256),
+            "tokenizer_model": (tokenizer_root / "spiece.model", TOKENIZER_MODEL_SHA256),
+            "tokenizer_config": (
+                tokenizer_root / "tokenizer_config.json",
+                TOKENIZER_CONFIG_SHA256,
+            ),
+            "tokenizer_special": (
+                tokenizer_root / "special_tokens_map.json",
+                TOKENIZER_SPECIAL_SHA256,
+            ),
+            "dinov3": (
+                hf_cache
+                / "models--timm--vit_base_patch16_dinov3.lvd1689m"
+                / "snapshots"
+                / DINO_REVISION
+                / "model.safetensors",
+                DINO_SHA256,
+            ),
+        }
+        for name, (path, expected) in self.auxiliary_assets.items():
+            if not path.is_file():
+                raise FileNotFoundError(f"Flex-π auxiliary asset {name}: {path}")
+            _verify_sha256(path, expected)
         if self.artifact_dir:
             self.artifact_dir.mkdir(parents=True, exist_ok=True)
 
@@ -301,6 +365,9 @@ class FlexPiPolicy:
             "stats_sha256": STATS_SHA256,
             "intrinsics": str(self.intrinsics_path),
             "intrinsics_sha256": INTRINSICS_SHA256,
+            "auxiliary_asset_sha256": {
+                name: expected for name, (_, expected) in self.auxiliary_assets.items()
+            },
             "action_horizon": ACTION_HORIZON,
             "inference_steps": INFERENCE_STEPS,
             "num_video_frames": self.num_video_frames,

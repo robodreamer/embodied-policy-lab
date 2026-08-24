@@ -21,8 +21,10 @@ PR readiness.
   headless benchmarks retain metadata and actions without transporting unused
   multi-megabyte frame payloads.
 - Pinned Flex-π source/model dependencies to immutable revisions and verify
-  their SHA-256 digests. The policy process restores `weights_only=True` after
-  the upstream evaluator changes PyTorch's loader behavior.
+  their SHA-256 digests both during setup and policy startup, including VAE,
+  T5/tokenizer, and DINOv3 assets. The policy process restores
+  `weights_only=True` after the upstream evaluator changes PyTorch's loader
+  behavior.
 - Both WAM policy servers reject tracked-dirty upstream worktrees. Benchmark
   sessions persist the lab/LIBERO revisions and dirty flags, policy release
   metadata, actual runtime, and settling contract before a full run can be

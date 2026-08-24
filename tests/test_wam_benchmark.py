@@ -103,6 +103,11 @@ def test_full_matrix_requires_the_shared_runtime(
                         "upstream_revision": f"{run['model']}-fixture",
                         "upstream_tracked_dirty": False,
                         "checkpoint_sha256": "fixture-sha256",
+                        "auxiliary_asset_sha256": (
+                            {"fixture": "fixture-sha256"}
+                            if run["model"] == "flexpi"
+                            else None
+                        ),
                     },
                 }
             ),

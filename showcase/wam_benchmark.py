@@ -564,6 +564,14 @@ def collect_results(runs: list[dict[str, Any]], *, profile: str) -> dict[str, An
             )
             is False
             and bool((record.get("policy_metadata") or {}).get("checkpoint_sha256"))
+            and (
+                record["model"] != "flexpi"
+                or bool(
+                    (record.get("policy_metadata") or {}).get(
+                        "auxiliary_asset_sha256"
+                    )
+                )
+            )
             for record in records
         )
     )
