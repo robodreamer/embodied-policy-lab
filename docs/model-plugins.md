@@ -120,9 +120,9 @@ claim limits are in
 6. Run one audited local request and one short rollout before claiming support.
 
 Checkpoint weights and virtual environments remain ignored. In-tree upstream
-integrations are pinned Git submodules. Fast-WAM uses a revision-checked sibling
-checkout because its independent runtime and release assets are not part of
-this repository.
+integrations are pinned Git submodules. Fast-WAM and Flex-π use
+revision-checked sibling checkouts because their independent runtimes and
+release assets are not part of this repository.
 
 ## GR00T setup
 

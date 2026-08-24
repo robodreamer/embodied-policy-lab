@@ -87,11 +87,11 @@ GPU. Simulation rendering is headless through EGL; each rollout is saved as an
 MP4 for inspection.
 
 The project is structured for publication: in-tree upstream integrations are
-pinned Git submodules. Fast-WAM uses a revision-checked sibling checkout so its
-independent runtime and release assets stay isolated. Model weights and
-generated machine-specific artifacts are excluded from version control. See
-[the external asset notes](docs/external-assets.md) for weight-license and
-integrity details.
+pinned Git submodules. Fast-WAM and Flex-π use revision-checked sibling
+checkouts so their independent runtimes and release assets stay isolated.
+Model weights and generated machine-specific artifacts are excluded from
+version control. See [the external asset notes](docs/external-assets.md) for
+weight-license and integrity details.
 
 ## Status
 
