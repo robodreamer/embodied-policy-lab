@@ -264,7 +264,12 @@ def run(args):
         canonical_prompt=initial_canonical_prompt,
         prompt=prompt_override or initial_canonical_prompt,
         prompt_source=prompt_source,
-        command_message="Choose a task and instruction, then start a rollout",
+        command_message=(
+            "Model ready. Choose a task and instruction, then press Start rollout."
+        ),
+    )
+    logging.info(
+        "Policy and task catalog ready; waiting for Start rollout at the dashboard"
     )
 
     should_stop = False

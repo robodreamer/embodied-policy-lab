@@ -40,6 +40,9 @@ h1 span { color: var(--acid); }
 .loading-spinner { width: 18px; height: 18px; border: 2px solid #34451f; border-top-color: var(--acid); border-right-color: var(--cyan); border-radius: 50%; animation: loadingSpin .9s linear infinite; }
 .loading-progress { position: absolute; right: 0; bottom: 0; left: 0; height: 3px; overflow: hidden; background: #1c251a; }
 .loading-progress::after { content: ""; position: absolute; top: 0; bottom: 0; width: 34%; background: linear-gradient(90deg, transparent, var(--acid), var(--cyan), transparent); animation: loadingSweep 1.4s ease-in-out infinite; }
+.loading-banner.ready { border-color: #2e8878; background: linear-gradient(90deg, rgba(16,49,43,.98), rgba(11,17,13,.98)); }
+.loading-banner.ready small, .loading-banner.ready strong { color: var(--cyan); }
+.loading-banner.ready .loading-spinner, .loading-banner.ready .loading-progress { display: none; }
 @keyframes loadingSpin { to { transform: rotate(360deg); } }
 @keyframes loadingSweep { from { transform: translateX(-110%); } to { transform: translateX(310%); } }
 main { max-width: 1800px; margin: auto; }

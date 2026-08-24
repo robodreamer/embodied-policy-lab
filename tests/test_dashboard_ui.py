@@ -29,6 +29,16 @@ def test_dashboard_has_explicit_startup_indicator():
     assert 'role="status"' in header
     assert "updateLoadingStatus(state)" in javascript
     assert '["waiting", "initializing", "preparing_task"]' in javascript
+    assert "READY — START A ROLLOUT" in javascript
+
+
+def test_dashboard_control_configuration_retries_after_transient_failure():
+    javascript = (STATIC / "app.js").read_text(encoding="utf-8")
+
+    assert "configureControlsOnce" in javascript
+    assert "controlsConfiguration = null" in javascript
+    assert "configured = true" in javascript
+    assert "DASHBOARD UPDATE FAILED" in javascript
 
 
 def test_dashboard_reveals_opt_in_comparison_after_actual_execution():

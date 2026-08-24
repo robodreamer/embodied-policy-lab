@@ -1,6 +1,7 @@
 const $ = (id) => document.getElementById(id);
 let lastState = {};
 let configured = false;
+let controlsConfiguration = null;
 let editingPrompt = false;
 let draftDirty = false;
 let taskDirty = false;
@@ -242,12 +243,17 @@ function humanPhase(state) {
 function updateLoadingStatus(state) {
   const phase = state.phase || "waiting";
   const loading = ["waiting", "initializing", "preparing_task"].includes(phase);
-  $("loadingBanner").classList.toggle("hidden", !loading);
-  if (!loading) return;
+  const ready = phase === "awaiting_command";
+  $("loadingBanner").classList.toggle("hidden", !loading && !ready);
+  $("loadingBanner").classList.toggle("ready", ready);
+  if (!loading && !ready) return;
 
   const model = state.model_display_name || state.model || "local policy";
   const simulator = state.simulator || state.backend || "local simulator";
-  if (phase === "preparing_task") {
+  if (ready) {
+    $("loadingTitle").textContent = `${String(model).toUpperCase()} READY — START A ROLLOUT`;
+    $("loadingDetail").textContent = "The model is resident and waiting. Select the task below, then press 4 · Start a fresh scored rollout to create the simulator views and run inference.";
+  } else if (phase === "preparing_task") {
     $("loadingTitle").textContent = `PREPARING ${String(simulator).toUpperCase()}`;
     $("loadingDetail").textContent = state.command_message
       || "Constructing the selected scene and loading its task definition. This can take several seconds.";
@@ -359,9 +365,7 @@ function updateControls(state) {
       : "Off. The policy executes normally without creating comparison artifacts."));
 }
 
-async function configureControls() {
-  if (configured) return;
-  configured = true;
+async function configureControlsOnce() {
   const config = await fetch("/api/config", {cache: "no-store"}).then(r => r.json());
   localLlmEnabled = Boolean(config.local_llm_enabled);
   randomGenerationEnabled = Array.isArray(config.prompt_generation_modes);
@@ -591,6 +595,17 @@ async function configureControls() {
   };
 }
 
+async function configureControls() {
+  if (configured) return;
+  if (!controlsConfiguration) controlsConfiguration = configureControlsOnce();
+  try {
+    await controlsConfiguration;
+    configured = true;
+  } finally {
+    controlsConfiguration = null;
+  }
+}
+
 async function updateState() {
   try {
     const state = await fetch("/api/state", {cache: "no-store"}).then(r => r.json());
@@ -812,7 +827,12 @@ async function updateState() {
     drawAction(state.last_action_chunk || []);
     drawLatency(state.inference_latencies_ms || []);
     refreshFrames();
-  } catch (_) { $("phaseBadge").textContent = "RECONNECTING"; }
+  } catch (error) {
+    $("phaseBadge").textContent = "RECONNECTING";
+    $("loadingBanner").classList.remove("hidden", "ready");
+    $("loadingTitle").textContent = "DASHBOARD UPDATE FAILED";
+    $("loadingDetail").textContent = `${error?.message || "Unknown browser error"}. Retrying automatically; refresh this page if the controls remain unavailable.`;
+  }
 }
 
 async function updateTelemetry() {
