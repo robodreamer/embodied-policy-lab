@@ -76,6 +76,15 @@ def handler_for(policy: FlexPiPolicy) -> type[BaseHTTPRequestHandler]:
                 )
                 if not isinstance(include_prediction_frames, bool):
                     raise ValueError("include_prediction_frames must be a JSON boolean")
+                prediction_frame_limit = payload.get("prediction_frame_limit")
+                if prediction_frame_limit is not None and (
+                    isinstance(prediction_frame_limit, bool)
+                    or not isinstance(prediction_frame_limit, int)
+                    or prediction_frame_limit < 1
+                ):
+                    raise ValueError(
+                        "prediction_frame_limit must be a positive JSON integer"
+                    )
                 if self.path == "/preprocess":
                     composite = policy.preprocess_composite(
                         external=decode_uint8_payload(
@@ -100,6 +109,7 @@ def handler_for(policy: FlexPiPolicy) -> type[BaseHTTPRequestHandler]:
                     task=payload["prompt"],
                     mode=payload.get("mode", "full-joint"),
                     include_prediction_frames=include_prediction_frames,
+                    prediction_frame_limit=prediction_frame_limit,
                 )
                 self._json(200, result)
             except (KeyError, TypeError, ValueError) as error:

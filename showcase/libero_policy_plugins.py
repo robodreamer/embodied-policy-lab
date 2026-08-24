@@ -53,6 +53,9 @@ class LiberoPolicyClient(Protocol):
     @property
     def mode(self) -> str: ...
 
+    @property
+    def metadata(self) -> dict[str, Any]: ...
+
     def set_mode(self, mode: str) -> None: ...
 
     def prepare_observation(
@@ -69,6 +72,7 @@ class LiberoPolicyClient(Protocol):
         observation: dict[str, Any],
         *,
         include_prediction_frames: bool = False,
+        prediction_frame_limit: int | None = None,
     ) -> dict[str, Any]: ...
 
 
@@ -128,6 +132,40 @@ def decode_uint16_payload(payload: dict[str, Any], *, name: str) -> np.ndarray:
     return np.frombuffer(raw, dtype=np.uint16).reshape(shape).copy()
 
 
+def _http_json(
+    endpoint: str,
+    path: str,
+    *,
+    timeout_seconds: float,
+    service: str,
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    data = (
+        json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        if payload is not None
+        else None
+    )
+    request = urllib.request.Request(
+        f"{endpoint}{path}",
+        data=data,
+        headers={"Content-Type": "application/json"} if data else {},
+        method="POST" if data else "GET",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+            result = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        detail = error.read().decode("utf-8", errors="replace")
+        raise RuntimeError(
+            f"{service} server returned HTTP {error.code}: {detail}"
+        ) from error
+    except urllib.error.URLError as error:
+        raise RuntimeError(f"Cannot reach {service} server at {endpoint}: {error}") from error
+    if not isinstance(result, dict):
+        raise ValueError(f"{service} server returned a non-object JSON response")
+    return result
+
+
 def _resize_with_pad(image: np.ndarray, size: int = 224) -> np.ndarray:
     """Exact local equivalent of OpenPI's PIL resize-with-pad preprocessing."""
 
@@ -172,6 +210,14 @@ class _FixedModeClient:
     available_modes: tuple[dict[str, str], ...] = ()
     mode = "action-only"
 
+    @property
+    def metadata(self) -> dict[str, Any]:
+        return {
+            "model": self.profile.model_name,
+            "runtime": self.spec.runtime,
+            "transport": self.spec.transport,
+        }
+
     def set_mode(self, mode: str) -> None:
         if mode not in ("", "action-only"):
             raise ValueError(f"{self.spec.display_name} does not expose inference modes")
@@ -204,8 +250,9 @@ class Pi05LiberoClient(_FixedModeClient):
         observation: dict[str, Any],
         *,
         include_prediction_frames: bool = False,
+        prediction_frame_limit: int | None = None,
     ) -> dict[str, Any]:
-        del include_prediction_frames
+        del include_prediction_frames, prediction_frame_limit
         return self._client.infer(observation)
 
 
@@ -220,6 +267,15 @@ class FastWamLiberoClient(_FixedModeClient):
     @property
     def endpoint(self) -> str:
         return f"http://{self.host}:{self.port}"
+
+    @property
+    def metadata(self) -> dict[str, Any]:
+        return _http_json(
+            self.endpoint,
+            "/metadata",
+            timeout_seconds=self.timeout_seconds,
+            service="Fast-WAM",
+        )
 
     def prepare_observation(
         self, external, wrist, state, prompt, depth=None
@@ -237,8 +293,9 @@ class FastWamLiberoClient(_FixedModeClient):
         observation: dict[str, Any],
         *,
         include_prediction_frames: bool = False,
+        prediction_frame_limit: int | None = None,
     ) -> dict[str, Any]:
-        del include_prediction_frames
+        del include_prediction_frames, prediction_frame_limit
         required = (
             "observation/image",
             "observation/wrist_image",
@@ -262,22 +319,13 @@ class FastWamLiberoClient(_FixedModeClient):
                 observation["observation/wrist_image"], name="wrist"
             ),
         }
-        request = urllib.request.Request(
-            f"{self.endpoint}/infer",
-            data=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
+        result = _http_json(
+            self.endpoint,
+            "/infer",
+            timeout_seconds=self.timeout_seconds,
+            service="Fast-WAM",
+            payload=payload,
         )
-        try:
-            with urllib.request.urlopen(
-                request, timeout=self.timeout_seconds
-            ) as response:
-                result = json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as error:
-            detail = error.read().decode("utf-8", errors="replace")
-            raise RuntimeError(
-                f"Fast-WAM server returned HTTP {error.code}: {detail}"
-            ) from error
         if "actions" not in result:
             raise ValueError("Fast-WAM response is missing the 'actions' field")
         actions = np.asarray(result["actions"], dtype=np.float32)
@@ -316,6 +364,15 @@ class FlexPiLiberoClient:
     def endpoint(self) -> str:
         return f"http://{self.host}:{self.port}"
 
+    @property
+    def metadata(self) -> dict[str, Any]:
+        return _http_json(
+            self.endpoint,
+            "/metadata",
+            timeout_seconds=self.timeout_seconds,
+            service="Flex-π",
+        )
+
     def set_mode(self, mode: str) -> None:
         self.mode = normalize_flexpi_mode(mode)
 
@@ -332,22 +389,13 @@ class FlexPiLiberoClient:
         return result
 
     def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
-        request = urllib.request.Request(
-            f"{self.endpoint}{path}",
-            data=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
+        return _http_json(
+            self.endpoint,
+            path,
+            timeout_seconds=self.timeout_seconds,
+            service="Flex-π",
+            payload=payload,
         )
-        try:
-            with urllib.request.urlopen(
-                request, timeout=self.timeout_seconds
-            ) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as error:
-            detail = error.read().decode("utf-8", errors="replace")
-            raise RuntimeError(
-                f"Flex-π server returned HTTP {error.code}: {detail}"
-            ) from error
 
     def compose_preview(self, external: np.ndarray, wrist: np.ndarray) -> np.ndarray:
         """Ask the pinned Flex-π runtime for its exact upstream input composite."""
@@ -367,6 +415,7 @@ class FlexPiLiberoClient:
         observation: dict[str, Any],
         *,
         include_prediction_frames: bool = False,
+        prediction_frame_limit: int | None = None,
     ) -> dict[str, Any]:
         required = (
             "observation/image",
@@ -386,6 +435,7 @@ class FlexPiLiberoClient:
             "schema_version": 1,
             "mode": self.mode,
             "include_prediction_frames": bool(include_prediction_frames),
+            "prediction_frame_limit": prediction_frame_limit,
             "prompt": str(observation["prompt"]),
             "state": state.tolist(),
             "external": _uint8_payload(

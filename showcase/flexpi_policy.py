@@ -65,6 +65,21 @@ def _git_revision(path: pathlib.Path) -> str:
     ).strip()
 
 
+def _git_tracked_dirty(path: pathlib.Path) -> bool:
+    status = subprocess.check_output(
+        [
+            "git",
+            "status",
+            "--porcelain",
+            "--untracked-files=no",
+            "--ignore-submodules=none",
+        ],
+        cwd=path,
+        text=True,
+    )
+    return bool(status.strip())
+
+
 def _verify_sha256(path: pathlib.Path, expected: str) -> None:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -143,6 +158,11 @@ class FlexPiPolicy:
             raise ValueError(
                 f"Flex-π upstream revision is {revision}, expected "
                 f"{EXPECTED_UPSTREAM_REVISION}"
+            )
+        if _git_tracked_dirty(self.upstream_root):
+            raise ValueError(
+                "Flex-π upstream has tracked source or submodule changes; "
+                "use a clean pinned checkout for validated inference"
             )
         for path in (
             self.checkpoint,
@@ -270,12 +290,17 @@ class FlexPiPolicy:
             "schema_version": 1,
             "model": "flexpi_libero_stream_dropout",
             "upstream_revision": EXPECTED_UPSTREAM_REVISION,
+            "upstream_tracked_dirty": False,
             "checkpoint_repository": CHECKPOINT_REPOSITORY,
             "checkpoint_revision": CHECKPOINT_REVISION,
             "checkpoint": str(self.checkpoint),
+            "checkpoint_sha256": CHECKPOINT_SHA256,
             "config": str(self.config_path),
+            "config_sha256": CONFIG_SHA256,
             "stats": str(self.stats_path),
+            "stats_sha256": STATS_SHA256,
             "intrinsics": str(self.intrinsics_path),
+            "intrinsics_sha256": INTRINSICS_SHA256,
             "action_horizon": ACTION_HORIZON,
             "inference_steps": INFERENCE_STEPS,
             "num_video_frames": self.num_video_frames,
@@ -394,6 +419,7 @@ class FlexPiPolicy:
         task: str,
         mode: str,
         include_prediction_frames: bool = False,
+        prediction_frame_limit: int | None = None,
     ) -> dict[str, Any]:
         with self._lock:
             return self._infer_locked(
@@ -405,12 +431,20 @@ class FlexPiPolicy:
                 task=task,
                 mode=mode,
                 include_prediction_frames=include_prediction_frames,
+                prediction_frame_limit=prediction_frame_limit,
             )
 
     def _infer_locked(self, **request: Any) -> dict[str, Any]:
         started = time.perf_counter()
         mode = normalize_flexpi_mode(request["mode"])
         include_prediction_frames = bool(request.get("include_prediction_frames"))
+        prediction_frame_limit = request.get("prediction_frame_limit")
+        if prediction_frame_limit is not None and (
+            isinstance(prediction_frame_limit, bool)
+            or not isinstance(prediction_frame_limit, int)
+            or prediction_frame_limit < 1
+        ):
+            raise ValueError("prediction_frame_limit must be a positive integer")
         state = np.asarray(request["state"], dtype=np.float32)
         if state.shape != (8,) or not np.isfinite(state).all():
             raise ValueError(f"State must be finite [8], got {state.shape}")
@@ -510,9 +544,13 @@ class FlexPiPolicy:
             }
             if include_prediction_frames:
                 result["prediction"]["input_frame"] = _rgb_payload(input_composite)
+                frames_to_encode = frames[:prediction_frame_limit]
                 result["prediction"]["frames"] = [
-                    _rgb_payload(frame) for frame in frames
+                    _rgb_payload(frame) for frame in frames_to_encode
                 ]
+                result["prediction"]["serialized_frame_count"] = len(
+                    frames_to_encode
+                )
             timing["presentation_encode_seconds"] = round(
                 time.perf_counter() - encode_started, 4
             )

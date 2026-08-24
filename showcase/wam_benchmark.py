@@ -224,6 +224,7 @@ def build_plan(
                     * selected_trials,
                     "seed": seed,
                     "replan_steps": REPLAN_STEPS,
+                    "settling_steps": 30 if config["model"] == "fastwam" else 10,
                     "max_policy_steps": suite_max_steps,
                     "latency_probe_warmups": probe_warmups,
                     "latency_probe_calls": probe_calls,
@@ -254,9 +255,13 @@ def _session_complete(run: dict[str, Any]) -> bool:
         "task_ids": expected_task_ids,
         "seed": int(run["seed"]),
         "replan_steps": int(run["replan_steps"]),
+        "num_steps_wait": int(run["settling_steps"]),
         "max_steps": int(run["max_policy_steps"]),
         "model_plugin": run["model"],
         "policy_mode": run["mode"],
+        "benchmark_runtime": (
+            "flexpi" if run["common_libero_runtime"] else "native"
+        ),
     }
     return (
         state.get("phase") == "complete"
@@ -276,13 +281,24 @@ def _same_run_spec(planned: dict[str, Any], recorded: dict[str, Any]) -> bool:
         "max_policy_steps",
         "seed",
         "replan_steps",
+        "settling_steps",
+        "latency_probe_warmups",
+        "latency_probe_calls",
         "common_libero_runtime",
     )
     return all(planned.get(field) == recorded.get(field) for field in fields)
 
 
-def _manifest_runs(path: pathlib.Path) -> dict[tuple[str, str], dict[str, Any]]:
+def _manifest_runs(
+    path: pathlib.Path, *, profile: str
+) -> dict[tuple[str, str], dict[str, Any]]:
     manifest = _read_json(path) or {}
+    if (
+        manifest.get("schema_version") != 2
+        or manifest.get("profile") != profile
+        or manifest.get("protocol") != PROTOCOL_NAME
+    ):
+        return {}
     return {
         (run["config"], run["suite"]): run
         for run in manifest.get("runs", [])
@@ -322,7 +338,7 @@ def execute_plan(
 ) -> list[dict[str, Any]]:
     output_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = output_dir / "benchmark-manifest.json"
-    prior_runs = _manifest_runs(manifest_path) if resume else {}
+    prior_runs = _manifest_runs(manifest_path, profile=profile) if resume else {}
     statuses = []
     for run_index, planned_run in enumerate(plan, start=1):
         run = planned_run
@@ -422,6 +438,20 @@ def collect_results(runs: list[dict[str, Any]], *, profile: str) -> dict[str, An
         successes = int(state.get("successes") or 0)
         episodes = int(state.get("episodes") or 0)
         interval = wilson_interval(successes, episodes)
+        observed_protocol = {
+            key: state.get(key)
+            for key in (
+                "suite",
+                "task_ids",
+                "seed",
+                "replan_steps",
+                "num_steps_wait",
+                "max_steps",
+                "model_plugin",
+                "policy_mode",
+                "benchmark_runtime",
+            )
+        }
         records.append(
             {
                 **{key: value for key, value in run.items() if key != "command"},
@@ -442,6 +472,12 @@ def collect_results(runs: list[dict[str, Any]], *, profile: str) -> dict[str, An
                 "gpu_peak_mib": _gpu_peak_mib(session_dir),
                 "mujoco_version": state.get("mujoco_version"),
                 "libero_source": state.get("libero_source"),
+                "libero_git": state.get("libero_git"),
+                "lab_git": state.get("lab_git"),
+                "python_version": state.get("python_version"),
+                "policy_metadata": state.get("policy_metadata"),
+                "observed_protocol": observed_protocol,
+                "session_contract_matches_plan": _session_complete(run),
             }
         )
 
@@ -483,14 +519,31 @@ def collect_results(runs: list[dict[str, Any]], *, profile: str) -> dict[str, An
     expected_config_contract = {
         config["key"]: (config["model"], config["mode"]) for config in CONFIGS
     }
+    runtime_fingerprints = {
+        (
+            record.get("mujoco_version"),
+            (record.get("libero_git") or {}).get("revision"),
+        )
+        for record in records
+    }
+    lab_revisions = {
+        (record.get("lab_git") or {}).get("revision") for record in records
+    }
     complete_matched_protocol = (
         bool(records)
         and profile == "paper"
         and observed_pairs == expected_pairs
         and len(records) == len(expected_pairs)
         and len({record["seed"] for record in records}) == 1
+        and len(runtime_fingerprints) == 1
+        and None not in next(iter(runtime_fingerprints))
+        and len(lab_revisions) == 1
+        and None not in lab_revisions
         and all(
             record["phase"] == "complete"
+            and record.get("status") in ("complete", "skipped_complete")
+            and record.get("returncode") == 0
+            and record["session_contract_matches_plan"]
             and record["task_ids"] == "all"
             and record["task_count"] == TASKS_PER_SUITE
             and record["trials_per_task"] == PAPER_TRIALS_PER_TASK
@@ -498,9 +551,19 @@ def collect_results(runs: list[dict[str, Any]], *, profile: str) -> dict[str, An
             == TASKS_PER_SUITE * PAPER_TRIALS_PER_TASK
             and record["max_policy_steps"] == SUITE_BUDGETS[record["suite"]]
             and record["replan_steps"] == REPLAN_STEPS
+            and record["settling_steps"]
+            == (30 if record["model"] == "fastwam" else 10)
             and record["common_libero_runtime"] is True
             and (record["model"], record["mode"])
             == expected_config_contract[record["config"]]
+            and (record.get("libero_git") or {}).get("tracked_dirty") is False
+            and (record.get("lab_git") or {}).get("tracked_dirty") is False
+            and bool((record.get("policy_metadata") or {}).get("upstream_revision"))
+            and (record.get("policy_metadata") or {}).get(
+                "upstream_tracked_dirty"
+            )
+            is False
+            and bool((record.get("policy_metadata") or {}).get("checkpoint_sha256"))
             for record in records
         )
     )

@@ -23,6 +23,13 @@ PR readiness.
 - Pinned Flex-π source/model dependencies to immutable revisions and verify
   their SHA-256 digests. The policy process restores `weights_only=True` after
   the upstream evaluator changes PyTorch's loader behavior.
+- Both WAM policy servers reject tracked-dirty upstream worktrees. Benchmark
+  sessions persist the lab/LIBERO revisions and dirty flags, policy release
+  metadata, actual runtime, and settling contract before a full run can be
+  certified.
+- Interactive Flex-π responses serialize only the prediction prefix that can
+  be aligned with the configured executed-action prefix; headless calls
+  serialize no prediction pixels.
 - Resume logic now retains completed retry directories and validates task IDs,
   seed, replan interval, suite budget, model, mode, and episode count before a
   session can be skipped.

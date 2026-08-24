@@ -14,6 +14,8 @@ import logging
 import math
 import os
 import pathlib
+import platform
+import subprocess
 import time
 
 import imageio
@@ -70,6 +72,33 @@ class Args:
 
 def _timestamp():
     return datetime.datetime.now(datetime.timezone.utc).astimezone().isoformat()
+
+
+def _git_provenance(path):
+    directory = pathlib.Path(path)
+    if directory.is_file():
+        directory = directory.parent
+    try:
+        revision = subprocess.check_output(
+            ["git", "-C", str(directory), "rev-parse", "HEAD"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+        status = subprocess.check_output(
+            [
+                "git",
+                "-C",
+                str(directory),
+                "status",
+                "--porcelain",
+                "--untracked-files=no",
+            ],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return {"revision": None, "tracked_dirty": None}
+    return {"revision": revision, "tracked_dirty": bool(status.strip())}
 
 
 class LiveState:
@@ -270,6 +299,9 @@ def evaluate(args):
     client = create_libero_policy_client(
         args.model, args.host, args.port, flexpi_mode=args.flexpi_mode
     )
+    policy_metadata = client.metadata
+    lab_provenance = _git_provenance(pathlib.Path(__file__).resolve().parents[1])
+    libero_provenance = _git_provenance(pathlib.Path(benchmark.__file__).resolve())
     inference_audit_path = pathlib.Path(args.session_dir) / "inference-audit.jsonl"
     latencies = []
     model_request_count = 0
@@ -290,10 +322,17 @@ def evaluate(args):
             "simulator": "LIBERO / robosuite / MuJoCo",
             "mujoco_version": mujoco_version,
             "libero_source": str(pathlib.Path(benchmark.__file__).resolve()),
+            "libero_git": libero_provenance,
+            "lab_git": lab_provenance,
+            "python_version": platform.python_version(),
             "model_plugin": client.spec.key,
             "model": client.profile.model_name,
             "model_display_name": client.spec.display_name,
             "runtime": client.spec.runtime,
+            "benchmark_runtime": os.environ.get(
+                "LIBERO_BENCHMARK_RUNTIME", "native"
+            ),
+            "policy_metadata": policy_metadata,
             "policy_transport": client.spec.transport,
             "policy_endpoint": client.endpoint,
             "network_audit": args.network_audit,
@@ -304,6 +343,7 @@ def evaluate(args):
             "total_tasks": len(task_ids),
             "seed": args.seed,
             "replan_steps": args.replan_steps,
+            "num_steps_wait": args.num_steps_wait,
             "action_horizon": client.profile.action_horizon,
             "action_dimension": 7,
             "policy_mode": client.mode,

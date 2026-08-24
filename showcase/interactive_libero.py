@@ -15,7 +15,11 @@ import numpy as np
 import tyro
 
 import instrumented_libero as core
-from flexpi_contracts import REPLAY_FPS, split_prediction_frame
+from flexpi_contracts import (
+    DEFAULT_FRAME_INTERVAL_ACTIONS,
+    REPLAY_FPS,
+    split_prediction_frame,
+)
 from libero_policy_plugins import create_libero_policy_client
 
 
@@ -613,7 +617,11 @@ def run(args):
                 )
                 inference_started = time.perf_counter()
                 policy_response = client.infer(
-                    model_input, include_prediction_frames=True
+                    model_input,
+                    include_prediction_frames=True,
+                    prediction_frame_limit=(
+                        1 + args.replan_steps // DEFAULT_FRAME_INTERVAL_ACTIONS
+                    ),
                 )
                 action_chunk = np.asarray(policy_response["actions"])
                 inference_latency = (time.perf_counter() - inference_started) * 1000.0

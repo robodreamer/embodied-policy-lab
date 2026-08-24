@@ -187,3 +187,15 @@ Validated sessions (kept outside version control):
 - `showcase-runs/20260824-113450`: action-only gate
 - `showcase-runs/20260824-113722`: full-joint hardware-fit gate
 - `showcase-runs/20260824-114021`: delayed predicted-vs-actual comparison
+
+### Final release-path gate
+
+After the stacked PR review, the pinned clean checkout was loaded again through
+the hardened `weights_only=True` server path. Startup completed in 87.6 seconds.
+A direct action-only request returned a finite 32×7 action chunk in 3.748
+seconds (including the first prompt encode). A subsequent full-joint request
+returned a finite 32×7 action chunk in 2.403 seconds plus the exact 448×512
+input composite and nine losslessly transported 448×512 generated frames at a
+four-action interval. The interactive client now requests only the prefix it
+can compare after its configured rollout, avoiding serialization of unused
+future frames.

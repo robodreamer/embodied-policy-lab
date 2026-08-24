@@ -69,6 +69,7 @@ def test_full_matrix_requires_the_shared_runtime(
     plan = build_plan(
         profile="paper", output_dir=tmp_path, common_runtime=common_runtime
     )
+    completed_runs = []
     for run in plan:
         session = tmp_path / "sessions" / run["config"] / run["suite"]
         session.mkdir(parents=True)
@@ -78,12 +79,38 @@ def test_full_matrix_requires_the_shared_runtime(
                     "phase": "complete",
                     "successes": run["expected_episodes"],
                     "episodes": run["expected_episodes"],
+                    "suite": run["suite"],
+                    "task_ids": list(range(10)),
+                    "seed": run["seed"],
+                    "replan_steps": run["replan_steps"],
+                    "num_steps_wait": run["settling_steps"],
+                    "max_steps": run["max_policy_steps"],
+                    "model_plugin": run["model"],
+                    "policy_mode": run["mode"],
+                    "benchmark_runtime": (
+                        "flexpi" if common_runtime else "native"
+                    ),
+                    "mujoco_version": "3.3.2",
+                    "libero_git": {
+                        "revision": "libero-fixture",
+                        "tracked_dirty": False,
+                    },
+                    "lab_git": {
+                        "revision": "lab-fixture",
+                        "tracked_dirty": False,
+                    },
+                    "policy_metadata": {
+                        "upstream_revision": f"{run['model']}-fixture",
+                        "upstream_tracked_dirty": False,
+                        "checkpoint_sha256": "fixture-sha256",
+                    },
                 }
             ),
             encoding="utf-8",
         )
+        completed_runs.append({**run, "status": "complete", "returncode": 0})
 
-    results = collect_results(plan, profile="paper")
+    results = collect_results(completed_runs, profile="paper")
 
     assert results["complete_matched_protocol"] is expected_complete
 
@@ -150,9 +177,11 @@ def test_resume_reuses_a_completed_retry_directory(tmp_path, monkeypatch):
         "task_ids": [2],
         "seed": planned["seed"],
         "replan_steps": planned["replan_steps"],
+        "num_steps_wait": planned["settling_steps"],
         "max_steps": planned["max_policy_steps"],
         "model_plugin": planned["model"],
         "policy_mode": planned["mode"],
+        "benchmark_runtime": "flexpi",
         "episodes": planned["expected_episodes"],
     }
     (retry / "state.json").write_text(json.dumps(state), encoding="utf-8")
@@ -162,7 +191,14 @@ def test_resume_reuses_a_completed_retry_directory(tmp_path, monkeypatch):
         retry
     )
     (tmp_path / "benchmark-manifest.json").write_text(
-        json.dumps({"runs": [{**retry_run, "status": "complete"}]}),
+        json.dumps(
+            {
+                "schema_version": 2,
+                "profile": "smoke",
+                "protocol": "matched-flexpi-libero-local-v1",
+                "runs": [{**retry_run, "status": "complete"}],
+            }
+        ),
         encoding="utf-8",
     )
 

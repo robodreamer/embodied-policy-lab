@@ -81,6 +81,36 @@ def test_preview_uses_server_owned_upstream_preprocessing():
     assert np.array_equal(actual, expected)
 
 
+def test_interactive_frame_limit_is_part_of_the_server_request():
+    client = FlexPiLiberoClient("127.0.0.1", 8000)
+    calls = []
+
+    def fake_post(path, payload):
+        calls.append((path, payload))
+        return {"actions": np.zeros((32, 7), dtype=np.float32).tolist()}
+
+    client._post = fake_post
+    observation = client.prepare_observation(
+        np.zeros((16, 16, 3), dtype=np.uint8),
+        np.zeros((16, 16, 3), dtype=np.uint8),
+        np.zeros(8, dtype=np.float32),
+        "pick up the bowl",
+        {
+            "external": np.zeros((16, 16), dtype=np.uint16),
+            "wrist": np.zeros((16, 16), dtype=np.uint16),
+        },
+    )
+
+    client.infer(
+        observation,
+        include_prediction_frames=True,
+        prediction_frame_limit=3,
+    )
+
+    assert calls[0][0] == "/infer"
+    assert calls[0][1]["prediction_frame_limit"] == 3
+
+
 def test_mode_and_prompt_normalization_are_explicit():
     assert normalize_flexpi_mode("fast") == "action-only"
     assert normalize_flexpi_mode("joint") == "full-joint"
