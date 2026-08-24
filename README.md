@@ -58,7 +58,9 @@ model/simulator pairs:
 
 ```bash
 ./lab                   # fzf arrow-key picker, or numbered fallback
+./scripts/run_interactive_showcase.sh  # same picker when called with no flags
 ./lab --default         # immediately launch RoboCasa + π0.5
+./lab --policy-family wam  # WAM-only menu: Fast-WAM or Flex-π
 ./lab --list            # compatibility matrix
 ./lab --default --dry-run
 ```
@@ -72,6 +74,7 @@ or bypass it entirely:
 
 ```bash
 ./lab --backend robocasa --model groot-n1.5
+./lab --policy-family wam --model flexpi --flexpi-mode action-only --default
 ./lab --backend robocasa --model groot-n1.5 --mode batch \
   --task-id 2 --trials 3 --default
 ```

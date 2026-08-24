@@ -2,6 +2,14 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+# The no-argument interactive entry point is the friendly terminal selector.
+# Calls from `./lab` already carry an explicit backend/model and continue into
+# the low-level launcher without recursing.
+if [[ $# -eq 0 && -z "${BACKEND:-}" && -z "${MODEL:-}" ]]; then
+  exec "$SCRIPT_DIR/../lab"
+fi
+
 export INTERACTIVE=1
 export HOLD_OPEN="${HOLD_OPEN:-1}"
 

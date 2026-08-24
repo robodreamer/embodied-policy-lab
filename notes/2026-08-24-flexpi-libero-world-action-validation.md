@@ -136,6 +136,12 @@ cd /home/andypark/Projects/playground/git-worktrees/embodied-policy-lab-fastwam
 ./scripts/run_interactive_showcase.sh \
   --backend libero --model flexpi --flexpi-mode action-only \
   --task-suite libero_spatial --task-id 0 --max-policy-steps 20
+
+# Terminal picker: select WAM, Flex-π, then joint or action-only.
+./scripts/run_interactive_showcase.sh
+
+# Non-interactive selection through the same friendly CLI.
+./lab --backend libero --model flexpi --flexpi-mode action-only --default
 ```
 
 Review `showcase-runs/latest/state.json`, `inference-audit.jsonl`, `gpu.csv`,
