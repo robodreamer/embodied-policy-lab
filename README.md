@@ -2,11 +2,13 @@
 
 # Embodied Policy Lab
 
-**One local workbench for robot policies, world-action models, and reproducible rollouts.**
+**Run the policy. See the future it predicted. Compare it with what actually happened.**
 
-Run π0.5, GR00T, Fast-WAM, and Flex-π behind the same simulation interface.
-Compare what a policy did with what a world-action model predicted, then keep
-the videos, metrics, prompts, and provenance needed to inspect the result.
+Embodied Policy Lab is a local evaluation and observability studio for robot
+VLAs and world-action models. Run π0.5, GR00T, Fast-WAM, and Flex-π through one
+experiment boundary, then keep the prediction replays, actions, metrics,
+prompts, and provenance needed to understand the result. Prediction replays
+are retained when the selected model exposes a generated future.
 
 [![CI](https://img.shields.io/github/actions/workflow/status/robodreamer/embodied-policy-lab/ci.yml?branch=main&label=CI)](https://github.com/robodreamer/embodied-policy-lab/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-4c6ef5.svg)](LICENSE)
@@ -30,24 +32,42 @@ The complete local studio: choose a compatible policy and simulator, define the
 scored rollout, select the Flex-π inference regime, and inspect runtime state.
 </sub></p>
 
-## Why this lab exists
+## Why this lab is different
 
-Robot model demos are often tied to one policy, one simulator, and one-off
-scripts. Embodied Policy Lab makes the experimental boundary explicit:
+The community already has strong model implementations, training libraries,
+simulators, and leaderboards. Embodied Policy Lab sits between them as the
+local experiment and evidence layer:
 
-- **One launcher.** Pick a compatible VLA or WAM profile with `./lab`; the
-  dashboard and artifact layout stay consistent.
-- **Local by default.** Policy inference, simulation, prompt generation, and
-  telemetry run on the workstation. Network destinations are recorded.
-- **Predictions you can inspect.** Flex-π world-action output is aligned with
-  the actions actually executed and compiled into a replayable comparison.
-- **Claims with evidence.** Every run preserves prompts, action hashes,
-  latency, GPU telemetry, simulator video, source revisions, and success state.
-- **Upstreams stay isolated.** Heavy policies use pinned, independent runtimes;
-  model weights and machine-specific artifacts are never committed.
+- **Match unlike models fairly.** Compatible VLA and WAM profiles share the
+  same task, seed, rollout budget, dashboard, and result schema.
+- **Compare prediction with reality.** Flex-π external and wrist futures are
+  aligned with the action prefixes actually executed and revealed only after
+  the rollout finishes.
+- **Keep evidence, not just a demo.** Every attempt preserves prompts, action
+  hashes, latency, GPU telemetry, simulator video, source revisions, and
+  success state.
+- **Run locally and audit the boundary.** Policy inference, simulation, prompt
+  generation, and telemetry stay on the workstation; observed network
+  destinations are recorded.
+- **Respect upstream contracts.** Heavy models stay in pinned, independent
+  runtimes instead of being forced through one lossy preprocessing path.
+
+Upstream projects remain authoritative for training and model claims. This lab
+owns the repeatable workflow for asking a different question: **what did this
+model predict, what did the robot actually do, and what evidence supports the
+comparison?** Read the dated
+[community positioning and roadmap](notes/2026-08-26-community-positioning-and-roadmap.md)
+for the competitive boundary and next priorities.
 
 This is a research workbench, not a robot-safety system or a claim that unlike
 papers have been reproduced under identical conditions.
+
+### When is future imagination worth it?
+
+The current WAM experiment compares Fast-WAM's direct action path with Flex-π
+in action-only and full-joint world-action modes under a shared local LIBERO
+schedule. That makes the speed, memory, control, and visible-prediction
+tradeoffs inspectable without confusing publisher results with local evidence.
 
 ## Model matrix
 
@@ -297,6 +317,7 @@ camera presentation controls, and troubleshooting live in the
 | [Fast-WAM validation](notes/2026-08-19-fastwam-libero-validation.md) | released-checkpoint boundary and bounded experiment |
 | [Flex-π validation](notes/2026-08-24-flexpi-libero-world-action-validation.md) | full-joint implementation and measured local checks |
 | [WAM benchmark](notes/2026-08-24-fastwam-flexpi-headless-libero-benchmark.md) | headless protocol, provenance, and claims |
+| [Community positioning](notes/2026-08-26-community-positioning-and-roadmap.md) | competitive boundary, selling point, and prioritized roadmap |
 | [Results](results/README.md) | sanitized publishable validation summaries |
 
 ## Development
