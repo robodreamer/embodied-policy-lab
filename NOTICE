@@ -1,0 +1,11 @@
+Embodied Policy Lab
+Copyright 2026 Andy Park and Embodied Policy Lab contributors
+
+This product includes integrations for third-party projects, simulators, and
+models. Those components are not relicensed by Embodied Policy Lab. In
+particular, Git submodules, revision-checked sibling repositories, simulator
+assets, and separately downloaded model weights remain subject to their own
+copyright notices, licenses, acceptable-use policies, and access terms.
+
+See docs/external-assets.md, .gitmodules, and the upstream repositories for
+component-specific attribution and terms.

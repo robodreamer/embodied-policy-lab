@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: >-
+  If you use Embodied Policy Lab in research, please cite this software and the
+  original model, simulator, and benchmark publications used in your study.
+title: Embodied Policy Lab
+type: software
+authors:
+  - family-names: Park
+    given-names: Andy
+repository-code: https://github.com/robodreamer/embodied-policy-lab
+license: Apache-2.0
+keywords:
+  - robotics
+  - vision-language-action
+  - world-action-model
+  - LIBERO
+  - RoboCasa
+  - reproducibility
