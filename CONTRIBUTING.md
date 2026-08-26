@@ -4,6 +4,10 @@ Thanks for helping make robot-model experiments easier to reproduce and harder
 to misinterpret. Small fixes, new policy/simulator adapters, dashboard
 improvements, validation protocols, and documentation are all welcome.
 
+Read [AGENTS.md](AGENTS.md) for the repository's model-compatibility, evidence,
+artifact, and validation guardrails. They apply equally to human and automated
+contributions.
+
 ## Before opening a change
 
 1. Search existing issues and pull requests.

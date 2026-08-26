@@ -3,8 +3,9 @@
 ## Objective
 
 Validate the released Fast-WAM LIBERO policy in Embodied Policy Lab without
-changing the existing π0.5 or RoboCasa runtimes. This branch is deliberately an
-isolated worktree experiment: `experiment/fastwam-libero-validation`.
+changing the existing π0.5 or RoboCasa runtimes. The integration stays in a
+pinned, isolated model runtime and shares only the public policy boundary with
+the rest of the lab.
 
 Primary references:
 

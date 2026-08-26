@@ -1,18 +1,12 @@
 # Flex-π LIBERO world-action validation — 2026-08-24
 
-## Objective and branch structure
+## Objective and public validation boundary
 
 Add the released Flex-π LIBERO checkpoint to Embodied Policy Lab without
-disturbing the validated Fast-WAM experiment. This work is a stacked branch:
-
-```text
-experiment/fastwam-libero-validation
-└── experiment/flexpi-libero-validation
-```
-
-That makes Fast-WAM the reviewable base and Flex-π a separate stacked change.
-Both appear as model plugins in the same dashboard and launcher, but one
-single-session GPU guard prevents simultaneous heavyweight servers.
+disturbing the validated Fast-WAM experiment. Both appear as model plugins in
+the same dashboard and launcher, while a single-session GPU guard prevents
+simultaneous heavyweight servers. This page records the released-asset
+contract and bounded checks that support the public integration claims.
 
 Primary references:
 
@@ -153,7 +147,7 @@ at `previews/latest_policy_{prediction,actual}_external.mp4`, the exact model la
 offsets in `previews/latest_policy_timeline.json`.
 
 The matched Fast-WAM/Flex-π headless evaluation is documented separately in
-[the benchmark note](2026-08-24-fastwam-flexpi-headless-libero-benchmark.md).
+[the benchmark protocol](../benchmarks/fastwam-flexpi-libero.md).
 
 ## Current local status
 

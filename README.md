@@ -55,9 +55,8 @@ local experiment and evidence layer:
 Upstream projects remain authoritative for training and model claims. This lab
 owns the repeatable workflow for asking a different question: **what did this
 model predict, what did the robot actually do, and what evidence supports the
-comparison?** Read the dated
-[community positioning and roadmap](notes/2026-08-26-community-positioning-and-roadmap.md)
-for the competitive boundary and next priorities.
+comparison?** Read the [public roadmap](ROADMAP.md) for the competitive boundary
+and next priorities.
 
 This is a research workbench, not a robot-safety system or a claim that unlike
 papers have been reproduced under identical conditions.
@@ -240,7 +239,7 @@ executed action prefixes for this run.
 
 This is a temporal diagnostic, not a counterfactual planner: the generated
 future does not score candidate actions or change the completed rollout. The
-[Flex-π validation note](notes/2026-08-24-flexpi-libero-world-action-validation.md)
+[Flex-π validation note](docs/validation/flexpi-libero.md)
 documents the camera, depth, action-space, and release-asset contracts.
 
 ## Matched WAM benchmark
@@ -260,7 +259,7 @@ and one auditable session per configuration.
 Results land under `benchmark-runs/wam-libero-*/`. The `paper` profile is a
 matched **local** comparison; it is not a reproduction of either project's
 complete paper protocol. Read the
-[benchmark protocol and claim boundaries](notes/2026-08-24-fastwam-flexpi-headless-libero-benchmark.md).
+[benchmark protocol and claim boundaries](docs/benchmarks/fastwam-flexpi-libero.md).
 
 ## How it fits together
 
@@ -313,11 +312,12 @@ camera presentation controls, and troubleshooting live in the
 | [Model plugins](docs/model-plugins.md) | adding a policy without coupling it to a simulator |
 | [World-model plugins](docs/world-model-plugins.md) | predictor semantics and the RoboCasa simulator-oracle baseline |
 | [External assets](docs/external-assets.md) | source/weight licenses, pinned revisions, integrity checks |
-| [Publication checklist](docs/publication-checklist.md) | repository description, topics, social card, and release readiness |
-| [Fast-WAM validation](notes/2026-08-19-fastwam-libero-validation.md) | released-checkpoint boundary and bounded experiment |
-| [Flex-π validation](notes/2026-08-24-flexpi-libero-world-action-validation.md) | full-joint implementation and measured local checks |
-| [WAM benchmark](notes/2026-08-24-fastwam-flexpi-headless-libero-benchmark.md) | headless protocol, provenance, and claims |
-| [Community positioning](notes/2026-08-26-community-positioning-and-roadmap.md) | competitive boundary, selling point, and prioritized roadmap |
+| [Roadmap](ROADMAP.md) | public priorities, scope boundaries, and research direction |
+| [π0.5 RoboCasa validation](docs/validation/robocasa-pi05.md) | observation/action contract and bounded local evidence |
+| [GR00T N1.5 RoboCasa validation](docs/validation/groot-n1.5-robocasa.md) | pinned integration and bounded local evidence |
+| [Fast-WAM validation](docs/validation/fastwam-libero.md) | released-checkpoint boundary and bounded experiment |
+| [Flex-π validation](docs/validation/flexpi-libero.md) | full-joint implementation and measured local checks |
+| [WAM benchmark](docs/benchmarks/fastwam-flexpi-libero.md) | headless protocol, provenance, and claims |
 | [Results](results/README.md) | sanitized publishable validation summaries |
 
 ## Development

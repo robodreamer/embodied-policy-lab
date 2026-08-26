@@ -1,180 +1,70 @@
-# Reproduction results
+# Validated local results
 
-## 2026-08-05 — unified RoboCasa CLI and dashboard adapter
+This directory contains concise, sanitized evidence from local Embodied Policy
+Lab runs. Raw session logs, model inputs, videos, caches, and machine-specific
+paths remain ignored.
 
-Session `20260805-173321` ran one complete `CloseToasterOvenDoor` episode through
-the same `run_showcase.sh` entrypoint used by LIBERO. It completed the 450-action
-horizon with 90 audited local π0.5 requests and produced a 226-frame video. The
-policy did not complete this seed, so the recorded score is **0/1**. Cold/JIT
-latency was 9.59 seconds, warm median latency was 134.49 ms, warm P95 was
-141.16 ms, and peak GPU memory was 21,045 MiB.
+Unless a row explicitly says otherwise, these are functional integration checks
+or bounded local measurements—not statistically meaningful model rankings or
+paper reproductions.
 
-Session `20260805-173442` validated interactive scene preparation, task
-switching, local-LLM prompt generation, prompt hash acknowledgement, live
-replanning, deliberate stop, aborted-attempt exclusion, report generation, and
-process cleanup. The exact locally generated instruction was acknowledged by
-π0.5 on three requests. See `docs/robocasa-backend.md` for commands and the full
-interpretation notes. A final unified-entrypoint regression reran LIBERO task 0
-successfully (**1/1**). RoboCasa session `20260805-174340` also validated the
-default syscall audit: only `127.0.0.1:8004` was observed and the verdict was
-`loopback_only`.
+## Validation workstation
 
-## 2026-08-05 — experimental RoboCasa local-policy smoke
+- NVIDIA RTX PRO 5000 Blackwell Laptop GPU
+- 24,463 MiB reported VRAM
+- Local model inference and simulation
+- Exact model, simulator, checkpoint, and source revisions retained by each
+  generated session
 
-The isolated RoboCasa365 runtime reset and rendered `CloseBlenderLid` on the
-target split. The matching `pi05_pretrain_human300` checkpoint then loaded from
-the local cache and received the official three-camera plus 16D-state input.
-It returned a 50-step, 12D action chunk; five converted actions were executed
-and recorded in MuJoCo. First-request latency, including JAX compilation, was
-10.48 seconds. Peak observed GPU memory was 21,121 MiB.
+## Policy validation summary
 
-Prompt and action hashes, telemetry, logs, JSON, and video were generated under
-`results/robocasa-policy-smoke/20260805-171258/`. The five-action smoke did not
-complete the 900-step task and is not a success-rate measurement. Full setup,
-the upstream checkpoint-statistics workaround, exact commands, and future
-adapter work are documented in `docs/robocasa-backend.md`.
+| Profile | Environment | Coverage | Result | Warm latency | Peak observed GPU memory | Interpretation |
+|---|---|---:|---:|---:|---:|---|
+| π0.5 | LIBERO Spatial | 10 tasks × 1 seed | 10/10 | ~132 ms median | 19,098 MiB | complete one-seed functional suite, not benchmark accuracy |
+| π0.5 | RoboCasa | 1 complete 450-action episode | 0/1 | 134.49 ms median | 21,045 MiB | closed-loop integration evidence |
+| GR00T N1.5 | RoboCasa | 1 complete 900-action episode | 0/1 | 165.44 ms median | 22,092 MiB | closed-loop integration evidence |
+| Fast-WAM | LIBERO Spatial task 2 | 1 complete initial state | 1/1 | 1.86 s mean | 14,288 MiB | real bounded success; insufficient for a rate |
 
-## 2026-08-05 — prompt handoff and rollout-budget diagnosis
+Different environment rows are not directly comparable. RoboCasa uses a
+mobile-manipulator 12D contract and different tasks and success predicates;
+LIBERO uses a fixed-arm 7D contract.
 
-Session `20260805-153435` reproduced both reported symptoms. The dashboard
-acknowledged a fresh-start command before the new environment published its
-prompt, allowing the previous state to repaint the draft briefly. Failed custom
-commands also stopped at the fixed `libero_spatial` cap of 220 actions, which
-took about 17.7–18.0 seconds on this workstation. A successful scored variation
-ended after 105 policy steps (8.95 seconds) because LIBERO detected the selected
-goal; that early stop is correct for a scored attempt.
+## Flex-π hardware and prediction gates
 
-The dashboard now retains a submitted draft until the acknowledged state also
-matches its prompt, task, evaluation mode, and budget. Fresh rollouts support
-Standard (1×), Extended (2×), and Long (3×) budgets, with Extended as the
-default. Manual edits default to a Long custom experiment. Custom experiments
-run the full budget and are reported as unscored; true goal-preserving variants
-can be marked Scored and still stop as soon as the selected goal succeeds.
+| Mode | Output | Gate result | Model timing | CUDA peak reservation |
+|---|---|---|---:|---:|
+| Action-only | finite 32×7 actions | one query and one executed action passed | 1.291 s | 13.24 GiB |
+| Full-joint | 32×7 actions plus RGB/DINO/pointmap futures | one query and one executed action passed | 2.980 s | 16.45 GiB |
+| Full-joint delayed comparison | aligned actual/generated external and wrist frames | capture, delayed reveal, and replay passed | 2.866 s | 17,961 MiB process-level telemetry |
 
-Session `20260805-154934` validated the fix against the real local policy. A
-browser-driven fresh start sampled the instruction field 97 times during the
-handoff; every sample retained the newly submitted prompt and the pending state
-was visible. A custom 220-step run reached the hidden LIBERO goal but continued
-through all 44 policy requests and finished `unscored` after 28.12 seconds. The
-same scene then ran a true scored wording variation, succeeded after 23 policy
-requests in 9.22 seconds, and was recorded separately as 1/1 scored plus one
-unscored custom attempt.
+These short gates validate loading, transport, action execution, future capture,
+and local hardware fit. They are not closed-loop task-success measurements.
 
-## 2026-08-05 — prompt delivery and randomized generation audit
+## Matched WAM smoke
 
-A live interactive session was inspected after four task-4 rollouts. The command
-queue, client log, state, and per-attempt prompt timelines all agreed on the
-exact step-0 inputs: a `throw it` instruction, two `put it in the drawer`
-variants, and `close the drawer`. Results were one success followed by three
-failures. This confirms the edits reached the client model input; visually
-similar trajectories are policy behavior for novel LIBERO instructions, not the
-dashboard silently reusing the canonical text.
+The headless smoke profile ran Fast-WAM, Flex-π action-only, and Flex-π
+full-joint on the same deliberately short 20-action LIBERO task. All three
+episodes ended before success as expected; the measurements validate the
+benchmark wiring and deployment-cost instrumentation.
 
-The next-run instrumentation now records every synchronous request in
-`inference-audit.jsonl`, including the exact prompt and SHA-256 digests of both
-the prompt and returned action chunk. The dashboard displays the acknowledged
-prompt digest. A full validation session recorded 58 audited requests across
-three completed attempts. Its two scored attempts succeeded; the exploratory
-`Position the ramekin near the plate.` attempt also triggered the original
-LIBERO success condition, showing the policy's familiar-task fallback even
-though all 16 requests in that attempt carried the exploratory text. That
-attempt was correctly excluded, leaving a scored result of 2/2 and one
-unscored exploration.
+| Configuration | Server total | Denoise core | Round trip | Peak GPU memory |
+|---|---:|---:|---:|---:|
+| Fast-WAM | 1,784.3 ms | 378.9 ms | 1,824.6 ms | 14,319 MiB |
+| Flex-π action-only | 311.9 ms | 295.8 ms | 324.4 ms | 14,671 MiB |
+| Flex-π full-joint | 2,325.1 ms | 2,304.2 ms | 2,355.6 ms | 17,961 MiB |
 
-Random local generation was tested repeatedly with `gemma3:1b`. Accepted scored
-variations retain the ordered object/location/destination terms. Exploratory
-outputs included distinct commands such as `Pick up the ramekin`, `Position the
-ramekin near the plate`, and `Pick up the black bowl`; these are explicitly
-excluded from LIBERO success-rate denominators. After adding cue validation and
-a local-model fallback for repeated output, a final batch produced eight unique
-exploratory drafts in eight requests without an error.
+Only two timed calls were collected. These values must not replace publisher
+latency claims measured on different GPUs and optimized serving stacks.
 
-## 2026-08-05 — local-LLM interactive workflow
+## Reproduce and review
 
-The revised three-step UI and combined GPU workflow were validated with Ollama
-`gemma3:1b` and the local π0.5 checkpoint:
+- [π0.5 RoboCasa validation](../docs/validation/robocasa-pi05.md)
+- [GR00T N1.5 RoboCasa validation](../docs/validation/groot-n1.5-robocasa.md)
+- [Fast-WAM LIBERO validation](../docs/validation/fastwam-libero.md)
+- [Flex-π LIBERO validation](../docs/validation/flexpi-libero.md)
+- [Matched Fast-WAM/Flex-π protocol](../docs/benchmarks/fastwam-flexpi-libero.md)
 
-- the simulator remained idle until an explicit **Start a fresh scored rollout**
-  action;
-- the dashboard generated `Pick up the black bowl and place it on the plate.`
-  locally through `127.0.0.1:11434`;
-- the generated prompt was recorded with source `local_llm`;
-- the resulting task-0 rollout completed successfully: **1/1**;
-- warm median π0.5 inference: approximately **135 ms** per action chunk;
-- combined peak GPU memory: **20,483 MiB**;
-- traced π0.5/simulator network verdict: **`loopback_only`**.
-
-Launch ordering was also tested: the runner unloads an already-resident Ollama
-model before π0.5 checkpoint restoration, then allows the small prompt model to
-load on demand. This avoids JAX checkpoint-load memory pressure on the 24 GB GPU.
-
-## 2026-08-05 — interactive prompt/reset validation
-
-The persistent browser-controlled workflow was exercised through its HTTP
-control path with the real local checkpoint and simulator:
-
-- canonical task-0 rollout: **success**;
-- typed paraphrase followed by an interactive reset: **success**;
-- completed-attempt success rate: **2/2 (100%)**;
-- task switching and clean session stop: verified;
-- warm mean inference: approximately **127 ms** per action chunk;
-- peak observed GPU memory: **19,098 MiB**;
-- network audit: **`loopback_only`**, with only `127.0.0.1:8000` observed;
-- local-LLM adapter: enabled/disabled behavior and non-loopback URL rejection
-  verified against a temporary local test endpoint.
-
-This is an integration validation, not a statistically meaningful prompt
-robustness result. Run many seeded attempts before comparing prompt variants.
-
-## 2026-08-05 — instrumented local showcase
-
-The browser-console workflow was validated on `libero_spatial` task 1 with the
-cached official checkpoint:
-
-- result: **1/1 successful episode**;
-- runtime: local JAX/CUDA on the RTX PRO 5000 Blackwell Laptop GPU;
-- warm median action-chunk inference: approximately **132 ms**;
-- warm p95 action-chunk inference: approximately **141 ms**;
-- peak observed GPU memory: **19,096 MiB**;
-- peak observed GPU utilization: **94%**;
-- network audit: **`loopback_only`**;
-- observed IP destination: `127.0.0.1:8000`;
-- observed remote IP destinations: **none**.
-
-The instrumented runner completed successfully and generated its Markdown/JSON
-report, raw syscall traces, GPU telemetry, dashboard state, and MP4 rollout.
-
-## 2026-08-05 — RTX PRO 5000 Blackwell Laptop GPU
-
-- Source revision: `15a9616a00943ada6c20a0f158e3adb39df2ccac`
-- Model: official `pi05_libero` checkpoint
-- Suite: `libero_spatial`
-- Seed: `7`
-- Trials: one per task, 10 total
-- Result: **10/10 successful episodes (100%)**
-- Evaluator time: **1 minute 13 seconds** after server readiness
-- Peak observed GPU memory: **19,098 MiB**
-- Peak observed GPU utilization: **99%**
-- Peak observed GPU power: **93.35 W**
-- Generated rollouts: 10 MP4 files, all marked `success`
-- Client exit status: `0`
-
-The first episode includes JAX compilation and took approximately 16 seconds;
-later episodes generally completed in roughly 4–6 seconds. This is a functional
-smoke test, not a statistically meaningful success-rate benchmark.
-
-The pinned robosuite/MuJoCo environment emitted `EGL_NOT_INITIALIZED` while
-destroying the rendering context after evaluation. This occurred after all
-videos and results were written and did not change the successful exit status.
-
-## Local artifacts
-
-Run `scripts/run_smoke_test.sh` to generate a new local result. The runner retains:
-
-- policy-server and simulator logs under `logs/`;
-- one-second GPU telemetry under `logs/`;
-- MP4 rollouts under `videos/<task-suite>/`.
-
-These artifacts are intentionally ignored because logs contain machine-specific
-paths and videos can grow large. Add a dated, sanitized summary here when
-publishing additional results.
+Generate a fresh local session with `./lab` or the commands in the linked
+validation documents. Publish a new result only with its task IDs, seeds,
+trial count, revisions, checkpoint identity, hardware, and interpretation
+boundary.

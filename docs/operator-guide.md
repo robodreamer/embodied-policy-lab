@@ -26,17 +26,13 @@ learned predictors are intentionally kept out of the registry and default
 dependency set. See [the world-model guide](world-model-plugins.md).
 
 The policy adapter boundary is documented in
-[the model-plugin guide](model-plugins.md). RoboCasa implementation and
-validation history remains in [the development notes](robocasa-backend.md),
-with GR00T-specific setup and measured results in
-[the N1.5 notes](groot-n1.5.md). The bounded Fast-WAM integration and its
-validation gates are documented in
-[the dated Fast-WAM experiment note](../notes/2026-08-19-fastwam-libero-validation.md).
-The stacked Flex-π experiment, exact depth/camera contract, and validation
-gates are in
-[the Flex-π world-action note](../notes/2026-08-24-flexpi-libero-world-action-validation.md).
-The matched headless evaluation protocol and its claim boundaries are in
-[the Fast-WAM/Flex-π benchmark note](../notes/2026-08-24-fastwam-flexpi-headless-libero-benchmark.md).
+[the model-plugin guide](model-plugins.md). The public validation record covers
+[π0.5 on RoboCasa](validation/robocasa-pi05.md),
+[GR00T N1.5 on RoboCasa](validation/groot-n1.5-robocasa.md),
+[Fast-WAM on LIBERO](validation/fastwam-libero.md), and
+[Flex-π on LIBERO](validation/flexpi-libero.md). The matched headless evaluation
+protocol and its claim boundaries are in the
+[Fast-WAM/Flex-π benchmark](benchmarks/fastwam-flexpi-libero.md).
 
 Quick RoboCasa checks:
 

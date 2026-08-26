@@ -105,7 +105,7 @@ shares the Flex-π LIBERO/MuJoCo 3.3.2 simulator runtime across both policies,
 freezes task IDs, seeds, 10-action replanning, and suite budgets, and reports
 success confidence intervals, warm batch-1 latency, and peak VRAM. Details and
 claim limits are in
-[the dated benchmark note](../notes/2026-08-24-fastwam-flexpi-headless-libero-benchmark.md).
+[the benchmark protocol](benchmarks/fastwam-flexpi-libero.md).
 
 ## Adding another model
 
@@ -135,8 +135,8 @@ optimizer/trainer state. It creates `upstream-robocasa-groot/.venv` with Python
 3.12, CUDA 12.8 PyTorch, and a prebuilt FlashAttention wheel compatible with
 this workstation's Blackwell GPU.
 
-See [the GR00T N1.5 notes](groot-n1.5.md) for pinned sources, packaging choices,
-and the latest measured local validation.
+See [the GR00T N1.5 validation](validation/groot-n1.5-robocasa.md) for pinned
+sources, packaging choices, and the latest measured local validation.
 
 Then use the normal interactive or batch CLI:
 
