@@ -17,9 +17,10 @@ robotics embodied-ai vision-language-action world-action-model
 libero robocasa mujoco reproducible-research
 ```
 
-Upload [`assets/social-preview.png`](assets/social-preview.png) in
-**Settings → General → Social preview**. It is already 1280×640 for clean
-link cards on GitHub, X, and LinkedIn.
+Upload [`assets/studio-overview.png`](assets/studio-overview.png) in
+**Settings → General → Social preview**. The current product capture is a
+near-2:1 image that keeps the studio identity, active model, task controls, and
+local-runtime status legible on GitHub, X, and LinkedIn.
 
 ## Before changing visibility
 
