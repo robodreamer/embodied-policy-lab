@@ -10,6 +10,7 @@ avoids translating it into the unrelated LIBERO HTTP schema.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime
 import hashlib
 import importlib
@@ -19,13 +20,14 @@ import os
 import pathlib
 import subprocess
 import sys
+import threading
 import time
+import warnings
 from typing import Any
 
 import numpy as np
 import yaml
 from PIL import Image
-
 
 CAMERA_FILES = {
     "head_camera": "external.jpg",
@@ -68,12 +70,14 @@ class LiveState:
     def __init__(self, session_dir: pathlib.Path, initial: dict[str, Any]):
         self.path = session_dir / "state.json"
         self.data = dict(initial)
+        self.lock = threading.Lock()
         self.update()
 
     def update(self, **values: Any) -> None:
-        self.data.update(values)
-        self.data["updated_at"] = timestamp()
-        atomic_json(self.path, self.data)
+        with self.lock:
+            self.data.update(values)
+            self.data["updated_at"] = timestamp()
+            atomic_json(self.path, self.data)
 
 
 class ControlInbox:
@@ -191,10 +195,21 @@ def camera_frames(observation: dict[str, Any]) -> dict[str, np.ndarray]:
 def load_policy(args: argparse.Namespace, state: LiveState):
     policy_name = "fastwam_policy" if args.model == "fastwam" else "flexpi_policy"
     deploy = args.model_root / "experiments" / "robotwin" / policy_name / "deploy_policy.py"
+    startup_note = (
+        "typically 80–100 seconds on this workstation"
+        if args.model == "flexpi"
+        else "this cold load runs once per studio session"
+    )
     state.update(
         command_message=(
-            f"Loading {args.model_display_name} checkpoint in the isolated RoboTwin runtime"
-        )
+            f"Loading {args.model_display_name} checkpoint · {startup_note}; "
+            "the model remains resident afterward"
+        ),
+        checkpoint_io_mode=(
+            "memory-mapped weights-only"
+            if args.model == "flexpi"
+            else "publisher default"
+        ),
     )
     module = load_module(deploy, f"embodied_lab_{policy_name}")
     joint = args.flexpi_mode == "full-joint"
@@ -218,9 +233,90 @@ def load_policy(args: argparse.Namespace, state: LiveState):
             infer_joint_pointmap=joint,
         )
     started = time.perf_counter()
-    policy = module.get_model(policy_args)
-    state.update(cold_inference_latency_ms=round((time.perf_counter() - started) * 1000, 2))
+    checkpoint_context = (
+        memory_mapped_checkpoint(args.checkpoint)
+        if args.model == "flexpi"
+        else contextlib.nullcontext()
+    )
+    with (
+        startup_progress(state, args.model_display_name, startup_note, started),
+        checkpoint_context,
+    ):
+        policy = module.get_model(policy_args)
+    elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
+    state.update(
+        cold_inference_latency_ms=elapsed_ms,
+        model_load_latency_ms=elapsed_ms,
+        startup_elapsed_seconds=round(elapsed_ms / 1000, 1),
+    )
     return module, policy
+
+
+@contextlib.contextmanager
+def startup_progress(
+    state: LiveState, model_display_name: str, startup_note: str, started: float
+):
+    """Keep the browser explicit about a healthy but lengthy cold model load."""
+    stopped = threading.Event()
+
+    def report() -> None:
+        while not stopped.wait(5):
+            elapsed = round(time.perf_counter() - started, 1)
+            state.update(
+                startup_elapsed_seconds=elapsed,
+                command_message=(
+                    f"Loading {model_display_name} checkpoint · {elapsed:.0f}s elapsed "
+                    f"({startup_note}); the model remains resident afterward"
+                ),
+            )
+
+    reporter = threading.Thread(target=report, daemon=True)
+    reporter.start()
+    try:
+        yield
+    finally:
+        stopped.set()
+        reporter.join(timeout=1)
+
+
+@contextlib.contextmanager
+def memory_mapped_checkpoint(checkpoint: pathlib.Path):
+    """Avoid an eager second CPU copy while loading the verified release file."""
+    import torch
+
+    checkpoint = checkpoint.resolve()
+    original_load = torch.load
+
+    def optimized_load(path, *args, **kwargs):
+        try:
+            is_checkpoint = pathlib.Path(path).resolve() == checkpoint
+        except TypeError:
+            is_checkpoint = False
+        if is_checkpoint:
+            kwargs.setdefault("mmap", True)
+            kwargs.setdefault("weights_only", True)
+        return original_load(path, *args, **kwargs)
+
+    torch.load = optimized_load
+    try:
+        yield
+    finally:
+        torch.load = original_load
+
+
+def preflight_simulator(robotwin_root: pathlib.Path, state: LiveState) -> None:
+    """Import RoboTwin/SAPIEN before the expensive policy checkpoint load."""
+    state.update(command_message="Checking the isolated RoboTwin/SAPIEN runtime")
+    sys.path.insert(0, str(robotwin_root))
+    sys.path.insert(0, str(robotwin_root / "description" / "utils"))
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="pkg_resources is deprecated as an API.*",
+            category=UserWarning,
+            module="sapien",
+        )
+        from envs.utils.create_actor import UnStableError  # noqa: F401
 
 
 def set_flexpi_mode(policy: Any, mode: str) -> None:
@@ -429,6 +525,7 @@ def run(args: argparse.Namespace) -> None:
         },
     )
 
+    preflight_simulator(args.robotwin_root, state)
     module, policy = load_policy(args, state)
     inbox = ControlInbox(args.session_dir)
     history: list[dict[str, Any]] = []

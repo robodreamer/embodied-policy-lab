@@ -106,6 +106,12 @@ launcher preserves the upstream inference preset that skips unnecessary Wan
 and ActionDiT training-base initialization. The runtime checkpoint is a hard
 link, not a second 12 GB copy.
 
+The first Flex-π load still takes roughly 80–100 seconds on the validation
+workstation. The studio reports elapsed startup time, memory-maps the verified
+checkpoint to avoid an eager second CPU copy, and keeps the loaded model
+resident across task changes and rollouts. A missing simulator dependency is
+checked before this heavyweight load begins.
+
 You can preselect part of the configuration and let the picker fill the rest,
 or bypass it entirely:
 

@@ -112,6 +112,26 @@ def test_flexpi_robotwin_launch_uses_complete_checkpoint_without_training_bases(
     assert "prepare_flexpi_inference_release.py" in batch
 
 
+def test_robotwin_launch_fails_fast_and_memory_maps_the_release_checkpoint():
+    project = Path(__file__).resolve().parents[1]
+    adapter = (project / "showcase/interactive_robotwin.py").read_text(
+        encoding="utf-8"
+    )
+    setup = (project / "scripts/setup_robotwin.sh").read_text(encoding="utf-8")
+    studio = (project / "scripts/run_robotwin_studio.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'SETUPTOOLS_VERSION="80.10.2"' in setup
+    assert "import pkg_resources, sapien" in setup
+    assert "preflight_simulator(args.robotwin_root, state)" in adapter
+    assert "startup_progress(state, args.model_display_name, startup_note, started)" in adapter
+    assert '"memory-mapped weights-only"' in adapter
+    assert 'kwargs.setdefault("mmap", True)' in adapter
+    assert 'kwargs.setdefault("weights_only", True)' in adapter
+    assert "import pkg_resources, sapien" in studio
+
+
 def test_robotwin_studio_preserves_three_distinct_camera_routes():
     assert CAMERA_FILES == {
         "head_camera": "external.jpg",

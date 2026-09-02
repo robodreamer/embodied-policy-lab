@@ -123,7 +123,6 @@ for required in "$runtime_python" "$entrypoint" "$checkpoint" "$statistics" \
   "$robotwin_root/assets/embodiments"; do
   [[ -e "$required" ]] || die "missing prerequisite: $required (run scripts/setup_robotwin.sh --check)"
 done
-
 run_stamp="$(date +%Y%m%d-%H%M%S)"
 output_hint="$model_root/evaluate_results/robotwin/$output_tag/$run_stamp"
 runtime_checkpoint="$checkpoint"
@@ -170,6 +169,10 @@ printf '\n'
 if [[ "$dry_run" == "1" ]]; then
   exit 0
 fi
+
+"$runtime_python" -W ignore::UserWarning -c "import pkg_resources, sapien" \
+  >/dev/null 2>&1 \
+  || die "RoboTwin SAPIEN runtime is incompatible; rerun scripts/setup_robotwin.sh --model $model"
 
 if [[ "$model" == "flexpi" ]]; then
   prepared_checkpoint="$(

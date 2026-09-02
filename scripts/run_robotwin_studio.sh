@@ -133,7 +133,6 @@ for required in "$runtime_python" "$checkpoint" "$statistics" \
   "$robotwin_root/envs/$task.py" "$robotwin_root/assets/embodiments"; do
   [[ -e "$required" ]] || die "missing prerequisite: $required (run scripts/setup_robotwin.sh --check)"
 done
-
 session_dir="${session_dir:-$PROJECT_DIR/showcase-runs/$(date +%Y%m%d-%H%M%S)-robotwin}"
 runtime_checkpoint="$checkpoint"
 if [[ "$model" == "flexpi" ]]; then
@@ -166,6 +165,10 @@ printf 'Command:'
 printf ' %q' "${runner[@]}"
 printf '\n'
 [[ "$dry_run" == "1" ]] && exit 0
+
+"$runtime_python" -W ignore::UserWarning -c "import pkg_resources, sapien" \
+  >/dev/null 2>&1 \
+  || die "RoboTwin SAPIEN runtime is incompatible; rerun scripts/setup_robotwin.sh --model $model"
 
 command -v ffmpeg >/dev/null 2>&1 || die "ffmpeg is required for rollout artifacts"
 command -v nvidia-smi >/dev/null 2>&1 || die "nvidia-smi is required for local GPU telemetry"

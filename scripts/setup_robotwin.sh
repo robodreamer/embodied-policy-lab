@@ -12,6 +12,7 @@ CUROBO_REVISION="8e734f3ced1df898990bcd92de40abce475907db"
 PYTORCH3D_REVISION="75ebeeaea0908c5527e7b1e305fbc7681382db47"
 FASTWAM_HF_REVISION="8eaceeb24c3cc92ff2a9c9a9d266a4941b836705"
 FLEXPI_HF_REVISION="87d3833ea3bd89c4922945631db81b346e780785"
+SETUPTOOLS_VERSION="80.10.2"
 
 FASTWAM_CHECKPOINT_SHA256="776475b22566a791854ecf31cf3b50f25e7d8d94c343132ec16eb94994aa9e63"
 ROBOTWIN_STATS_SHA256="7a02c46cfc8c5e746c0afbe41fca73f723eda34cbc083f8ca54f76d8f7468095"
@@ -122,6 +123,20 @@ check_path() {
   fi
 }
 
+check_python_import() {
+  local description="$1" python="$2" modules="$3"
+  if [[ ! -x "$python" ]]; then
+    return
+  fi
+  if "$python" -W ignore::UserWarning -c "$modules" >/dev/null 2>&1; then
+    printf 'ok      %s\n' "$description"
+  else
+    printf 'broken  %s (rerun setup to repair the isolated runtime)\n' \
+      "$description" >&2
+    status=1
+  fi
+}
+
 verify_sha256() {
   local description="$1" path="$2" expected="$3" actual
   if [[ ! -f "$path" ]]; then
@@ -169,6 +184,8 @@ fi
 if [[ "$check_only" == "1" ]]; then
   if [[ -n "$FASTWAM_ROOT" ]]; then
     check_path "Fast-WAM RoboTwin runtime" "$FASTWAM_ROOT/.venv-robotwin/bin/python"
+    check_python_import "Fast-WAM SAPIEN compatibility" \
+      "$FASTWAM_ROOT/.venv-robotwin/bin/python" "import pkg_resources, sapien"
     check_path "Fast-WAM RoboTwin task config" "$FASTWAM_ROOT/third_party/RoboTwin/task_config/demo_clean.yml"
     check_path "Fast-WAM RoboTwin assets" "$FASTWAM_ROOT/third_party/RoboTwin/assets/embodiments"
     fast_ckpt="$FASTWAM_ROOT/checkpoints/fastwam_release/robotwin_uncond_3cam_384.pt"
@@ -180,6 +197,8 @@ if [[ "$check_only" == "1" ]]; then
   fi
   if [[ -n "$FLEXPI_ROOT" ]]; then
     check_path "Flex-π RoboTwin runtime" "$FLEXPI_ROOT/.venv-robotwin/bin/python"
+    check_python_import "Flex-π SAPIEN compatibility" \
+      "$FLEXPI_ROOT/.venv-robotwin/bin/python" "import pkg_resources, sapien"
     check_path "Flex-π RoboTwin task config" "$FLEXPI_ROOT/third_party/RoboTwin/task_config/demo_clean.yml"
     check_path "Flex-π RoboTwin assets" "$FLEXPI_ROOT/third_party/RoboTwin/assets/embodiments"
     flex_release="$FLEXPI_ROOT/runs/flexpi-robotwin"
@@ -271,6 +290,10 @@ install_model_runtime() {
   uv pip install --python "$python" --no-build-isolation \
     "git+https://github.com/facebookresearch/pytorch3d.git@$PYTORCH3D_REVISION"
   uv pip install --python "$python" --no-build-isolation -e "$ROBOTWIN_ROOT/envs/curobo"
+  # SAPIEN 3.0.0b1 still imports pkg_resources. Setuptools removed that module
+  # in v82, so keep the isolated simulator runtime on the final compatible
+  # release series until SAPIEN no longer requires it.
+  uv pip install --python "$python" "setuptools==$SETUPTOOLS_VERSION"
 
   "$python" - <<'PY'
 from importlib.metadata import distribution

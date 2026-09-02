@@ -119,6 +119,14 @@ session-local hard-linked checkpoint view with the inference overrides. No
 checkpoint bytes are copied, publisher files remain unchanged, and
 `inference-release.json` records the decision in the session evidence.
 
+On 2026-09-02, one local RTX PRO 5000 cold-load wiring check reached
+`awaiting_command` in 80.20 seconds with memory-mapped, weights-only checkpoint
+loading and used 13,424 MiB process VRAM. The immediately preceding eager-load
+check took 87.95 seconds. This single back-to-back observation is not a startup
+benchmark—filesystem cache state was uncontrolled—but it verifies the optimized
+path and removes the unnecessary eager CPU checkpoint copy. The model remains
+resident for subsequent tasks and rollouts in the same studio session.
+
 Each rollout intentionally keeps RoboTwin's upstream expert seed check and
 unseen-instruction generator. Preparation is therefore slower than merely
 resetting a scene, but the resulting score follows the native evaluator's seed
