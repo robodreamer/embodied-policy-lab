@@ -166,9 +166,10 @@ printf ' %q' "${runner[@]}"
 printf '\n'
 [[ "$dry_run" == "1" ]] && exit 0
 
-"$runtime_python" -W ignore::UserWarning -c "import pkg_resources, sapien" \
+"$runtime_python" -W ignore::UserWarning -c \
+  "from importlib.metadata import version; assert version('nvidia-curobo') == '0.7.8'; assert version('warp-lang') == '1.12.0'; import pkg_resources, sapien, warp as wp, curobo.types.math, curobo.types.robot; assert hasattr(wp, 'torch')" \
   >/dev/null 2>&1 \
-  || die "RoboTwin SAPIEN runtime is incompatible; rerun scripts/setup_robotwin.sh --model $model"
+  || die "RoboTwin simulator runtime is incompatible; rerun scripts/setup_robotwin.sh --model $model"
 
 command -v ffmpeg >/dev/null 2>&1 || die "ffmpeg is required for rollout artifacts"
 command -v nvidia-smi >/dev/null 2>&1 || die "nvidia-smi is required for local GPU telemetry"

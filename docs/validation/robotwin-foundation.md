@@ -24,13 +24,21 @@ silently replace the shared `cv2` files. The lab therefore creates
 | RoboTwin stable `release` tag | `bf44be51cf5717a5595ce59447f2cf5263d2aa95` | simulator/task contract used by both released model evaluators |
 | Fast-WAM | `45d8e1458921d83f8ad6cf9ce993d371208dabd0` | native RoboTwin action evaluator |
 | Flex-π | `20c1b2b71ea35a415d5d47c39b04443cfadad7a1` | native selectable action-only/full-joint evaluator |
-| Curobo | `8e734f3ced1df898990bcd92de40abce475907db` | motion-planning dependency used by scene initialization/expert seed checks |
+| cuRobo v0.7.8 | `d64c4b005459db10c5dd867d8b30a87d5bda9bdb` | v1 motion-planning API used by scene initialization/expert seed checks |
+| Warp 1.12.0 | PyPI release | final compatibility namespace used by cuRobo v0.7.8 |
 | PyTorch3D stable | `75ebeeaea0908c5527e7b1e305fbc7681382db47` | RoboTwin geometry dependency |
 
 RoboTwin's newer `main` branch is not substituted here. The model repositories
 vendor the stable release contract and their published checkpoints were built
 for it. Migrating to the newer XPolicyLab path is a separate compatibility and
 benchmark project.
+
+The cuRobo pin is deliberately v0.7.8. cuRoboV2 reorganized its public API and
+does not provide the `curobo.types.math` package imported by this RoboTwin
+release. Setup safely switches an existing clean dependency checkout to the
+pinned v1 revision and refuses to overwrite local changes.
+Warp is also pinned because 1.13 removed the deprecated `warp.torch` namespace
+that cuRobo v0.7.8 still calls when constructing its mesh collision world.
 
 The Fast-WAM revision omits the upstream `task_config/` directory from its
 vendored copy. Setup fills that missing untracked runtime input from the exact

@@ -94,6 +94,11 @@ clean or randomized phase:
 Keep RoboTwin's `.venv-robotwin` runtimes separate from both models' LIBERO
 `.venv` directories. Details, expected storage, exact revisions, and claim
 boundaries are in the [RoboTwin foundation note](validation/robotwin-foundation.md).
+cuRobo v0.7.8 builds CUDA extensions once during setup. If a matching system
+`nvcc` is unavailable, setup can use Pixi's cached NVIDIA CUDA 12.8 compiler;
+this compiler is not needed during normal studio startup. The isolated runtime
+also pins `warp-lang==1.12.0`, the final release that retains the legacy
+`warp.torch` namespace used by cuRobo v0.7.8.
 The interactive dashboard opens before checkpoint loading finishes and exposes
 the head, left-wrist, and right-wrist views separately. Starting a rollout runs
 the same expert-valid seed check and unseen-instruction generation as the

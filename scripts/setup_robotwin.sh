@@ -8,11 +8,14 @@ PROJECT_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 ROBOTWIN_REVISION="bf44be51cf5717a5595ce59447f2cf5263d2aa95"
 FASTWAM_REVISION="45d8e1458921d83f8ad6cf9ce993d371208dabd0"
 FLEXPI_REVISION="20c1b2b71ea35a415d5d47c39b04443cfadad7a1"
-CUROBO_REVISION="8e734f3ced1df898990bcd92de40abce475907db"
+CUROBO_REF="v0.7.8"
+CUROBO_REVISION="d64c4b005459db10c5dd867d8b30a87d5bda9bdb"
 PYTORCH3D_REVISION="75ebeeaea0908c5527e7b1e305fbc7681382db47"
 FASTWAM_HF_REVISION="8eaceeb24c3cc92ff2a9c9a9d266a4941b836705"
 FLEXPI_HF_REVISION="87d3833ea3bd89c4922945631db81b346e780785"
 SETUPTOOLS_VERSION="80.10.2"
+CUDA_COMPILER_VERSION="12.8"
+WARP_VERSION="1.12.0"
 
 FASTWAM_CHECKPOINT_SHA256="776475b22566a791854ecf31cf3b50f25e7d8d94c343132ec16eb94994aa9e63"
 ROBOTWIN_STATS_SHA256="7a02c46cfc8c5e746c0afbe41fca73f723eda34cbc083f8ca54f76d8f7468095"
@@ -185,7 +188,8 @@ if [[ "$check_only" == "1" ]]; then
   if [[ -n "$FASTWAM_ROOT" ]]; then
     check_path "Fast-WAM RoboTwin runtime" "$FASTWAM_ROOT/.venv-robotwin/bin/python"
     check_python_import "Fast-WAM SAPIEN compatibility" \
-      "$FASTWAM_ROOT/.venv-robotwin/bin/python" "import pkg_resources, sapien"
+      "$FASTWAM_ROOT/.venv-robotwin/bin/python" \
+      "from importlib.metadata import version; assert version('nvidia-curobo') == '0.7.8'; assert version('warp-lang') == '$WARP_VERSION'; import pkg_resources, sapien, warp as wp, curobo.types.math, curobo.types.robot; assert hasattr(wp, 'torch')"
     check_path "Fast-WAM RoboTwin task config" "$FASTWAM_ROOT/third_party/RoboTwin/task_config/demo_clean.yml"
     check_path "Fast-WAM RoboTwin assets" "$FASTWAM_ROOT/third_party/RoboTwin/assets/embodiments"
     fast_ckpt="$FASTWAM_ROOT/checkpoints/fastwam_release/robotwin_uncond_3cam_384.pt"
@@ -198,7 +202,8 @@ if [[ "$check_only" == "1" ]]; then
   if [[ -n "$FLEXPI_ROOT" ]]; then
     check_path "Flex-π RoboTwin runtime" "$FLEXPI_ROOT/.venv-robotwin/bin/python"
     check_python_import "Flex-π SAPIEN compatibility" \
-      "$FLEXPI_ROOT/.venv-robotwin/bin/python" "import pkg_resources, sapien"
+      "$FLEXPI_ROOT/.venv-robotwin/bin/python" \
+      "from importlib.metadata import version; assert version('nvidia-curobo') == '0.7.8'; assert version('warp-lang') == '$WARP_VERSION'; import pkg_resources, sapien, warp as wp, curobo.types.math, curobo.types.robot; assert hasattr(wp, 'torch')"
     check_path "Flex-π RoboTwin task config" "$FLEXPI_ROOT/third_party/RoboTwin/task_config/demo_clean.yml"
     check_path "Flex-π RoboTwin assets" "$FLEXPI_ROOT/third_party/RoboTwin/assets/embodiments"
     flex_release="$FLEXPI_ROOT/runs/flexpi-robotwin"
@@ -248,10 +253,17 @@ fi
 
 if [[ "$install_runtime" == "1" ]]; then
   if [[ ! -d "$ROBOTWIN_ROOT/envs/curobo/.git" ]]; then
-    git clone https://github.com/NVlabs/curobo.git "$ROBOTWIN_ROOT/envs/curobo"
-    git -C "$ROBOTWIN_ROOT/envs/curobo" checkout --detach "$CUROBO_REVISION"
+    git clone --branch "$CUROBO_REF" https://github.com/NVlabs/curobo.git \
+      "$ROBOTWIN_ROOT/envs/curobo"
   fi
   actual_curobo="$(git -C "$ROBOTWIN_ROOT/envs/curobo" rev-parse HEAD)"
+  if [[ "$actual_curobo" != "$CUROBO_REVISION" ]]; then
+    [[ -z "$(git -C "$ROBOTWIN_ROOT/envs/curobo" status --porcelain)" ]] \
+      || die "Curobo checkout has local changes; refusing to switch it to $CUROBO_REF"
+    git -C "$ROBOTWIN_ROOT/envs/curobo" fetch origin "refs/tags/$CUROBO_REF:refs/tags/$CUROBO_REF"
+    git -C "$ROBOTWIN_ROOT/envs/curobo" checkout --detach "$CUROBO_REVISION"
+    actual_curobo="$(git -C "$ROBOTWIN_ROOT/envs/curobo" rev-parse HEAD)"
+  fi
   [[ "$actual_curobo" == "$CUROBO_REVISION" ]] \
     || die "Curobo revision is $actual_curobo; expected $CUROBO_REVISION"
 fi
@@ -275,6 +287,34 @@ prepare_vendor() {
   fi
 }
 
+install_curobo_runtime() {
+  local python="$1" cuda_arch cuda_home nvcc_path uv_path
+  cuda_arch="$($python -c 'import torch; major, minor = torch.cuda.get_device_capability(); print(f"{major}.{minor}")')"
+  uv_path="$(command -v uv)"
+
+  if [[ -n "${CUDA_HOME:-}" && -x "$CUDA_HOME/bin/nvcc" ]]; then
+    CUDA_HOME="$CUDA_HOME" TORCH_CUDA_ARCH_LIST="$cuda_arch" \
+      uv pip install --python "$python" --no-build-isolation -e "$ROBOTWIN_ROOT/envs/curobo"
+    return
+  fi
+  nvcc_path="$(command -v nvcc || true)"
+  if [[ -n "$nvcc_path" ]]; then
+    cuda_home="$(cd "$(dirname "$nvcc_path")/.." && pwd)"
+    CUDA_HOME="$cuda_home" TORCH_CUDA_ARCH_LIST="$cuda_arch" \
+      uv pip install --python "$python" --no-build-isolation -e "$ROBOTWIN_ROOT/envs/curobo"
+    return
+  fi
+  command -v pixi >/dev/null 2>&1 \
+    || die "cuRobo v0.7.8 needs CUDA nvcc; install CUDA $CUDA_COMPILER_VERSION or Pixi"
+  pixi exec --spec "cuda-compiler=$CUDA_COMPILER_VERSION" \
+    --channel nvidia --channel conda-forge bash -c '
+      export CUDA_HOME="$CONDA_PREFIX/targets/x86_64-linux"
+      export PATH="$CONDA_PREFIX/nvvm/bin:$PATH"
+      export TORCH_CUDA_ARCH_LIST="$1"
+      exec "$2" pip install --python "$3" --no-build-isolation -e "$4"
+    ' bash "$cuda_arch" "$uv_path" "$python" "$ROBOTWIN_ROOT/envs/curobo"
+}
+
 install_model_runtime() {
   local model_root="$1"
   local python="$model_root/.venv-robotwin/bin/python"
@@ -286,10 +326,11 @@ install_model_runtime() {
   uv pip install --python "$python" \
     transforms3d==0.4.2 sapien==3.0.0b1 scipy==1.10.1 mplib==0.2.1 \
     gymnasium==0.29.1 trimesh==4.4.3 open3d==0.18.0 \
-    pydantic zarr h5py 'pyglet<2' moviepy termcolor av matplotlib ffmpeg
+    pydantic zarr h5py 'pyglet<2' moviepy termcolor av matplotlib ffmpeg \
+    "warp-lang==$WARP_VERSION"
   uv pip install --python "$python" --no-build-isolation \
     "git+https://github.com/facebookresearch/pytorch3d.git@$PYTORCH3D_REVISION"
-  uv pip install --python "$python" --no-build-isolation -e "$ROBOTWIN_ROOT/envs/curobo"
+  install_curobo_runtime "$python"
   # SAPIEN 3.0.0b1 still imports pkg_resources. Setuptools removed that module
   # in v82, so keep the isolated simulator runtime on the final compatible
   # release series until SAPIEN no longer requires it.

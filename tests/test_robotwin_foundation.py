@@ -66,6 +66,12 @@ def test_setup_pins_upstream_release_and_keeps_downloads_explicit():
     project = Path(__file__).resolve().parents[1]
     setup = (project / "scripts/setup_robotwin.sh").read_text(encoding="utf-8")
     assert 'ROBOTWIN_REVISION="bf44be51cf5717a5595ce59447f2cf5263d2aa95"' in setup
+    assert 'CUROBO_REF="v0.7.8"' in setup
+    assert 'CUROBO_REVISION="d64c4b005459db10c5dd867d8b30a87d5bda9bdb"' in setup
+    assert 'CUDA_COMPILER_VERSION="12.8"' in setup
+    assert 'WARP_VERSION="1.12.0"' in setup
+    assert '"warp-lang==$WARP_VERSION"' in setup
+    assert 'pixi exec --spec "cuda-compiler=$CUDA_COMPILER_VERSION"' in setup
     assert "--download-assets" in setup
     assert "--download-checkpoints" in setup
     assert "download_assets=0" in setup
@@ -124,12 +130,23 @@ def test_robotwin_launch_fails_fast_and_memory_maps_the_release_checkpoint():
 
     assert 'SETUPTOOLS_VERSION="80.10.2"' in setup
     assert "import pkg_resources, sapien" in setup
+    assert "curobo.types.math, curobo.types.robot" in setup
+    assert "version('warp-lang') == '$WARP_VERSION'" in setup
     assert "preflight_simulator(args.robotwin_root, state)" in adapter
+    assert "from envs.robot.planner import CuroboPlanner" in adapter
+    assert 'version("warp-lang") != "1.12.0"' in adapter
     assert "startup_progress(state, args.model_display_name, startup_note, started)" in adapter
     assert '"memory-mapped weights-only"' in adapter
     assert 'kwargs.setdefault("mmap", True)' in adapter
     assert 'kwargs.setdefault("weights_only", True)' in adapter
     assert "import pkg_resources, sapien" in studio
+
+
+def test_robotwin_smoke_honors_runtime_root_overrides():
+    project = Path(__file__).resolve().parents[1]
+    smoke = (project / "scripts/run_robotwin_smoke.sh").read_text(encoding="utf-8")
+    assert 'local override_name="$1" name="$2" candidate override=""' in smoke
+    assert 'override="${!override_name:-}"' in smoke
 
 
 def test_robotwin_studio_preserves_three_distinct_camera_routes():

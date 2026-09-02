@@ -307,6 +307,13 @@ def memory_mapped_checkpoint(checkpoint: pathlib.Path):
 def preflight_simulator(robotwin_root: pathlib.Path, state: LiveState) -> None:
     """Import RoboTwin/SAPIEN before the expensive policy checkpoint load."""
     state.update(command_message="Checking the isolated RoboTwin/SAPIEN runtime")
+    from importlib.metadata import version
+
+    if version("nvidia-curobo") != "0.7.8" or version("warp-lang") != "1.12.0":
+        raise RuntimeError(
+            "RoboTwin requires nvidia-curobo 0.7.8 with warp-lang 1.12.0; "
+            "rerun scripts/setup_robotwin.sh for this model"
+        )
     sys.path.insert(0, str(robotwin_root))
     sys.path.insert(0, str(robotwin_root / "description" / "utils"))
     with warnings.catch_warnings():
@@ -316,6 +323,14 @@ def preflight_simulator(robotwin_root: pathlib.Path, state: LiveState) -> None:
             category=UserWarning,
             module="sapien",
         )
+        import warp as wp
+
+        if not hasattr(wp, "torch"):
+            raise RuntimeError(
+                "The installed Warp release has no warp.torch compatibility API; "
+                "rerun scripts/setup_robotwin.sh for this model"
+            )
+        from envs.robot.planner import CuroboPlanner  # noqa: F401
         from envs.utils.create_actor import UnStableError  # noqa: F401
 
 

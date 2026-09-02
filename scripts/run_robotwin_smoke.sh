@@ -32,7 +32,8 @@ done
   || { echo "runtime model must be fastwam or flexpi" >&2; exit 2; }
 
 find_root() {
-  local override_name="$1" name="$2" candidate override="${!override_name:-}"
+  local override_name="$1" name="$2" candidate override=""
+  override="${!override_name:-}"
   if [[ -n "$override" ]]; then printf '%s\n' "$override"; return; fi
   for candidate in "$PROJECT_DIR/../$name" "$PROJECT_DIR/../../$name"; do
     if [[ -d "$candidate" ]]; then (cd "$candidate" && pwd); return; fi
