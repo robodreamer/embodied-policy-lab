@@ -205,31 +205,7 @@ export MODELSCOPE_DOWNLOAD_PARALLELS="${MODELSCOPE_DOWNLOAD_PARALLELS:-16}"
 mkdir -p "$DIFFSYNTH_MODEL_BASE_PATH"
 (
   cd "$FLEXPI_ROOT"
-  "$PYTHON" - <<'PY'
-import os
-from huggingface_hub import snapshot_download as hf_snapshot_download
-from modelscope import snapshot_download
-
-base = os.environ["DIFFSYNTH_MODEL_BASE_PATH"]
-for repository, pattern, revision in (
-    ("DiffSynth-Studio/Wan-Series-Converted-Safetensors", "Wan2.2_VAE.safetensors", "150f75d811d51f6c7760154aa7fec371dccda529"),
-    ("DiffSynth-Studio/Wan-Series-Converted-Safetensors", "models_t5_umt5-xxl-enc-bf16.safetensors", "c535be3126c57216d921514a58251608393589b2"),
-    ("Wan-AI/Wan2.1-T2V-1.3B", "google/umt5-xxl/*", "a5cc907bb8fb1fbc12125b6e52bb4b08e6342b25"),
-):
-    print(f"Warming pinned inference asset: {repository} / {pattern}", flush=True)
-    snapshot_download(
-        repository,
-        revision=revision,
-        local_dir=os.path.join(base, repository),
-        allow_file_pattern=pattern,
-    )
-
-hf_snapshot_download(
-    "timm/vit_base_patch16_dinov3.lvd1689m",
-    revision="c6a5fb7d12bbd3cf3b0079253141c3332aaed7da",
-)
-print("Required VAE, T5/tokenizer, and DINOv3 assets are ready.")
-PY
+  "$PYTHON" "$PROJECT_DIR/scripts/download_flexpi_assets.py"
 )
 
 LIBERO_CONFIG="$FLEXPI_ROOT/.libero-config"

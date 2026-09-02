@@ -71,6 +71,25 @@ def test_setup_pins_upstream_release_and_keeps_downloads_explicit():
     assert "download_checkpoints=0" in setup
 
 
+def test_flexpi_asset_downloader_uses_file_hashes_not_modelscope_file_revisions():
+    project = Path(__file__).resolve().parents[1]
+    downloader = (project / "scripts/download_flexpi_assets.py").read_text(
+        encoding="utf-8"
+    )
+    robotwin_setup = (project / "scripts/setup_robotwin.sh").read_text(
+        encoding="utf-8"
+    )
+    libero_setup = (project / "scripts/setup_flexpi_libero.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'revision="master"' in downloader
+    assert "0e913a2ca571c75fcb63385a8edadcca73454af5842596cb1ad11e4142590996" in downloader
+    assert "150f75d811d51f6c7760154aa7fec371dccda529" not in downloader
+    assert '"$flex_python" "$PROJECT_DIR/scripts/download_flexpi_assets.py"' in robotwin_setup
+    assert '"$PYTHON" "$PROJECT_DIR/scripts/download_flexpi_assets.py"' in libero_setup
+
+
 def test_robotwin_studio_preserves_three_distinct_camera_routes():
     assert CAMERA_FILES == {
         "head_camera": "external.jpg",
