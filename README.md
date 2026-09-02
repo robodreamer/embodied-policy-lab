@@ -13,7 +13,7 @@ are retained when the selected model exposes a generated future.
 [![CI](https://img.shields.io/github/actions/workflow/status/robodreamer/embodied-policy-lab/ci.yml?branch=main&label=CI)](https://github.com/robodreamer/embodied-policy-lab/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-4c6ef5.svg)](LICENSE)
 ![Status](https://img.shields.io/badge/status-research%20preview-f59f00.svg)
-![Simulators](https://img.shields.io/badge/sim-LIBERO%20%7C%20RoboCasa-7c3aed.svg)
+![Simulators](https://img.shields.io/badge/sim-LIBERO%20%7C%20RoboCasa%20%7C%20RoboTwin-7c3aed.svg)
 
 [Quick start](#quick-start) · [Model matrix](#model-matrix) ·
 [World-action replay](#see-the-future-next-to-the-rollout) ·
@@ -74,9 +74,9 @@ tradeoffs inspectable without confusing publisher results with local evidence.
 |---|---|---|---|---|
 | VLA | π0.5 | action chunks | LIBERO, RoboCasa | supported |
 | VLA | NVIDIA Isaac GR00T N1.5 | action chunks | RoboCasa | supported |
-| WAM | Fast-WAM | 32×7 action chunks | LIBERO | experimental |
-| WAM | Flex-π action-only | 32×7 action chunks | LIBERO | experimental |
-| WAM | Flex-π full-joint | actions + RGB/DINO/pointmap futures | LIBERO | experimental; default Flex-π mode |
+| WAM | Fast-WAM | 32×7 EEF or 32×14 qpos action chunks | LIBERO, RoboTwin 2.0 | experimental; RoboTwin is native batch-only |
+| WAM | Flex-π action-only | 32×7 EEF or 32×14 qpos action chunks | LIBERO, RoboTwin 2.0 | experimental; RoboTwin is native batch-only |
+| WAM | Flex-π full-joint | actions + RGB/DINO/pointmap futures | LIBERO, RoboTwin 2.0 | experimental; default Flex-π mode; RoboTwin is native batch-only |
 
 RoboCasa also exposes `robocasa-sim`, an optional deterministic simulator-oracle
 baseline. It replays action prefixes in a matched MuJoCo environment; it is not
@@ -120,6 +120,8 @@ written under `showcase-runs/<timestamp>/`.
 | Flex-π world + action | `./scripts/setup_flexpi_libero.sh` | `./lab --backend libero --model flexpi` |
 | Flex-π action-only | same as above | `./lab --backend libero --model flexpi --flexpi-mode action-only` |
 | GR00T N1.5 on RoboCasa | `ROBOCASA_DOWNLOAD_ASSETS=1 GROOT_DOWNLOAD_CHECKPOINT=1 ./scripts/setup_groot.sh` | `./lab --backend robocasa --model groot-n1.5` |
+| Fast-WAM on RoboTwin | `./scripts/setup_robotwin.sh --model fastwam --download-assets --download-checkpoints` | `./lab --backend robotwin --model fastwam --mode batch --default` |
+| Flex-π on RoboTwin | `./scripts/setup_robotwin.sh --model flexpi --download-assets --download-checkpoints` | `./lab --backend robotwin --model flexpi --mode batch --default` |
 
 The Fast-WAM and Flex-π setup scripts clone revision-checked sibling
 repositories and verify published assets. Re-run either with `--check` for a
@@ -133,6 +135,7 @@ non-mutating readiness check. Downloads are large; see
 ./lab                                  # fzf picker, or numbered fallback
 ./lab --policy-family vla              # only VLA profiles
 ./lab --policy-family wam              # Fast-WAM or Flex-π
+./lab --backend robotwin --model flexpi --mode batch --default
 ./lab --backend robocasa               # fill the remaining choices interactively
 ./lab --default --dry-run              # print the default command without running it
 ```
@@ -266,13 +269,15 @@ complete paper protocol. Read the
 ```mermaid
 flowchart LR
     UI[./lab + browser dashboard] --> REG[Compatibility registry]
-    REG --> SIM[LIBERO or RoboCasa]
+    REG --> SIM[LIBERO, RoboCasa, or RoboTwin]
     REG --> POLICY[Local policy server]
+    REG --> NATIVE[RoboTwin native batch evaluator]
     POLICY --> VLA[π0.5 / GR00T]
     POLICY --> WAM[Fast-WAM / Flex-π]
     SIM --> RUN[Closed-loop execution]
     VLA --> RUN
     WAM --> RUN
+    NATIVE --> RUN
     WAM -. generated future .-> ALIGN[Post-rollout alignment]
     RUN --> EVIDENCE[Video + metrics + hashes + telemetry]
     ALIGN --> EVIDENCE
@@ -293,8 +298,10 @@ Treat the figures below as planning guidance, not minimum guarantees.
 | π0.5 inference checkpoint | ~12 GB download |
 | First LIBERO/OpenPI cache | ~11.6 GiB |
 | RoboCasa assets | ~23 GB |
+| RoboTwin assets | ~16 GB, shared by the isolated Fast-WAM/Flex-π runtimes |
 | GR00T N1.5 inference checkpoint | ~7.6 GB |
 | Flex-π release checkpoint | ~12 GB, plus VAE/T5/DINO assets |
+| Fast-WAM RoboTwin release checkpoint | ~12 GB |
 | Flex-π action-only peak reservation | 13.24 GiB in the bounded local check |
 | Flex-π full-joint peak reservation | 16.45 GiB in the bounded local check |
 
@@ -317,6 +324,7 @@ camera presentation controls, and troubleshooting live in the
 | [GR00T N1.5 RoboCasa validation](docs/validation/groot-n1.5-robocasa.md) | pinned integration and bounded local evidence |
 | [Fast-WAM validation](docs/validation/fastwam-libero.md) | released-checkpoint boundary and bounded experiment |
 | [Flex-π validation](docs/validation/flexpi-libero.md) | full-joint implementation and measured local checks |
+| [RoboTwin foundation](docs/validation/robotwin-foundation.md) | 14D bimanual contract, isolated setup, model-free smoke, and native batch path |
 | [WAM benchmark](docs/benchmarks/fastwam-flexpi-libero.md) | headless protocol, provenance, and claims |
 | [Results](results/README.md) | sanitized publishable validation summaries |
 
@@ -350,8 +358,9 @@ This workbench integrates or evaluates projects from
 [RoboCasa](https://github.com/robocasa/robocasa),
 [NVIDIA Isaac GR00T](https://github.com/NVIDIA/Isaac-GR00T),
 [Fast-WAM](https://github.com/yuantianyuan01/FastWAM),
-[Flex-π](https://github.com/geyan21/flex-pi), and
-[LIBERO](https://github.com/Lifelong-Robot-Learning/LIBERO). Their papers,
+[Flex-π](https://github.com/geyan21/flex-pi),
+[LIBERO](https://github.com/Lifelong-Robot-Learning/LIBERO), and
+[RoboTwin](https://github.com/RoboTwin-Platform/RoboTwin). Their papers,
 checkpoints, and repositories remain the authoritative sources for model
 claims.
 

@@ -63,6 +63,15 @@ SIMULATORS = {
         ),
         task_collection="atomic_seen",
     ),
+    "robotwin": SimulatorSpec(
+        key="robotwin",
+        display_name="RoboTwin 2.0",
+        simulator="RoboTwin 2.0 / SAPIEN / Vulkan",
+        state_dimension=14,
+        action_dimension=14,
+        cameras=("head_camera", "left_camera", "right_camera"),
+        task_collection="demo_clean",
+    ),
 }
 
 
@@ -144,6 +153,22 @@ PROFILES = {
         ),
         action_horizon=16,
         default_replan_steps=16,
+    ),
+    ("robotwin", "fastwam"): ProfileSpec(
+        backend="robotwin",
+        policy="fastwam",
+        model_name="robotwin_uncond_3cam_384",
+        checkpoint="checkpoints/fastwam_release/robotwin_uncond_3cam_384.pt",
+        action_horizon=32,
+        default_replan_steps=24,
+    ),
+    ("robotwin", "flexpi"): ProfileSpec(
+        backend="robotwin",
+        policy="flexpi",
+        model_name="flexpi_robotwin_3cam_384",
+        checkpoint="runs/flexpi-robotwin/checkpoints/weights/step_048060.pt",
+        action_horizon=32,
+        default_replan_steps=32,
     ),
 }
 

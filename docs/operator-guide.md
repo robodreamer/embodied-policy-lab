@@ -15,6 +15,7 @@ matrix is:
 |---|---:|---:|---:|---:|
 | LIBERO | ✓ | experimental | experimental | — |
 | RoboCasa365 | ✓ | — | — | ✓ |
+| RoboTwin 2.0 | — | experimental, native batch | experimental, native batch | — |
 
 RoboCasa also has an independent predictor selector. Direct execution
 (`--world-model none`) is the default. The optional `robocasa-sim` choice is a
@@ -30,16 +31,19 @@ The policy adapter boundary is documented in
 [π0.5 on RoboCasa](validation/robocasa-pi05.md),
 [GR00T N1.5 on RoboCasa](validation/groot-n1.5-robocasa.md),
 [Fast-WAM on LIBERO](validation/fastwam-libero.md), and
-[Flex-π on LIBERO](validation/flexpi-libero.md). The matched headless evaluation
+[Flex-π on LIBERO](validation/flexpi-libero.md). The
+[RoboTwin foundation](validation/robotwin-foundation.md) records the separate
+14D SAPIEN/Vulkan path. The matched headless evaluation
 protocol and its claim boundaries are in the
 [Fast-WAM/Flex-π benchmark](benchmarks/fastwam-flexpi-libero.md).
 
-Quick RoboCasa checks:
+Quick simulator and policy checks:
 
 ```bash
 ./scripts/run_robocasa_smoke.sh         # simulator only
 ./scripts/run_robocasa_policy_smoke.sh  # one real local π0.5 request
 ./scripts/run_groot_policy_smoke.sh     # one real local GR00T N1.5 request
+./scripts/run_robotwin_smoke.sh         # RoboTwin reset/3-camera/14D qpos path
 ```
 
 Interactive and automatic RoboCasa rollouts use the original showcase scripts:
@@ -69,6 +73,24 @@ Interactive mode opens task 0 immediately; choose another task from the
 dashboard or pass `--task-id ID`. Batch mode asks for a task ID and trial count
 unless those values were supplied as flags.
 
+RoboTwin is the exception: its first integration deliberately uses each WAM's
+native batch evaluator while preserving the released three-camera, 14D qpos
+contract. It does not open the browser studio yet. A task is a snake_case name,
+and `--task-set` selects the clean or randomized phase:
+
+```bash
+./scripts/setup_robotwin.sh --model both --download-assets --download-checkpoints
+./scripts/setup_robotwin.sh --model both --check
+./lab --backend robotwin --model fastwam --mode batch \
+  --task-set demo_clean --task-id click_bell --trials 1 --default
+./lab --backend robotwin --model flexpi --flexpi-mode action-only --mode batch \
+  --task-set demo_randomized --task-id turn_switch --trials 1 --default
+```
+
+Keep RoboTwin's `.venv-robotwin` runtimes separate from both models' LIBERO
+`.venv` directories. Details, expected storage, exact revisions, and claim
+boundaries are in the [RoboTwin foundation note](validation/robotwin-foundation.md).
+
 You can preselect part of the configuration and let the picker fill the rest,
 or bypass it entirely:
 
@@ -81,10 +103,11 @@ or bypass it entirely:
 
 This repository is a reproducible local deployment of π0.5, experimental
 Fast-WAM and Flex-π, and NVIDIA Isaac GR00T N1.5 in the LIBERO and RoboCasa
-robot-manipulation simulators. It uses
-pinned upstream integrations, robosuite, MuJoCo, and the workstation's NVIDIA
-GPU. Simulation rendering is headless through EGL; each rollout is saved as an
-MP4 for inspection.
+robot-manipulation simulators, plus a native batch foundation for Fast-WAM and
+Flex-π in RoboTwin. It uses pinned upstream integrations, robosuite/MuJoCo or
+SAPIEN/Vulkan, and the workstation's NVIDIA GPU. MuJoCo rendering is headless
+through EGL; RoboTwin uses Vulkan. Native evaluators save rollout videos for
+inspection.
 
 The project is structured for publication: in-tree upstream integrations are
 pinned Git submodules. Fast-WAM and Flex-π use revision-checked sibling
@@ -99,9 +122,11 @@ weight-license and integrity details.
 - Pinned revisions: Git submodules, `UPSTREAM_COMMIT`, and Fast-WAM/Flex-π setup revision gates
 - Models: `pi05_libero`, experimental `fastwam_libero_uncond_2cam224` and
   `flexpi_libero_stream_dropout`,
-  `pi05_pretrain_human300`, and `gr00t_n1.5_robocasa365_120k`
+  `pi05_pretrain_human300`, `gr00t_n1.5_robocasa365_120k`,
+  `robotwin_uncond_3cam_384`, and `flexpi_robotwin_3cam_384`
 - Policy runtimes: isolated JAX/CUDA and PyTorch/CUDA environments
-- Simulator runtimes: Python 3.8 LIBERO, Python 3.11 RoboCasa/OpenPI, and Python 3.12 RoboCasa/GR00T
+- Simulator runtimes: Python 3.8 LIBERO, Python 3.11 RoboCasa/OpenPI,
+  Python 3.12 RoboCasa/GR00T, and isolated Python 3.10 RoboTwin WAM runtimes
 - Terminal-picker default: RoboCasa + π0.5; the legacy low-level CLI still defaults to LIBERO
 
 Initial LIBERO validation on August 5, 2026 completed all 10/10 smoke-test episodes.

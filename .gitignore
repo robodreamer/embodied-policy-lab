@@ -10,6 +10,7 @@ benchmark-runs/
 results/robocasa-smoke/
 results/robocasa-policy-smoke/
 results/groot-policy-smoke/
+results/robotwin-smoke/
 __pycache__/
 *.py[cod]
 MUJOCO_LOG.TXT

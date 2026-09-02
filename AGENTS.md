@@ -56,11 +56,13 @@ Do not add a selector option only in HTML, shell text, or Markdown.
 - Preserve the released checkpoint's cameras, state ordering, image transforms,
   action ordering, horizon, normalization, and simulator version.
 - Never project LIBERO's fixed-arm 7D contract onto RoboCasa's
-  mobile-manipulator 12D contract. Add an explicit adapter/profile instead.
+  mobile-manipulator 12D or RoboTwin's bimanual 14D qpos contract. Add an
+  explicit adapter/profile instead.
 - Valid public pairings are currently π0.5 with LIBERO or RoboCasa, Fast-WAM
-  with LIBERO, Flex-π with LIBERO, and GR00T N1.5 with RoboCasa. Update the
-  registry, tests, compatibility table, and operator guide together when this
-  changes.
+  with LIBERO or RoboTwin, Flex-π with LIBERO or RoboTwin, and GR00T N1.5 with
+  RoboCasa. RoboTwin WAM profiles are native batch-only until a shared studio
+  adapter exists. Update the registry, tests, compatibility table, and operator
+  guide together when this changes.
 - Keep heavyweight or conflicting CUDA/Python stacks in isolated runtimes.
   Import model-specific dependencies lazily and communicate through the
   existing local policy boundary.

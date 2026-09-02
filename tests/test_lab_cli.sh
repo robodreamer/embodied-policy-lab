@@ -9,6 +9,9 @@ grep -F "VLA     robocasa  groot-n1.5    action-only   ready" <<<"$list_output" 
 grep -F "WAM     libero    fastwam       action-only   experimental" <<<"$list_output" >/dev/null
 grep -F "WAM     libero    flexpi        full-joint    experimental" <<<"$list_output" >/dev/null
 grep -F "WAM     libero    flexpi        action-only   experimental" <<<"$list_output" >/dev/null
+grep -F "WAM     robotwin  fastwam       action-only   experimental" <<<"$list_output" >/dev/null
+grep -F "WAM     robotwin  flexpi        full-joint    experimental" <<<"$list_output" >/dev/null
+grep -F "WAM     robotwin  flexpi        action-only   experimental" <<<"$list_output" >/dev/null
 if grep -E 'dino-wm|jepa-wm' <<<"$list_output" >/dev/null; then
   echo "unsupported learned predictors must not appear in ./lab --list" >&2
   exit 1
@@ -75,6 +78,33 @@ wam_default_output="$("$PROJECT_DIR/lab" \
 grep -F "Experiment: WAM" <<<"$wam_default_output" >/dev/null
 grep -F "Simulator: libero" <<<"$wam_default_output" >/dev/null
 grep -F "Model: fastwam" <<<"$wam_default_output" >/dev/null
+
+robotwin_fastwam_output="$("$PROJECT_DIR/lab" \
+  --backend robotwin --model fastwam \
+  --task-set demo_clean --task-id click_bell --trials 2 --default --dry-run)"
+grep -F "Simulator: robotwin" <<<"$robotwin_fastwam_output" >/dev/null
+grep -F "Phase: demo_clean · task click_bell" <<<"$robotwin_fastwam_output" >/dev/null
+grep -F "run_robotwin_evaluation.sh --model fastwam --task click_bell --phase demo_clean --trials 2" \
+  <<<"$robotwin_fastwam_output" >/dev/null
+
+robotwin_flexpi_output="$("$PROJECT_DIR/lab" \
+  --backend robotwin --model flexpi --flexpi-mode action-only --mode batch \
+  --task-set demo_randomized --task-id turn_switch --default --dry-run)"
+grep -F "Flex-π inference: action-only" <<<"$robotwin_flexpi_output" >/dev/null
+grep -F "run_robotwin_evaluation.sh --model flexpi --task turn_switch --phase demo_randomized --trials 1 --flexpi-mode action-only" \
+  <<<"$robotwin_flexpi_output" >/dev/null
+
+if "$PROJECT_DIR/lab" --backend robotwin --model fastwam \
+  --mode interactive --default --dry-run >/dev/null 2>&1; then
+  echo "expected RoboTwin interactive mode to fail until the shared studio adapter exists" >&2
+  exit 1
+fi
+
+if "$PROJECT_DIR/lab" --backend robotwin --model pi05 \
+  --mode batch --default --dry-run >/dev/null 2>&1; then
+  echo "expected unvalidated RoboTwin + π0.5 profile to fail" >&2
+  exit 1
+fi
 
 if "$PROJECT_DIR/lab" --policy-family vla --backend libero --model flexpi \
   --default --dry-run >/dev/null 2>&1; then

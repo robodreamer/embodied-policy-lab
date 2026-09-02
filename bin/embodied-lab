@@ -20,13 +20,13 @@ Usage:
 
 Options:
   --policy-family NAME vla (default) or wam
-  --backend NAME       robocasa (default) or libero
+  --backend NAME       robocasa (default), libero, or robotwin
   --model NAME         pi05 (default), fastwam, flexpi, or groot-n1.5
   --flexpi-mode MODE   full-joint (default) or action-only
   --world-model NAME   none (default) or robocasa-sim oracle baseline
-  --mode MODE          interactive (default) or batch
+  --mode MODE          interactive (default) or batch (RoboTwin only supports batch)
   --task-set NAME      task collection (backend default when omitted)
-  --task-id ID         initial/batch task (interactive default: 0, no prompt)
+  --task-id ID         numeric task ID, or RoboTwin task name (default: click_bell)
   --trials COUNT       batch attempts (default: 1)
   --default            skip the picker and use missing defaults
   --dry-run            print the resolved command without running it
@@ -38,6 +38,7 @@ Examples:
   ./lab --default
   ./lab --policy-family wam
   ./lab --backend libero --model flexpi --flexpi-mode action-only --default
+  ./lab --backend robotwin --model flexpi --mode batch --task-id click_bell --default
   ./lab --backend robocasa --model groot-n1.5 --mode interactive --default
   ./lab --default --dry-run -- --dashboard-port 8086
 
@@ -56,6 +57,9 @@ VLA     libero    pi05          action-only   ready
 WAM     libero    fastwam       action-only   experimental / staged 24 GB profile
 WAM     libero    flexpi        full-joint    experimental / world-action co-generation (default)
 WAM     libero    flexpi        action-only   experimental / lower-compute action path
+WAM     robotwin  fastwam       action-only   experimental / native batch evaluation
+WAM     robotwin  flexpi        full-joint    experimental / native batch evaluation (default)
+WAM     robotwin  flexpi        action-only   experimental / native batch evaluation
 
 PREDICTOR / BASELINE  BACKEND    STATUS
 none                  any        ready / default direct execution
@@ -151,6 +155,9 @@ main() {
   if [[ -z "$policy_family" && "$backend" == "robocasa" ]]; then
     policy_family="vla"
   fi
+  if [[ -z "$policy_family" && "$backend" == "robotwin" ]]; then
+    policy_family="wam"
+  fi
   case "$model" in
     fastwam|flexpi) backend="${backend:-libero}" ;;
     groot-n1.5) backend="${backend:-robocasa}" ;;
@@ -161,8 +168,9 @@ main() {
       *) die "incompatible policy family/model: family=$policy_family model=$model (use --list)" ;;
     esac
   fi
-  if [[ "$policy_family" == "wam" && -n "$backend" && "$backend" != "libero" ]]; then
-    die "WAM experiments currently require --backend libero"
+  if [[ "$policy_family" == "wam" && -n "$backend" && \
+    "$backend" != "libero" && "$backend" != "robotwin" ]]; then
+    die "WAM experiments require --backend libero or robotwin"
   fi
 
   if [[ "$use_defaults" == "0" ]]; then
@@ -173,7 +181,10 @@ main() {
 
     if [[ -z "$backend" ]]; then
       if [[ "$policy_family" == "wam" ]]; then
-        backend="libero"
+        backend="$(pick_id \
+          "Choose a WAM simulator" \
+          $'libero\tLIBERO · interactive studio + matched local benchmark · recommended' \
+          $'robotwin\tRoboTwin 2.0 · bimanual SAPIEN benchmark · native batch foundation')" || return 1
       else
         backend="$(pick_id \
           "Choose a VLA simulator" \
@@ -218,10 +229,16 @@ main() {
       fi
     fi
 
-    mode="${mode:-$(pick_id \
-      "Choose run mode" \
-      $'interactive\tInteractive dashboard · change task/prompt and repeat' \
-      $'batch\tAutomatic batch · run selected task and exit')}" || return 1
+    if [[ -z "$mode" ]]; then
+      if [[ "$backend" == "robotwin" ]]; then
+        mode="batch"
+      else
+        mode="$(pick_id \
+          "Choose run mode" \
+          $'interactive\tInteractive dashboard · change task/prompt and repeat' \
+          $'batch\tAutomatic batch · run selected task and exit')" || return 1
+      fi
+    fi
 
     if [[ -z "$task_set" ]]; then
       if [[ "$backend" == "robocasa" ]]; then
@@ -230,6 +247,11 @@ main() {
           $'atomic_seen\tatomic_seen · 18 tasks · recommended' \
           $'composite_seen\tcomposite_seen · 16 multi-step tasks' \
           $'all_atomic_tasks\tall_atomic_tasks · 65 tasks')" || return 1
+      elif [[ "$backend" == "robotwin" ]]; then
+        task_set="$(pick_id \
+          "Choose RoboTwin evaluation phase" \
+          $'demo_clean\tdemo_clean · clean benchmark phase · recommended for first run' \
+          $'demo_randomized\tdemo_randomized · domain-randomized benchmark phase')" || return 1
       else
         if [[ "$model" == "flexpi" ]]; then
           task_set="$(pick_id \
@@ -251,7 +273,11 @@ main() {
     fi
     if [[ "$mode" == "batch" ]]; then
       if [[ "$task_id_set" == "0" ]]; then
-        task_id="$(read_value "Task ID to run: " "$task_id")" || return 1
+        if [[ "$backend" == "robotwin" ]]; then
+          task_id="$(read_value "RoboTwin task name to run: " "click_bell")" || return 1
+        else
+          task_id="$(read_value "Task ID to run: " "$task_id")" || return 1
+        fi
       fi
       if [[ "$trials_set" == "0" ]]; then
         trials="$(read_value "Trials for this task: " "$trials")" || return 1
@@ -272,9 +298,18 @@ main() {
     flexpi_mode=""
   fi
   world_model="${world_model:-none}"
-  mode="${mode:-interactive}"
+  if [[ -z "$mode" ]]; then
+    mode="$( [[ "$backend" == "robotwin" ]] && echo batch || echo interactive )"
+  fi
   if [[ -z "$task_set" ]]; then
-    task_set="$( [[ "$backend" == "robocasa" ]] && echo atomic_seen || echo libero_spatial )"
+    case "$backend" in
+      robocasa) task_set="atomic_seen" ;;
+      robotwin) task_set="demo_clean" ;;
+      *) task_set="libero_spatial" ;;
+    esac
+  fi
+  if [[ "$backend" == "robotwin" && "$task_id_set" == "0" ]]; then
+    task_id="click_bell"
   fi
 
   [[ "$policy_family" == "vla" || "$policy_family" == "wam" ]] \
@@ -283,48 +318,78 @@ main() {
     vla/pi05|vla/groot-n1.5|wam/fastwam|wam/flexpi) ;;
     *) die "incompatible policy family/model: family=$policy_family model=$model (use --list)" ;;
   esac
-  if [[ "$policy_family" == "wam" && "$backend" != "libero" ]]; then
-    die "WAM experiments currently require --backend libero"
+  if [[ "$policy_family" == "wam" && \
+    "$backend" != "libero" && "$backend" != "robotwin" ]]; then
+    die "WAM experiments require --backend libero or robotwin"
   fi
 
   case "$backend/$model" in
-    robocasa/pi05|robocasa/groot-n1.5|libero/pi05|libero/fastwam|libero/flexpi) ;;
+    robocasa/pi05|robocasa/groot-n1.5|libero/pi05|libero/fastwam|libero/flexpi|robotwin/fastwam|robotwin/flexpi) ;;
     *) die "incompatible profile: backend=$backend model=$model (use --list)" ;;
   esac
   case "$backend/$world_model" in
-    robocasa/robocasa-sim|robocasa/none|libero/none) ;;
+    robocasa/robocasa-sim|robocasa/none|libero/none|robotwin/none) ;;
     *) die "incompatible world model: backend=$backend world_model=$world_model (use --list)" ;;
   esac
   [[ "$mode" == "interactive" || "$mode" == "batch" ]] \
     || die "--mode must be interactive or batch"
+  if [[ "$backend" == "robotwin" && "$mode" != "batch" ]]; then
+    die "RoboTwin currently uses the upstream native batch evaluator; pass --mode batch"
+  fi
   if [[ "$model" == "flexpi" && \
     "$flexpi_mode" != "full-joint" && "$flexpi_mode" != "action-only" ]]; then
     die "--flexpi-mode must be full-joint or action-only"
   fi
-  [[ "$task_id" =~ ^[0-9]+$ ]] || die "--task-id must be a non-negative integer"
+  if [[ "$backend" == "robotwin" ]]; then
+    [[ "$task_set" == "demo_clean" || "$task_set" == "demo_randomized" ]] \
+      || die "RoboTwin --task-set must be demo_clean or demo_randomized"
+    [[ "$task_id" =~ ^[a-z0-9_]+$ ]] \
+      || die "RoboTwin --task-id must be a snake_case task name"
+  else
+    [[ "$task_id" =~ ^[0-9]+$ ]] || die "--task-id must be a non-negative integer"
+  fi
   [[ "$trials" =~ ^[1-9][0-9]*$ ]] || die "--trials must be a positive integer"
 
-  local launcher="$PROJECT_DIR/scripts/run_interactive_showcase.sh"
-  local -a command=(
-    "$launcher"
-    --backend "$backend"
-    --model "$model"
-    --world-model "$world_model"
-    --task-set "$task_set"
-    --task-id "$task_id"
-  )
-  if [[ "$model" == "flexpi" ]]; then
-    command+=(--flexpi-mode "$flexpi_mode")
-  fi
-  if [[ "$mode" == "batch" ]]; then
-    command[0]="$PROJECT_DIR/scripts/run_showcase.sh"
-    command+=(--batch --trials "$trials")
+  local -a command
+  if [[ "$backend" == "robotwin" ]]; then
+    command=(
+      "$PROJECT_DIR/scripts/run_robotwin_evaluation.sh"
+      --model "$model"
+      --task "$task_id"
+      --phase "$task_set"
+      --trials "$trials"
+    )
+    if [[ "$model" == "flexpi" ]]; then
+      command+=(--flexpi-mode "$flexpi_mode")
+    fi
+  else
+    local launcher="$PROJECT_DIR/scripts/run_interactive_showcase.sh"
+    command=(
+      "$launcher"
+      --backend "$backend"
+      --model "$model"
+      --world-model "$world_model"
+      --task-set "$task_set"
+      --task-id "$task_id"
+    )
+    if [[ "$model" == "flexpi" ]]; then
+      command+=(--flexpi-mode "$flexpi_mode")
+    fi
+    if [[ "$mode" == "batch" ]]; then
+      command[0]="$PROJECT_DIR/scripts/run_showcase.sh"
+      command+=(--batch --trials "$trials")
+    fi
   fi
   command+=("${extra_args[@]}")
 
   local rendered summary
   rendered="$(shell_command "${command[@]}")"
-  summary="Embodied Policy Lab\nExperiment: ${policy_family^^}\nSimulator: $backend\nPolicy Model: $model\nPredictor: $world_model\nMode: $mode\nTasks: $task_set · initial ID $task_id"
+  summary="Embodied Policy Lab\nExperiment: ${policy_family^^}\nSimulator: $backend\nPolicy Model: $model\nPredictor: $world_model\nMode: $mode"
+  if [[ "$backend" == "robotwin" ]]; then
+    summary+="\nPhase: $task_set · task $task_id"
+  else
+    summary+="\nTasks: $task_set · initial ID $task_id"
+  fi
   if [[ "$model" == "flexpi" ]]; then summary+="\nFlex-π inference: $flexpi_mode"; fi
   if [[ "$mode" == "batch" ]]; then summary+=" · $trials trial(s)"; fi
 
