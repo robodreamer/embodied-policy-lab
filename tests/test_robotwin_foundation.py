@@ -3,7 +3,14 @@ from pathlib import Path
 import pytest
 
 from showcase import backend_registry
-from showcase.interactive_robotwin import CAMERA_FILES, humanize_task, task_catalog
+from showcase.interactive_robotwin import (
+    CAMERA_FILES,
+    OBSERVER_FILE,
+    humanize_task,
+    task_catalog,
+    validate_expert_seed,
+)
+from showcase.robotwin_rendering import resolve_render_denoiser
 from showcase.robotwin_smoke import validate_observation
 
 
@@ -155,6 +162,40 @@ def test_robotwin_studio_preserves_three_distinct_camera_routes():
         "left_camera": "wrist.jpg",
         "right_camera": "right_wrist.jpg",
     }
+    assert OBSERVER_FILE == "observer.jpg"
+
+
+def test_robotwin_render_denoiser_accepts_explicit_compatible_modes():
+    assert resolve_render_denoiser("oidn") == "oidn"
+    assert resolve_render_denoiser("optix") == "optix"
+    assert resolve_render_denoiser("none") == "none"
+    with pytest.raises(ValueError, match="render denoiser"):
+        resolve_render_denoiser("broken")
+
+
+def test_robotwin_expert_seed_check_rejects_publisher_planner_error():
+    class BrokenExpert:
+        def play_once(self):
+            raise IndexError("list index out of range")
+
+    episode, rejection = validate_expert_seed(BrokenExpert())
+    assert episode is None
+    assert rejection == "IndexError: list index out of range"
+
+
+def test_robotwin_expert_seed_check_accepts_only_successful_plan():
+    class ValidExpert:
+        plan_success = True
+
+        def play_once(self):
+            return {"info": {"target": "bottle"}}
+
+        def check_success(self):
+            return True
+
+    episode, rejection = validate_expert_seed(ValidExpert())
+    assert episode == {"info": {"target": "bottle"}}
+    assert rejection is None
 
 
 def test_robotwin_studio_catalog_uses_named_tasks(tmp_path):
@@ -190,3 +231,18 @@ def test_dashboard_exposes_right_wrist_camera_route():
     app = (project / "showcase/static/app.js").read_text(encoding="utf-8")
     assert 'route == "/frames/right_wrist.jpg"' in server
     assert "/frames/right_wrist.jpg?t=" in app
+    assert 'route == "/frames/observer.jpg"' in server
+    assert "/frames/observer.jpg?t=" in app
+    assert 'id="observerCard"' in (
+        project / "showcase/static/index.html"
+    ).read_text(encoding="utf-8")
+
+
+def test_robotwin_expert_seed_failures_are_recorded():
+    project = Path(__file__).resolve().parents[1]
+    adapter = (project / "showcase/interactive_robotwin.py").read_text(
+        encoding="utf-8"
+    )
+    assert '"stage": "expert_validation"' in adapter
+    assert "expert_rejected_seeds=rejected_seeds" in adapter
+    assert "episode_info, rejection = validate_expert_seed(environment)" in adapter

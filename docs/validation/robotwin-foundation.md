@@ -87,6 +87,30 @@ writes JSON evidence:
 Evidence lands under `results/robotwin-smoke/<timestamp>/result.json`. A pass is
 a simulator/interface wiring check; it says nothing about policy success.
 
+### Blackwell rendering and the observer view
+
+The pinned SAPIEN wheel bundles Intel Open Image Denoise (OIDN) 2.0.1, and the
+RoboTwin release hard-codes that denoiser during scene setup. Its CUDA device
+can fail on Blackwell GPUs, producing repeated `OIDN Error: invalid handle`
+messages and visibly noisy or washed-out frames. The studio's `auto` mode keeps
+OIDN on older GPUs and redirects only CUDA capability 12.x and newer to SAPIEN's
+OptiX denoiser. Override the selection for diagnosis with:
+
+```bash
+./lab --backend robo_twin --model flexpi --default -- \
+  --render-denoiser optix
+```
+
+The resolved choice is shown in the launcher and recorded in `state.json`.
+`none` is available for renderer isolation, but produces an intentionally
+under-denoised ray-traced view and is not the recommended experiment setting.
+
+In addition to the released policy's head, left-wrist, and right-wrist inputs,
+the studio renders RoboTwin's built-in front observer camera. This fourth view
+shows both robots and the task surface for human progress monitoring. It is
+labelled **monitoring only**, saved separately as `frames/observer.jpg`, and is
+never inserted into the model observation or the three-camera policy contract.
+
 ## Run the browser studio
 
 The browser adapter keeps the policy and SAPIEN environment in one native
@@ -103,8 +127,9 @@ absolute 14D qpos actions into the unrelated LIBERO HTTP schema:
 ```
 
 The page is available while the checkpoint loads. Once ready, it offers all 50
-named tasks, live head/left-wrist/right-wrist RGB views, prompt and rollout
-controls, 14D action charts, GPU telemetry, and per-camera MP4 artifacts.
+named tasks, a front observer view, the live head/left-wrist/right-wrist policy
+RGB views, prompt and rollout controls, 14D action charts, GPU telemetry, and
+per-policy-camera MP4 artifacts.
 Flex-π's full-joint and action-only modes are switchable without reloading the
 checkpoint. The UI calls the policy link `IN-PROCESS NATIVE · LOCAL`; it does
 not claim a network policy service.
@@ -138,7 +163,18 @@ resident for subsequent tasks and rollouts in the same studio session.
 Each rollout intentionally keeps RoboTwin's upstream expert seed check and
 unseen-instruction generator. Preparation is therefore slower than merely
 resetting a scene, but the resulting score follows the native evaluator's seed
-validity and language path.
+validity and language path. Some task/seed combinations fail inside the
+publisher's expert planner—for example, an action waypoint list may be shorter
+than a task implementation assumes. As in RoboTwin's native evaluator, the
+studio records that seed under `expert_rejected_seeds`, closes the failed scene,
+and tries the next seed. Rejected expert seeds are preparation diagnostics and
+never count as policy attempts or failures. Errors during the actual policy
+rollout are not swallowed and still fail the session.
+
+On 2026-09-02, a bounded local preparation check reproduced
+`put_bottles_dustbin`'s `IndexError: list index out of range` at seed `400000`.
+The adapter retained that rejection and accepted seed `400001`, verifying the
+retry with the real pinned task rather than only a synthetic test double.
 
 ## Run one bounded native model evaluation
 

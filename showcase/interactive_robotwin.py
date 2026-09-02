@@ -34,6 +34,7 @@ CAMERA_FILES = {
     "left_camera": "wrist.jpg",
     "right_camera": "right_wrist.jpg",
 }
+OBSERVER_FILE = "observer.jpg"
 ACTION_LABELS = [
     "LEFT J1",
     "LEFT J2",
@@ -172,7 +173,11 @@ def task_catalog(robotwin_root: pathlib.Path) -> tuple[list[dict[str, Any]], dic
     return tasks, {str(task): int(limit) for task, limit in limits.items()}
 
 
-def write_frames(session_dir: pathlib.Path, observation: dict[str, Any]) -> None:
+def write_frames(
+    session_dir: pathlib.Path,
+    observation: dict[str, Any],
+    observer: np.ndarray | None = None,
+) -> None:
     frame_dir = session_dir / "frames"
     frame_dir.mkdir(parents=True, exist_ok=True)
     cameras = observation["observation"]
@@ -181,6 +186,13 @@ def write_frames(session_dir: pathlib.Path, observation: dict[str, Any]) -> None
         destination = frame_dir / filename
         temporary = destination.with_suffix(".tmp.jpg")
         Image.fromarray(frame, mode="RGB").save(temporary, quality=88)
+        os.replace(temporary, destination)
+    if observer is not None:
+        destination = frame_dir / OBSERVER_FILE
+        temporary = destination.with_suffix(".tmp.jpg")
+        Image.fromarray(np.asarray(observer, dtype=np.uint8), mode="RGB").save(
+            temporary, quality=88
+        )
         os.replace(temporary, destination)
 
 
@@ -343,14 +355,29 @@ def set_flexpi_mode(policy: Any, mode: str) -> None:
             setattr(policy, attribute, joint)
 
 
+def validate_expert_seed(environment: Any) -> tuple[dict[str, Any] | None, str | None]:
+    """Run RoboTwin's publisher-owned expert check without scoring the seed."""
+    try:
+        episode_info = environment.play_once()
+        valid = bool(environment.plan_success and environment.check_success())
+    except Exception as error:  # noqa: BLE001
+        # The native evaluator rejects any seed that fails during play_once().
+        return None, f"{type(error).__name__}: {error}"
+    if not valid:
+        return None, "expert did not complete the task"
+    return episode_info, None
+
+
 def prepare_task(
     robotwin_root: pathlib.Path,
     task: str,
     phase: str,
     seed: int,
+    render_denoiser: str,
     state: LiveState,
 ):
     """Reproduce the upstream expert-seed check and unseen instruction path."""
+    from robotwin_rendering import override_upstream_oidn
     from robotwin_smoke import load_task_arguments
 
     sys.path.insert(0, str(robotwin_root))
@@ -369,6 +396,7 @@ def prepare_task(
         eval_mode=True,
         render_freq=0,
     )
+    rejected_seeds: list[dict[str, Any]] = []
 
     for offset in range(25):
         candidate_seed = native_seed + offset
@@ -379,17 +407,35 @@ def prepare_task(
             )
         )
         try:
-            environment.setup_demo(
-                now_ep_num=0, seed=candidate_seed, is_test=True, **arguments
-            )
-            episode_info = environment.play_once()
-            valid = bool(environment.plan_success and environment.check_success())
+            with override_upstream_oidn(render_denoiser):
+                environment.setup_demo(
+                    now_ep_num=0, seed=candidate_seed, is_test=True, **arguments
+                )
+            episode_info, rejection = validate_expert_seed(environment)
             environment.close_env()
-            if not valid:
+            if rejection is not None:
+                # Restrict publisher-style retry behavior to this expert check;
+                # policy rollout failures still propagate and fail the session.
+                rejected_seeds.append(
+                    {
+                        "seed": candidate_seed,
+                        "stage": "expert_validation",
+                        "error": rejection,
+                    }
+                )
+                state.update(
+                    expert_rejected_seeds=rejected_seeds,
+                    command_message=(
+                        f"Rejected RoboTwin seed {candidate_seed}: upstream expert "
+                        f"validation failed ({rejection}); trying the next seed"
+                    ),
+                )
                 continue
-            environment.setup_demo(
-                now_ep_num=0, seed=candidate_seed, is_test=True, **arguments
-            )
+            assert episode_info is not None
+            with override_upstream_oidn(render_denoiser):
+                environment.setup_demo(
+                    now_ep_num=0, seed=candidate_seed, is_test=True, **arguments
+                )
             descriptions = generate_episode_descriptions(
                 task, [episode_info["info"]], 1
             )
@@ -398,9 +444,18 @@ def prepare_task(
                 raise ValueError(f"RoboTwin generated no instruction for {task}")
             instruction = str(np.random.default_rng(candidate_seed).choice(unseen))
             environment.set_instruction(instruction=instruction)
+            state.update(expert_rejected_seeds=rejected_seeds)
             return environment, instruction, candidate_seed
-        except UnStableError:
+        except UnStableError as error:
+            rejected_seeds.append(
+                {
+                    "seed": candidate_seed,
+                    "stage": "scene_setup",
+                    "error": f"{type(error).__name__}: {error}",
+                }
+            )
             environment.close_env()
+            state.update(expert_rejected_seeds=rejected_seeds)
             continue
         except Exception:
             environment.close_env()
@@ -435,6 +490,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--replan-steps", type=int, required=True)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--realtime-delay-ms", type=int, default=35)
+    parser.add_argument(
+        "--render-denoiser",
+        choices=("auto", "oidn", "optix", "none"),
+        default="auto",
+    )
     parser.add_argument("--flexpi-mode", choices=("full-joint", "action-only"), default="full-joint")
     parser.add_argument("--auto-start", action="store_true")
     parser.add_argument("--network-audit", action=argparse.BooleanOptionalAction, default=True)
@@ -442,10 +502,13 @@ def parse_args() -> argparse.Namespace:
 
 
 def run(args: argparse.Namespace) -> None:
+    from robotwin_rendering import resolve_render_denoiser
+
     args.model_root = args.model_root.resolve()
     args.robotwin_root = args.robotwin_root.resolve()
     args.session_dir = args.session_dir.resolve()
     args.model_display_name = "Fast-WAM" if args.model == "fastwam" else "Flex-π"
+    args.render_denoiser = resolve_render_denoiser(args.render_denoiser)
     os.chdir(args.robotwin_root)
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
     tasks, step_limits = task_catalog(args.robotwin_root)
@@ -486,6 +549,9 @@ def run(args: argparse.Namespace) -> None:
             "action_labels": ACTION_LABELS,
             "state_dimension": 14,
             "camera_count": 3,
+            "observer_camera_available": True,
+            "observer_camera_label": "FRONT OBSERVER CAMERA",
+            "render_denoiser": args.render_denoiser,
             "camera_observation_width": 320,
             "camera_observation_height": 240,
             "model_image_width": 320,
@@ -703,13 +769,16 @@ def run(args: argparse.Namespace) -> None:
                 current_task,
                 args.phase,
                 args.seed + attempt_number - 1,
+                args.render_denoiser,
                 state,
             )
             instruction = prompt_override or canonical_prompt
             environment.set_instruction(instruction=instruction)
             module.reset_model(policy)
             observation = environment.get_obs()
-            write_frames(args.session_dir, observation)
+            write_frames(
+                args.session_dir, observation, environment.cameras.get_observer_rgb()
+            )
             initial_frames = camera_frames(observation)
             video_paths = {
                 camera: args.session_dir
@@ -739,7 +808,11 @@ def run(args: argparse.Namespace) -> None:
             for step in range(max_steps):
                 module.eval(environment, policy, observation)
                 observation = environment.get_obs()
-                write_frames(args.session_dir, observation)
+                write_frames(
+                    args.session_dir,
+                    observation,
+                    environment.cameras.get_observer_rgb(),
+                )
                 for camera, frame in camera_frames(observation).items():
                     writers[camera].write(frame)
                 succeeded = bool(environment.eval_success or environment.check_success())

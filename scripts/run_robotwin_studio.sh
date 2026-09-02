@@ -21,6 +21,8 @@ Options:
   --gpu ID              CUDA device index (default: 0)
   --dashboard-port PORT loopback browser port (default: 8085)
   --realtime-delay-ms N optional delay after each simulator action (default: 35)
+  --render-denoiser NAME
+                        auto (default), oidn, optix, or none
   --auto-start          prepare and run the initial task after model load
   --open / --no-open    enable or disable automatic browser opening
   --hold-open / --no-hold-open
@@ -62,6 +64,7 @@ seed="0"
 gpu_id="0"
 dashboard_port="8085"
 realtime_delay_ms="35"
+render_denoiser="auto"
 auto_start=0
 auto_open=1
 hold_open=1
@@ -80,6 +83,7 @@ while [[ $# -gt 0 ]]; do
     --gpu) gpu_id="${2:?--gpu requires a value}"; shift 2 ;;
     --dashboard-port) dashboard_port="${2:?--dashboard-port requires a value}"; shift 2 ;;
     --realtime-delay-ms) realtime_delay_ms="${2:?--realtime-delay-ms requires a value}"; shift 2 ;;
+    --render-denoiser) render_denoiser="${2:?--render-denoiser requires a value}"; shift 2 ;;
     --auto-start) auto_start=1; shift ;;
     --open) auto_open=1; shift ;;
     --no-open) auto_open=0; shift ;;
@@ -93,6 +97,10 @@ while [[ $# -gt 0 ]]; do
     *) die "unknown option: $1" ;;
   esac
 done
+
+[[ "$render_denoiser" == "auto" || "$render_denoiser" == "oidn" || \
+  "$render_denoiser" == "optix" || "$render_denoiser" == "none" ]] \
+  || die "--render-denoiser must be auto, oidn, optix, or none"
 
 [[ "$model" == "fastwam" || "$model" == "flexpi" ]] || die "--model must be fastwam or flexpi"
 [[ "$phase" == "demo_clean" || "$phase" == "demo_randomized" ]] || die "--phase must be demo_clean or demo_randomized"
@@ -152,6 +160,7 @@ runner=(
   --replan-steps "$replan_steps"
   --seed "$seed"
   --realtime-delay-ms "$realtime_delay_ms"
+  --render-denoiser "$render_denoiser"
   --flexpi-mode "$flexpi_mode"
 )
 [[ "$auto_start" == "1" ]] && runner+=(--auto-start)
@@ -160,6 +169,7 @@ runner=(
 printf 'RoboTwin browser studio\n'
 printf '  model: %s · mode: %s\n  task: %s · phase: %s\n' "$model" "$flexpi_mode" "$task" "$phase"
 printf '  contract: head + left wrist + right wrist · 14D qpos · horizon 32 · replan %s\n' "$replan_steps"
+printf '  monitor: front observer (not sent to policy) · denoiser %s\n' "$render_denoiser"
 printf '  session: %s\n' "$session_dir"
 printf 'Command:'
 printf ' %q' "${runner[@]}"

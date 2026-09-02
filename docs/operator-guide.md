@@ -100,10 +100,19 @@ this compiler is not needed during normal studio startup. The isolated runtime
 also pins `warp-lang==1.12.0`, the final release that retains the legacy
 `warp.torch` namespace used by cuRobo v0.7.8.
 The interactive dashboard opens before checkpoint loading finishes and exposes
-the head, left-wrist, and right-wrist views separately. Starting a rollout runs
-the same expert-valid seed check and unseen-instruction generation as the
+the head, left-wrist, and right-wrist policy views separately. It also exposes
+RoboTwin's front observer camera as a monitoring-only view of both robots and
+the task surface; that frame is never sent to the policy. Starting a rollout
+runs the same expert-valid seed check and unseen-instruction generation as the
 upstream evaluator, so scene preparation can take longer than a reset-only
-demo.
+demo. Publisher expert-planner failures reject and advance the seed without
+counting a policy attempt, and the rejected seed/error remains in `state.json`.
+
+On Blackwell GPUs, `--render-denoiser auto` selects OptiX because the OIDN 2.0.1
+bundled by the pinned SAPIEN wheel can fail with `OIDN Error: invalid handle`
+and leave noisy frames. Older GPUs retain RoboTwin's OIDN choice. For an
+explicit diagnostic override, append `-- --render-denoiser optix` to the
+`./lab` command.
 
 For Flex-π, each session records `flexpi-inference-release/inference-release.json`.
 The release checkpoint contains complete video and action experts, so the

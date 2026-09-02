@@ -71,6 +71,9 @@ function drawLatency(values) {
 
 function refreshFrames() {
   const stamp = Date.now();
+  if (!$("observerCard").classList.contains("hidden")) {
+    $("observerFrame").src = `/frames/observer.jpg?t=${stamp}`;
+  }
   $("externalFrame").src = `/frames/external.jpg?t=${stamp}`;
   $("wristFrame").src = `/frames/wrist.jpg?t=${stamp}`;
   if (!$("rightWristCard").classList.contains("hidden")) {
@@ -756,15 +759,20 @@ async function updateState() {
     $("externalCameraMeta").textContent = cameraMeta;
     $("wristCameraMeta").textContent = cameraMeta;
     $("rightWristCameraMeta").textContent = cameraMeta;
+    const denoiser = String(state.render_denoiser || "default").toUpperCase();
+    $("observerCameraMeta").textContent = `${liveWidth}×${liveHeight} MONITORING ONLY · ${denoiser} DENOISER · NOT SENT TO POLICY`;
+    $("observerCameraTitle").textContent = state.observer_camera_label || "FRONT OBSERVER CAMERA";
     $("externalCameraTitle").textContent = state.external_camera_label || "EXTERNAL CAMERA";
     $("wristCameraTitle").textContent = state.wrist_camera_label || "WRIST CAMERA";
     $("rightWristCameraTitle").textContent = state.third_camera_label || "RIGHT WRIST CAMERA";
     document.documentElement.style.setProperty("--camera-aspect", `${liveWidth} / ${liveHeight}`);
     const cameraCount = Number(state.camera_count) || 2;
     const threeCamera = cameraCount >= 3;
+    const observerCamera = Boolean(state.observer_camera_available);
+    $("observerCard").classList.toggle("hidden", !observerCamera);
     $("rightWristCard").classList.toggle("hidden", !threeCamera);
-    $("heroGrid").classList.toggle("three-camera", threeCamera);
-    $("stateShape").textContent = `${cameraCount} RGB VIEW${cameraCount === 1 ? "" : "S"} · ${sourceWidth}×${sourceHeight} SOURCE · ${state.state_dimension || "—"}D STATE`;
+    $("heroGrid").classList.toggle("three-camera", threeCamera && !observerCamera);
+    $("stateShape").textContent = `${cameraCount} POLICY RGB VIEW${cameraCount === 1 ? "" : "S"}${observerCamera ? " + 1 OBSERVER" : ""} · ${sourceWidth}×${sourceHeight} SOURCE · ${state.state_dimension || "—"}D STATE`;
     $("actionShape").textContent = state.action_dimension ? `${state.action_dimension}D ACTIONS` : "POLICY ACTIONS";
     $("simulatorLabel").textContent = simulatorDisplayName;
     $("actionTitle").textContent = state.action_horizon

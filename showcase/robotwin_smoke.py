@@ -12,7 +12,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-
 CAMERA_KEYS = ("head_camera", "left_camera", "right_camera")
 ACTION_DIMENSION = 14
 
@@ -85,6 +84,7 @@ def load_task_arguments(robotwin_root: Path, task: str, phase: str) -> dict[str,
 
 def run_smoke(robotwin_root: Path, task: str, phase: str, seed: int) -> dict[str, Any]:
     import numpy as np
+    from robotwin_rendering import override_upstream_oidn, resolve_render_denoiser
 
     original_cwd = Path.cwd()
     sys.path.insert(0, str(robotwin_root))
@@ -95,10 +95,15 @@ def run_smoke(robotwin_root: Path, task: str, phase: str, seed: int) -> dict[str
         task_class = getattr(task_module, task)
         arguments = load_task_arguments(robotwin_root, task, phase)
         environment = task_class()
-        environment.setup_demo(now_ep_num=0, seed=seed, is_test=True, **arguments)
+        denoiser = resolve_render_denoiser(os.environ.get("ROBOTWIN_DENOISER", "auto"))
+        with override_upstream_oidn(denoiser):
+            environment.setup_demo(now_ep_num=0, seed=seed, is_test=True, **arguments)
 
         before = environment.get_obs()
         before_shapes = validate_observation(before)
+        observer_shape = list(environment.cameras.get_observer_rgb().shape)
+        if observer_shape != [240, 320, 3]:
+            raise ValueError(f"observer camera RGB must be 240x320x3, got {observer_shape}")
         state = np.asarray(before["joint_action"]["vector"], dtype=np.float32)
         environment.take_action(state.copy(), action_type="qpos")
         after = environment.get_obs()
@@ -124,7 +129,9 @@ def run_smoke(robotwin_root: Path, task: str, phase: str, seed: int) -> dict[str
             "state_dimension": int(state.shape[0]),
             "action_dimension": int(state.shape[0]),
             "action_type": "qpos",
+            "render_denoiser": denoiser,
             "steps_executed": 1,
+            "observer_camera": observer_shape,
             "cameras_before": before_shapes,
             "cameras_after": after_shapes,
             "task_success_after_noop": bool(environment.check_success()),
