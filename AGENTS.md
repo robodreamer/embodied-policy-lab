@@ -60,12 +60,14 @@ Do not add a selector option only in HTML, shell text, or Markdown.
   explicit adapter/profile instead.
 - Valid public pairings are currently π0.5 with LIBERO or RoboCasa, Fast-WAM
   with LIBERO or RoboTwin, Flex-π with LIBERO or RoboTwin, and GR00T N1.5 with
-  RoboCasa. RoboTwin WAM profiles are native batch-only until a shared studio
-  adapter exists. Update the registry, tests, compatibility table, and operator
-  guide together when this changes.
+  RoboCasa. RoboTwin WAM profiles expose the shared studio through an explicit
+  in-process native adapter and retain the publisher-native batch path. Update
+  the registry, tests, compatibility table, and operator guide together when
+  this changes.
 - Keep heavyweight or conflicting CUDA/Python stacks in isolated runtimes.
-  Import model-specific dependencies lazily and communicate through the
-  existing local policy boundary.
+  Import model-specific dependencies lazily and communicate through an
+  explicit local policy boundary. RoboTwin keeps policy and SAPIEN together in
+  its native adapter to avoid serializing three RGB/depth observations.
 - Keep one heavyweight model resident at a time unless the user explicitly
   opts into GPU oversubscription.
 - Flex-π action-only and full-joint world-action inference are distinct

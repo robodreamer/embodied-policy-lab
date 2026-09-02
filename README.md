@@ -74,9 +74,9 @@ tradeoffs inspectable without confusing publisher results with local evidence.
 |---|---|---|---|---|
 | VLA | π0.5 | action chunks | LIBERO, RoboCasa | supported |
 | VLA | NVIDIA Isaac GR00T N1.5 | action chunks | RoboCasa | supported |
-| WAM | Fast-WAM | 32×7 EEF or 32×14 qpos action chunks | LIBERO, RoboTwin 2.0 | experimental; RoboTwin is native batch-only |
-| WAM | Flex-π action-only | 32×7 EEF or 32×14 qpos action chunks | LIBERO, RoboTwin 2.0 | experimental; RoboTwin is native batch-only |
-| WAM | Flex-π full-joint | actions + RGB/DINO/pointmap futures | LIBERO, RoboTwin 2.0 | experimental; default Flex-π mode; RoboTwin is native batch-only |
+| WAM | Fast-WAM | 32×7 EEF or 32×14 qpos action chunks | LIBERO, RoboTwin 2.0 | experimental; RoboTwin studio + native batch |
+| WAM | Flex-π action-only | 32×7 EEF or 32×14 qpos action chunks | LIBERO, RoboTwin 2.0 | experimental; RoboTwin studio + native batch |
+| WAM | Flex-π full-joint | actions + RGB/DINO/pointmap futures | LIBERO, RoboTwin 2.0 | experimental; default Flex-π mode; RoboTwin studio + native batch |
 
 RoboCasa also exposes `robocasa-sim`, an optional deterministic simulator-oracle
 baseline. It replays action prefixes in a matched MuJoCo environment; it is not
@@ -120,8 +120,8 @@ written under `showcase-runs/<timestamp>/`.
 | Flex-π world + action | `./scripts/setup_flexpi_libero.sh` | `./lab --backend libero --model flexpi` |
 | Flex-π action-only | same as above | `./lab --backend libero --model flexpi --flexpi-mode action-only` |
 | GR00T N1.5 on RoboCasa | `ROBOCASA_DOWNLOAD_ASSETS=1 GROOT_DOWNLOAD_CHECKPOINT=1 ./scripts/setup_groot.sh` | `./lab --backend robocasa --model groot-n1.5` |
-| Fast-WAM on RoboTwin | `./scripts/setup_robotwin.sh --model fastwam --download-assets --download-checkpoints` | `./lab --backend robotwin --model fastwam --mode batch --default` |
-| Flex-π on RoboTwin | `./scripts/setup_robotwin.sh --model flexpi --download-assets --download-checkpoints` | `./lab --backend robotwin --model flexpi --mode batch --default` |
+| Fast-WAM on RoboTwin | `./scripts/setup_robotwin.sh --model fastwam --download-assets --download-checkpoints` | `./lab --backend robotwin --model fastwam --mode interactive --default` |
+| Flex-π on RoboTwin | `./scripts/setup_robotwin.sh --model flexpi --download-assets --download-checkpoints` | `./lab --backend robotwin --model flexpi --mode interactive --default` |
 
 The Fast-WAM and Flex-π setup scripts clone revision-checked sibling
 repositories and verify published assets. Re-run either with `--check` for a
@@ -135,12 +135,18 @@ non-mutating readiness check. Downloads are large; see
 ./lab                                  # fzf picker, or numbered fallback
 ./lab --policy-family vla              # only VLA profiles
 ./lab --policy-family wam              # Fast-WAM or Flex-π
-./lab --backend robotwin --model flexpi --mode batch --default
+./lab --backend robotwin --model flexpi --mode interactive --default
 ./lab --backend robocasa               # fill the remaining choices interactively
 ./lab --default --dry-run              # print the default command without running it
 ```
 
 </details>
+
+RoboTwin interactive sessions preserve its native head, left-wrist, and
+right-wrist views and 14D qpos action contract. Select any of the 50 named
+tasks in the browser; for Flex-π, switch between world-action co-generation
+and action-only inference without loading another checkpoint. Choose
+`--mode batch` for the model publisher's native evaluation/reporting path.
 
 ## One dashboard, comparable evidence
 
@@ -270,10 +276,13 @@ complete paper protocol. Read the
 flowchart LR
     UI[./lab + browser dashboard] --> REG[Compatibility registry]
     REG --> SIM[LIBERO, RoboCasa, or RoboTwin]
-    REG --> POLICY[Local policy server]
+    REG --> POLICY[Local policy adapter]
+    POLICY --> SERVICE[Loopback policy service]
+    POLICY --> INPROC[RoboTwin in-process native adapter]
     REG --> NATIVE[RoboTwin native batch evaluator]
-    POLICY --> VLA[π0.5 / GR00T]
-    POLICY --> WAM[Fast-WAM / Flex-π]
+    SERVICE --> VLA[π0.5 / GR00T]
+    SERVICE --> WAM[Fast-WAM / Flex-π]
+    INPROC --> WAM
     SIM --> RUN[Closed-loop execution]
     VLA --> RUN
     WAM --> RUN
@@ -324,7 +333,7 @@ camera presentation controls, and troubleshooting live in the
 | [GR00T N1.5 RoboCasa validation](docs/validation/groot-n1.5-robocasa.md) | pinned integration and bounded local evidence |
 | [Fast-WAM validation](docs/validation/fastwam-libero.md) | released-checkpoint boundary and bounded experiment |
 | [Flex-π validation](docs/validation/flexpi-libero.md) | full-joint implementation and measured local checks |
-| [RoboTwin foundation](docs/validation/robotwin-foundation.md) | 14D bimanual contract, isolated setup, model-free smoke, and native batch path |
+| [RoboTwin integration](docs/validation/robotwin-foundation.md) | 14D bimanual contract, three-camera studio, model-free smoke, and native batch path |
 | [WAM benchmark](docs/benchmarks/fastwam-flexpi-libero.md) | headless protocol, provenance, and claims |
 | [Results](results/README.md) | sanitized publishable validation summaries |
 

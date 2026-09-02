@@ -13,7 +13,7 @@ Usage:
   ./scripts/run_interactive_showcase.sh [options]
 
 Backend, model, and task options:
-  --backend libero|robocasa       Simulator backend (default: libero)
+  --backend libero|robocasa|robotwin Simulator backend (default: libero)
   --model pi05|fastwam|flexpi|groot-n1.5 Local policy plugin (default: pi05)
   --flexpi-mode MODE              full-joint (default for Flex-pi) or action-only
   --world-model NAME              none (default) or robocasa-sim oracle baseline
@@ -59,6 +59,7 @@ Examples:
   ./scripts/run_showcase.sh --backend libero --task-suite libero_spatial --task-ids 0,1
   ./scripts/run_interactive_showcase.sh --backend libero --model fastwam --task-id 2
   ./scripts/run_interactive_showcase.sh --backend libero --model flexpi --flexpi-mode full-joint
+  ./scripts/run_interactive_showcase.sh --backend robotwin --model flexpi --task-id click_bell
 
 Environment-variable controls remain supported for backward compatibility.
 EOF
@@ -166,6 +167,48 @@ case "$WORLD_MODEL" in
   off|direct) WORLD_MODEL="none" ;;
   sim|simulator|simulator-oracle) WORLD_MODEL="robocasa-sim" ;;
 esac
+
+# RoboTwin owns a native 14D qpos + three-camera adapter. Delegate before the
+# LIBERO/RoboCasa server setup so its isolated runtime is never forced through
+# either simulator's transport schema.
+if [[ "$BACKEND" == "robotwin" ]]; then
+  TASK_SUITE="${TASK_SUITE:-demo_clean}"
+  TASK_IDS="${TASK_IDS:-click_bell}"
+  [[ "$MODEL" == "fastwam" || "$MODEL" == "flexpi" ]] \
+    || { echo "RoboTwin supports fastwam or flexpi." >&2; exit 2; }
+  [[ -z "$WORLD_MODEL" || "$WORLD_MODEL" == "none" ]] \
+    || { echo "RoboTwin currently supports --world-model none." >&2; exit 2; }
+  robotwin_command=(
+    "$SCRIPT_DIR/run_robotwin_studio.sh"
+    --model "$MODEL"
+    --task "$TASK_IDS"
+    --phase "$TASK_SUITE"
+    --seed "$SEED"
+    --dashboard-port "$DASHBOARD_PORT"
+    --realtime-delay-ms "$REALTIME_DELAY_MS"
+  )
+  [[ -z "$REPLAN_STEPS" ]] || robotwin_command+=(--replan-steps "$REPLAN_STEPS")
+  [[ -z "$FLEXPI_MODE" ]] || robotwin_command+=(--flexpi-mode "$FLEXPI_MODE")
+  [[ "$AUTO_START" == "1" ]] && robotwin_command+=(--auto-start)
+  [[ "$AUTO_OPEN" == "1" ]] && robotwin_command+=(--open) || robotwin_command+=(--no-open)
+  [[ "$HOLD_OPEN" == "1" ]] && robotwin_command+=(--hold-open) || robotwin_command+=(--no-hold-open)
+  [[ "$NETWORK_AUDIT" == "1" ]] && robotwin_command+=(--network-audit) || robotwin_command+=(--no-network-audit)
+  [[ -z "$SESSION_DIR" ]] || robotwin_command+=(--session-dir "$SESSION_DIR")
+  if [[ "$INTERACTIVE" == "1" ]]; then
+    exec "${robotwin_command[@]}"
+  fi
+  batch_command=(
+    "$SCRIPT_DIR/run_robotwin_evaluation.sh"
+    --model "$MODEL"
+    --task "$TASK_IDS"
+    --phase "$TASK_SUITE"
+    --trials "$TRIALS_PER_TASK"
+    --seed "$SEED"
+  )
+  [[ -z "$REPLAN_STEPS" ]] || batch_command+=(--replan-steps "$REPLAN_STEPS")
+  [[ -z "$FLEXPI_MODE" ]] || batch_command+=(--flexpi-mode "$FLEXPI_MODE")
+  exec "${batch_command[@]}"
+fi
 
 case "$BACKEND" in
   libero)

@@ -81,7 +81,7 @@ grep -F "Model: fastwam" <<<"$wam_default_output" >/dev/null
 
 robotwin_fastwam_output="$("$PROJECT_DIR/lab" \
   --backend robotwin --model fastwam \
-  --task-set demo_clean --task-id click_bell --trials 2 --default --dry-run)"
+  --mode batch --task-set demo_clean --task-id click_bell --trials 2 --default --dry-run)"
 grep -F "Simulator: robotwin" <<<"$robotwin_fastwam_output" >/dev/null
 grep -F "Phase: demo_clean · task click_bell" <<<"$robotwin_fastwam_output" >/dev/null
 grep -F "run_robotwin_evaluation.sh --model fastwam --task click_bell --phase demo_clean --trials 2" \
@@ -94,11 +94,11 @@ grep -F "Flex-π inference: action-only" <<<"$robotwin_flexpi_output" >/dev/null
 grep -F "run_robotwin_evaluation.sh --model flexpi --task turn_switch --phase demo_randomized --trials 1 --flexpi-mode action-only" \
   <<<"$robotwin_flexpi_output" >/dev/null
 
-if "$PROJECT_DIR/lab" --backend robotwin --model fastwam \
-  --mode interactive --default --dry-run >/dev/null 2>&1; then
-  echo "expected RoboTwin interactive mode to fail until the shared studio adapter exists" >&2
-  exit 1
-fi
+robotwin_studio_output="$("$PROJECT_DIR/lab" --backend robotwin --model fastwam \
+  --mode interactive --task-id click_bell --default --dry-run)"
+grep -F "Mode: interactive" <<<"$robotwin_studio_output" >/dev/null
+grep -F "run_robotwin_studio.sh --model fastwam --task click_bell --phase demo_clean" \
+  <<<"$robotwin_studio_output" >/dev/null
 
 if "$PROJECT_DIR/lab" --backend robotwin --model pi05 \
   --mode batch --default --dry-run >/dev/null 2>&1; then

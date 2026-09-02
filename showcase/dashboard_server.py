@@ -502,6 +502,10 @@ def main():
                 self._file(session_dir / "frames" / "external.jpg", "image/jpeg")
             elif route == "/frames/wrist.jpg":
                 self._file(session_dir / "frames" / "wrist.jpg", "image/jpeg")
+            elif route == "/frames/right_wrist.jpg":
+                self._file(
+                    session_dir / "frames" / "right_wrist.jpg", "image/jpeg"
+                )
             elif route == "/previews/latest_prediction.mp4":
                 self._file(
                     session_dir / "previews" / "latest_prediction.mp4", "video/mp4"

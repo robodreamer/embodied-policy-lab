@@ -1,7 +1,8 @@
 # RoboTwin 2.0 environment foundation
 
-Status: **experimental native batch integration**. This is an executable wiring
-foundation, not a reproduction of either model's published RoboTwin score.
+Status: **experimental browser-studio and native batch integration**. This is
+an executable wiring foundation, not a reproduction of either model's
+published RoboTwin score.
 
 ## Why this is a separate environment
 
@@ -78,11 +79,44 @@ writes JSON evidence:
 Evidence lands under `results/robotwin-smoke/<timestamp>/result.json`. A pass is
 a simulator/interface wiring check; it says nothing about policy success.
 
-## Run one bounded model evaluation
+## Run the browser studio
 
-RoboTwin currently uses each model publisher's native single-task evaluator.
-This is deliberately batch-only; it does not yet claim the shared browser
-studio, HTTP policy boundary, or matched headless benchmark.
+The browser adapter keeps the policy and SAPIEN environment in one native
+process. This avoids serializing three RGB/depth observations or translating
+absolute 14D qpos actions into the unrelated LIBERO HTTP schema:
+
+```bash
+./lab --backend robotwin --model fastwam --mode interactive \
+  --task-set demo_clean --task-id click_bell --default
+./lab --backend robotwin --model flexpi --mode interactive \
+  --task-set demo_randomized --task-id turn_switch --default
+```
+
+The page is available while the checkpoint loads. Once ready, it offers all 50
+named tasks, live head/left-wrist/right-wrist RGB views, prompt and rollout
+controls, 14D action charts, GPU telemetry, and per-camera MP4 artifacts.
+Flex-π's full-joint and action-only modes are switchable without reloading the
+checkpoint. The UI calls the policy link `IN-PROCESS NATIVE · LOCAL`; it does
+not claim a network policy service.
+
+The full-joint switch enables the released Flex-π joint denoising path, but the
+current RoboTwin adapter does not request, decode, or retain generated-future
+media. Its studio evidence is the executed three-camera rollout plus the 14D
+action chunks. Do not interpret the absence of a comparison panel as
+action-only inference; the selected mode remains recorded in `state.json` and
+`report.json`.
+
+Each rollout intentionally keeps RoboTwin's upstream expert seed check and
+unseen-instruction generator. Preparation is therefore slower than merely
+resetting a scene, but the resulting score follows the native evaluator's seed
+validity and language path.
+
+## Run one bounded native model evaluation
+
+Batch mode uses each model publisher's native single-task evaluator. It remains
+the reference path for native logs and result naming; the browser studio adds
+interactive control and lab-normalized session artifacts without claiming an
+HTTP policy boundary or a matched cross-model benchmark.
 
 ```bash
 # Fast-WAM action inference; 24 actions executed from each 32-action chunk.
@@ -128,8 +162,9 @@ full-joint Flex-π as separate conditions.
 
 ## Known limitations
 
-- No shared interactive studio or live camera dashboard yet.
-- No normalized lab session schema for native RoboTwin artifacts yet.
+- The studio records a normalized lab session, while native batch output keeps
+  the upstream result schema; those two artifact layouts are intentionally not
+  merged.
 - No local GPU/model rollout is claimed by this foundation until assets and
   checkpoints are present and the commands above are recorded.
 - RoboTwin's official full protocol is 100 episodes per task per phase across

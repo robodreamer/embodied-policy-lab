@@ -73,6 +73,9 @@ function refreshFrames() {
   const stamp = Date.now();
   $("externalFrame").src = `/frames/external.jpg?t=${stamp}`;
   $("wristFrame").src = `/frames/wrist.jpg?t=${stamp}`;
+  if (!$("rightWristCard").classList.contains("hidden")) {
+    $("rightWristFrame").src = `/frames/right_wrist.jpg?t=${stamp}`;
+  }
 }
 
 async function postJson(route, payload) {
@@ -138,7 +141,9 @@ function populateTasks(tasks, selected) {
   select.replaceChildren(...tasks.map(task => {
     const option = document.createElement("option");
     option.value = task.id;
-    option.textContent = `Task ${Number(task.id) + 1} — ${task.name || task.prompt}`;
+    const numericId = Number(task.id);
+    const position = task.position || (Number.isFinite(numericId) ? numericId + 1 : "—");
+    option.textContent = `Task ${position} — ${task.name || task.prompt}`;
     return option;
   }));
   select.value = desired;
@@ -215,7 +220,7 @@ function renderHistory(history) {
         : (item.mixed_prompt ? "excluded · mixed prompt" : "excluded · aborted"));
     const values = [
       item.attempt,
-      Number(item.task_id) + 1,
+      item.task_position || (Number.isFinite(Number(item.task_id)) ? Number(item.task_id) + 1 : item.task_id),
       item.mixed_prompt ? `${item.prompt} (changed mid-run)` : item.prompt,
       item.prompt_source || "—",
       item.max_steps ? `${item.max_steps} steps` : "legacy",
@@ -416,12 +421,12 @@ async function configureControlsOnce() {
         draftDirty = false;
         const result = await postJson("/api/control", {
           action: "set_task",
-          task_id: Number(task.id),
+          task_id: task.id,
         });
         pendingCommand = {
           id: result.command.id,
           action: "set_task",
-          taskId: Number(task.id),
+          taskId: String(task.id),
         };
         setControlNote("Preparing the selected simulator scene and its exact canonical instruction…");
       } catch (error) { setControlNote(error.message, true); }
@@ -479,7 +484,9 @@ async function configureControlsOnce() {
       });
       pendingCommand = {id: result.command.id, action: "set_policy_mode", policyMode: requested};
       setControlNote(requested === "full-joint"
-        ? "World-action co-generation is staged. Its visual future appears only after the matching real action prefix executes."
+        ? (lastState.backend === "robotwin"
+          ? "World-action co-generation is staged. The current RoboTwin adapter charts executed actions but does not yet retain generated-future media."
+          : "World-action co-generation is staged. Its visual future appears only after the matching real action prefix executes.")
         : "Fast action-only inference is staged; no visual future will be generated.");
       updateControls(lastState);
     } catch (error) { setControlNote(error.message, true); }
@@ -512,7 +519,7 @@ async function configureControlsOnce() {
   $("startRun").onclick = async () => {
     try {
       const expectedPrompt = $("promptInput").value.trim();
-      const expectedTask = Number($("taskSelect").value);
+      const expectedTask = $("taskSelect").value;
       const expectedBudget = selectedBudget();
       const expectedEvaluation = selectedEvaluationMode();
       const expectedPolicyMode = $("policyModeSetting").classList.contains("hidden")
@@ -553,7 +560,7 @@ async function configureControlsOnce() {
         id: result.command.id,
         action: "set_prompt",
         prompt: $("promptInput").value.trim(),
-        taskId: Number($("taskSelect").value),
+        taskId: $("taskSelect").value,
         evaluationMode: selectedEvaluationMode(),
       };
       setControlNote("Draft sent. The policy will replan from the next observation; this attempt is now mixed-prompt.");
@@ -620,7 +627,7 @@ async function updateState() {
       const promptMatches = pendingCommand.prompt === undefined || canonicalPromptAck
         || String(state.prompt || "").trim() === pendingCommand.prompt;
       const taskMatches = pendingCommand.taskId === undefined
-        || Number(state.task_id) === pendingCommand.taskId;
+        || String(state.task_id) === String(pendingCommand.taskId);
       const budgetMatches = pendingCommand.budget === undefined
         || Number(state.rollout_budget_multiplier) === pendingCommand.budget;
       const evaluationMatches = pendingCommand.evaluationMode === undefined
@@ -707,7 +714,9 @@ async function updateState() {
     ].filter(Boolean).join(" · ") || "Prediction comparison";
     $("profileTaskSet").textContent = state.suite || "—";
     $("profileTaskDetail").textContent = taskPosition;
-    $("profileTransport").textContent = `${transportName} · LOOPBACK`;
+    $("profileTransport").textContent = state.policy_transport === "in-process native"
+      ? "IN-PROCESS NATIVE · LOCAL"
+      : `${transportName} · LOOPBACK`;
     $("profileEndpoint").textContent = state.policy_endpoint || "Waiting for endpoint";
     $("modelRuntimeName").textContent = `${modelDisplayName} / ${String(state.runtime || "local runtime").replace(/^local /i, "")}`;
     $("prompt").textContent = state.model_ack_prompt || state.prompt || "Waiting for an instruction…";
@@ -746,8 +755,15 @@ async function updateState() {
     const cameraMeta = `${liveWidth}×${liveHeight} LIVE VIEW · POLICY CAMERA ${sourceWidth}×${sourceHeight} · MODEL INPUT ${modelWidth}×${modelHeight}`;
     $("externalCameraMeta").textContent = cameraMeta;
     $("wristCameraMeta").textContent = cameraMeta;
+    $("rightWristCameraMeta").textContent = cameraMeta;
+    $("externalCameraTitle").textContent = state.external_camera_label || "EXTERNAL CAMERA";
+    $("wristCameraTitle").textContent = state.wrist_camera_label || "WRIST CAMERA";
+    $("rightWristCameraTitle").textContent = state.third_camera_label || "RIGHT WRIST CAMERA";
     document.documentElement.style.setProperty("--camera-aspect", `${liveWidth} / ${liveHeight}`);
     const cameraCount = Number(state.camera_count) || 2;
+    const threeCamera = cameraCount >= 3;
+    $("rightWristCard").classList.toggle("hidden", !threeCamera);
+    $("heroGrid").classList.toggle("three-camera", threeCamera);
     $("stateShape").textContent = `${cameraCount} RGB VIEW${cameraCount === 1 ? "" : "S"} · ${sourceWidth}×${sourceHeight} SOURCE · ${state.state_dimension || "—"}D STATE`;
     $("actionShape").textContent = state.action_dimension ? `${state.action_dimension}D ACTIONS` : "POLICY ACTIONS";
     $("simulatorLabel").textContent = simulatorDisplayName;

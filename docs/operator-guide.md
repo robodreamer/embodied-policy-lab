@@ -15,7 +15,7 @@ matrix is:
 |---|---:|---:|---:|---:|
 | LIBERO | ✓ | experimental | experimental | — |
 | RoboCasa365 | ✓ | — | — | ✓ |
-| RoboTwin 2.0 | — | experimental, native batch | experimental, native batch | — |
+| RoboTwin 2.0 | — | experimental, studio + native batch | experimental, studio + native batch | — |
 
 RoboCasa also has an independent predictor selector. Direct execution
 (`--world-model none`) is the default. The optional `robocasa-sim` choice is a
@@ -73,14 +73,15 @@ Interactive mode opens task 0 immediately; choose another task from the
 dashboard or pass `--task-id ID`. Batch mode asks for a task ID and trial count
 unless those values were supplied as flags.
 
-RoboTwin is the exception: its first integration deliberately uses each WAM's
-native batch evaluator while preserving the released three-camera, 14D qpos
-contract. It does not open the browser studio yet. A task is a snake_case name,
-and `--task-set` selects the clean or randomized phase:
+RoboTwin preserves the released three-camera, 14D qpos contract in both the
+browser studio and each WAM's native batch evaluator. A task is a snake_case
+name, and `--task-set` selects the clean or randomized phase:
 
 ```bash
 ./scripts/setup_robotwin.sh --model both --download-assets --download-checkpoints
 ./scripts/setup_robotwin.sh --model both --check
+./lab --backend robotwin --model flexpi --mode interactive \
+  --task-set demo_clean --task-id click_bell --default
 ./lab --backend robotwin --model fastwam --mode batch \
   --task-set demo_clean --task-id click_bell --trials 1 --default
 ./lab --backend robotwin --model flexpi --flexpi-mode action-only --mode batch \
@@ -90,6 +91,11 @@ and `--task-set` selects the clean or randomized phase:
 Keep RoboTwin's `.venv-robotwin` runtimes separate from both models' LIBERO
 `.venv` directories. Details, expected storage, exact revisions, and claim
 boundaries are in the [RoboTwin foundation note](validation/robotwin-foundation.md).
+The interactive dashboard opens before checkpoint loading finishes and exposes
+the head, left-wrist, and right-wrist views separately. Starting a rollout runs
+the same expert-valid seed check and unseen-instruction generation as the
+upstream evaluator, so scene preparation can take longer than a reset-only
+demo.
 
 You can preselect part of the configuration and let the picker fill the rest,
 or bypass it entirely:
@@ -103,8 +109,8 @@ or bypass it entirely:
 
 This repository is a reproducible local deployment of π0.5, experimental
 Fast-WAM and Flex-π, and NVIDIA Isaac GR00T N1.5 in the LIBERO and RoboCasa
-robot-manipulation simulators, plus a native batch foundation for Fast-WAM and
-Flex-π in RoboTwin. It uses pinned upstream integrations, robosuite/MuJoCo or
+robot-manipulation simulators, plus a three-camera studio and native batch path
+for Fast-WAM and Flex-π in RoboTwin. It uses pinned upstream integrations, robosuite/MuJoCo or
 SAPIEN/Vulkan, and the workstation's NVIDIA GPU. MuJoCo rendering is headless
 through EGL; RoboTwin uses Vulkan. Native evaluators save rollout videos for
 inspection.

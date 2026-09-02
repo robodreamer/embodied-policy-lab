@@ -24,7 +24,7 @@ Options:
   --model NAME         pi05 (default), fastwam, flexpi, or groot-n1.5
   --flexpi-mode MODE   full-joint (default) or action-only
   --world-model NAME   none (default) or robocasa-sim oracle baseline
-  --mode MODE          interactive (default) or batch (RoboTwin only supports batch)
+  --mode MODE          interactive (default) or batch
   --task-set NAME      task collection (backend default when omitted)
   --task-id ID         numeric task ID, or RoboTwin task name (default: click_bell)
   --trials COUNT       batch attempts (default: 1)
@@ -38,7 +38,7 @@ Examples:
   ./lab --default
   ./lab --policy-family wam
   ./lab --backend libero --model flexpi --flexpi-mode action-only --default
-  ./lab --backend robotwin --model flexpi --mode batch --task-id click_bell --default
+  ./lab --backend robotwin --model flexpi --mode interactive --task-id click_bell --default
   ./lab --backend robocasa --model groot-n1.5 --mode interactive --default
   ./lab --default --dry-run -- --dashboard-port 8086
 
@@ -57,9 +57,9 @@ VLA     libero    pi05          action-only   ready
 WAM     libero    fastwam       action-only   experimental / staged 24 GB profile
 WAM     libero    flexpi        full-joint    experimental / world-action co-generation (default)
 WAM     libero    flexpi        action-only   experimental / lower-compute action path
-WAM     robotwin  fastwam       action-only   experimental / native batch evaluation
-WAM     robotwin  flexpi        full-joint    experimental / native batch evaluation (default)
-WAM     robotwin  flexpi        action-only   experimental / native batch evaluation
+WAM     robotwin  fastwam       action-only   experimental / browser studio + native batch
+WAM     robotwin  flexpi        full-joint    experimental / browser studio + native batch (default)
+WAM     robotwin  flexpi        action-only   experimental / browser studio + native batch
 
 PREDICTOR / BASELINE  BACKEND    STATUS
 none                  any        ready / default direct execution
@@ -184,7 +184,7 @@ main() {
         backend="$(pick_id \
           "Choose a WAM simulator" \
           $'libero\tLIBERO · interactive studio + matched local benchmark · recommended' \
-          $'robotwin\tRoboTwin 2.0 · bimanual SAPIEN benchmark · native batch foundation')" || return 1
+          $'robotwin\tRoboTwin 2.0 · bimanual SAPIEN benchmark · three-camera browser studio')" || return 1
       else
         backend="$(pick_id \
           "Choose a VLA simulator" \
@@ -230,14 +230,10 @@ main() {
     fi
 
     if [[ -z "$mode" ]]; then
-      if [[ "$backend" == "robotwin" ]]; then
-        mode="batch"
-      else
-        mode="$(pick_id \
-          "Choose run mode" \
-          $'interactive\tInteractive dashboard · change task/prompt and repeat' \
-          $'batch\tAutomatic batch · run selected task and exit')" || return 1
-      fi
+      mode="$(pick_id \
+        "Choose run mode" \
+        $'interactive\tInteractive dashboard · change task/prompt and repeat' \
+        $'batch\tAutomatic native batch · run selected task and exit')" || return 1
     fi
 
     if [[ -z "$task_set" ]]; then
@@ -299,7 +295,7 @@ main() {
   fi
   world_model="${world_model:-none}"
   if [[ -z "$mode" ]]; then
-    mode="$( [[ "$backend" == "robotwin" ]] && echo batch || echo interactive )"
+    mode="interactive"
   fi
   if [[ -z "$task_set" ]]; then
     case "$backend" in
@@ -333,9 +329,6 @@ main() {
   esac
   [[ "$mode" == "interactive" || "$mode" == "batch" ]] \
     || die "--mode must be interactive or batch"
-  if [[ "$backend" == "robotwin" && "$mode" != "batch" ]]; then
-    die "RoboTwin currently uses the upstream native batch evaluator; pass --mode batch"
-  fi
   if [[ "$model" == "flexpi" && \
     "$flexpi_mode" != "full-joint" && "$flexpi_mode" != "action-only" ]]; then
     die "--flexpi-mode must be full-joint or action-only"
@@ -352,13 +345,22 @@ main() {
 
   local -a command
   if [[ "$backend" == "robotwin" ]]; then
-    command=(
-      "$PROJECT_DIR/scripts/run_robotwin_evaluation.sh"
-      --model "$model"
-      --task "$task_id"
-      --phase "$task_set"
-      --trials "$trials"
-    )
+    if [[ "$mode" == "interactive" ]]; then
+      command=(
+        "$PROJECT_DIR/scripts/run_robotwin_studio.sh"
+        --model "$model"
+        --task "$task_id"
+        --phase "$task_set"
+      )
+    else
+      command=(
+        "$PROJECT_DIR/scripts/run_robotwin_evaluation.sh"
+        --model "$model"
+        --task "$task_id"
+        --phase "$task_set"
+        --trials "$trials"
+      )
+    fi
     if [[ "$model" == "flexpi" ]]; then
       command+=(--flexpi-mode "$flexpi_mode")
     fi

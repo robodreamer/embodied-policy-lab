@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from showcase import backend_registry
+from showcase.interactive_robotwin import CAMERA_FILES, humanize_task, task_catalog
 from showcase.robotwin_smoke import validate_observation
 
 
@@ -68,3 +69,32 @@ def test_setup_pins_upstream_release_and_keeps_downloads_explicit():
     assert "--download-checkpoints" in setup
     assert "download_assets=0" in setup
     assert "download_checkpoints=0" in setup
+
+
+def test_robotwin_studio_preserves_three_distinct_camera_routes():
+    assert CAMERA_FILES == {
+        "head_camera": "external.jpg",
+        "left_camera": "wrist.jpg",
+        "right_camera": "right_wrist.jpg",
+    }
+
+
+def test_robotwin_studio_catalog_uses_named_tasks(tmp_path):
+    config = tmp_path / "task_config"
+    config.mkdir()
+    (config / "_eval_step_limit.yml").write_text(
+        "click_bell: 400\nturn_switch: 500\n", encoding="utf-8"
+    )
+    tasks, limits = task_catalog(tmp_path)
+    assert [task["id"] for task in tasks] == ["click_bell", "turn_switch"]
+    assert tasks[0]["position"] == 1
+    assert limits == {"click_bell": 400, "turn_switch": 500}
+    assert humanize_task("click_bell") == "click bell"
+
+
+def test_dashboard_exposes_right_wrist_camera_route():
+    project = Path(__file__).resolve().parents[1]
+    server = (project / "showcase/dashboard_server.py").read_text(encoding="utf-8")
+    app = (project / "showcase/static/app.js").read_text(encoding="utf-8")
+    assert 'route == "/frames/right_wrist.jpg"' in server
+    assert "/frames/right_wrist.jpg?t=" in app

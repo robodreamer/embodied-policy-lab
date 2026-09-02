@@ -127,9 +127,9 @@
         <p id="controlNote">Choose a task and instruction, then start. Aborted and mixed-prompt attempts are excluded from per-prompt rates.</p>
       </section>
 
-      <section class="hero-grid">
+      <section id="heroGrid" class="hero-grid">
         <article class="camera-card primary">
-          <div class="card-label"><span>02</span> EXTERNAL CAMERA · LIVE SIMULATOR STATE <small id="externalCameraMeta" class="camera-quality">—</small></div>
+          <div class="card-label"><span>02</span> <b id="externalCameraTitle">EXTERNAL CAMERA</b> · LIVE SIMULATOR STATE <small id="externalCameraMeta" class="camera-quality">—</small></div>
           <div class="camera-frame">
             <img id="externalFrame" alt="External camera feed">
             <div class="reticle"></div>
@@ -137,9 +137,16 @@
           </div>
         </article>
         <article class="camera-card">
-          <div class="card-label"><span>03</span> WRIST CAMERA · LIVE SIMULATOR STATE <small id="wristCameraMeta" class="camera-quality">—</small></div>
+          <div class="card-label"><span>03</span> <b id="wristCameraTitle">WRIST CAMERA</b> · LIVE SIMULATOR STATE <small id="wristCameraMeta" class="camera-quality">—</small></div>
           <div class="camera-frame wrist">
             <img id="wristFrame" alt="Wrist camera feed">
+            <div class="reticle"></div>
+          </div>
+        </article>
+        <article id="rightWristCard" class="camera-card hidden">
+          <div class="card-label"><span>03B</span> <b id="rightWristCameraTitle">RIGHT WRIST CAMERA</b> · LIVE SIMULATOR STATE <small id="rightWristCameraMeta" class="camera-quality">—</small></div>
+          <div class="camera-frame wrist">
+            <img id="rightWristFrame" alt="Right wrist camera feed">
             <div class="reticle"></div>
           </div>
         </article>

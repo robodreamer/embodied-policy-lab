@@ -349,4 +349,5 @@ echo
 echo "RoboTwin source/runtime preparation complete. Large downloads remain opt-in."
 echo "Readiness: ./scripts/setup_robotwin.sh --model $model --check"
 echo "Simulator-only smoke: ./scripts/run_robotwin_smoke.sh --task click_bell"
-echo "One model run: ./lab --backend robotwin --model fastwam --mode batch --task-id click_bell --default"
+echo "Browser studio: ./lab --backend robotwin --model fastwam --mode interactive --task-id click_bell --default"
+echo "Native batch: ./lab --backend robotwin --model fastwam --mode batch --task-id click_bell --default"
