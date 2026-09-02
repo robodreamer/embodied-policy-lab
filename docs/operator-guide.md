@@ -74,17 +74,20 @@ dashboard or pass `--task-id ID`. Batch mode asks for a task ID and trial count
 unless those values were supplied as flags.
 
 RoboTwin preserves the released three-camera, 14D qpos contract in both the
-browser studio and each WAM's native batch evaluator. A task is a snake_case
-name, and `--task-set` selects the clean or randomized phase:
+browser studio and each WAM's native batch evaluator. The terminal launcher
+offers a searchable menu of all 50 tasks; `--list-tasks` prints the same
+catalog for review. A task is a snake_case name, and `--task-set` selects the
+clean or randomized phase:
 
 ```bash
 ./scripts/setup_robotwin.sh --model both --download-assets --download-checkpoints
 ./scripts/setup_robotwin.sh --model both --check
-./lab --backend robotwin --model flexpi --mode interactive \
-  --task-set demo_clean --task-id click_bell --default
-./lab --backend robotwin --model fastwam --mode batch \
+./lab --backend robo_twin --list-tasks
+./lab --backend robo_twin --model flexpi --mode interactive \
+  --task-set demo_clean --task click_bell --default
+./lab --backend robo_twin --model fastwam --mode batch \
   --task-set demo_clean --task-id click_bell --trials 1 --default
-./lab --backend robotwin --model flexpi --flexpi-mode action-only --mode batch \
+./lab --backend robo_twin --model flexpi --flexpi-mode action-only --mode batch \
   --task-set demo_randomized --task-id turn_switch --trials 1 --default
 ```
 
@@ -96,6 +99,12 @@ the head, left-wrist, and right-wrist views separately. Starting a rollout runs
 the same expert-valid seed check and unseen-instruction generation as the
 upstream evaluator, so scene preparation can take longer than a reset-only
 demo.
+
+For Flex-π, each session records `flexpi-inference-release/inference-release.json`.
+The release checkpoint contains complete video and action experts, so the
+launcher preserves the upstream inference preset that skips unnecessary Wan
+and ActionDiT training-base initialization. The runtime checkpoint is a hard
+link, not a second 12 GB copy.
 
 You can preselect part of the configuration and let the picker fill the rest,
 or bypass it entirely:

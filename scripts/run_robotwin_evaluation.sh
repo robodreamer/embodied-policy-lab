@@ -126,10 +126,14 @@ done
 
 run_stamp="$(date +%Y%m%d-%H%M%S)"
 output_hint="$model_root/evaluate_results/robotwin/$output_tag/$run_stamp"
+runtime_checkpoint="$checkpoint"
+if [[ "$model" == "flexpi" ]]; then
+  runtime_checkpoint="$output_hint/flexpi-inference-release/checkpoints/weights/$(basename "$checkpoint")"
+fi
 command=(
   "$runtime_python" "$entrypoint"
   "task=$task_profile"
-  "ckpt=$checkpoint"
+  "ckpt=$runtime_checkpoint"
   "EVALUATION.robotwin_root=$robotwin_root"
   "EVALUATION.dataset_stats_path=$statistics"
   "EVALUATION.task_name=$task"
@@ -165,6 +169,17 @@ printf ' %q' "${command[@]}"
 printf '\n'
 if [[ "$dry_run" == "1" ]]; then
   exit 0
+fi
+
+if [[ "$model" == "flexpi" ]]; then
+  prepared_checkpoint="$(
+    "$runtime_python" "$PROJECT_DIR/showcase/prepare_flexpi_inference_release.py" \
+      --checkpoint "$checkpoint" \
+      --config "$model_root/runs/flexpi-robotwin/config.yaml" \
+      --destination "$output_hint/flexpi-inference-release"
+  )"
+  [[ "$prepared_checkpoint" == "$runtime_checkpoint" ]] \
+    || die "unexpected Flex-π runtime checkpoint path: $prepared_checkpoint"
 fi
 
 export PYTHONNOUSERSITE=1

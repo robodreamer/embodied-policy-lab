@@ -120,8 +120,8 @@ written under `showcase-runs/<timestamp>/`.
 | Flex-π world + action | `./scripts/setup_flexpi_libero.sh` | `./lab --backend libero --model flexpi` |
 | Flex-π action-only | same as above | `./lab --backend libero --model flexpi --flexpi-mode action-only` |
 | GR00T N1.5 on RoboCasa | `ROBOCASA_DOWNLOAD_ASSETS=1 GROOT_DOWNLOAD_CHECKPOINT=1 ./scripts/setup_groot.sh` | `./lab --backend robocasa --model groot-n1.5` |
-| Fast-WAM on RoboTwin | `./scripts/setup_robotwin.sh --model fastwam --download-assets --download-checkpoints` | `./lab --backend robotwin --model fastwam --mode interactive --default` |
-| Flex-π on RoboTwin | `./scripts/setup_robotwin.sh --model flexpi --download-assets --download-checkpoints` | `./lab --backend robotwin --model flexpi --mode interactive --default` |
+| Fast-WAM on RoboTwin | `./scripts/setup_robotwin.sh --model fastwam --download-assets --download-checkpoints` | `./lab --backend robo_twin --model fastwam --mode interactive --default` |
+| Flex-π on RoboTwin | `./scripts/setup_robotwin.sh --model flexpi --download-assets --download-checkpoints` | `./lab --backend robo_twin --model flexpi --mode interactive --default` |
 
 The Fast-WAM and Flex-π setup scripts clone revision-checked sibling
 repositories and verify published assets. Re-run either with `--check` for a
@@ -135,7 +135,8 @@ non-mutating readiness check. Downloads are large; see
 ./lab                                  # fzf picker, or numbered fallback
 ./lab --policy-family vla              # only VLA profiles
 ./lab --policy-family wam              # Fast-WAM or Flex-π
-./lab --backend robotwin --model flexpi --mode interactive --default
+./lab --backend robo_twin --list-tasks # inspect all 50 named tasks
+./lab --backend robo_twin --model flexpi # choose phase and task interactively
 ./lab --backend robocasa               # fill the remaining choices interactively
 ./lab --default --dry-run              # print the default command without running it
 ```
@@ -144,7 +145,7 @@ non-mutating readiness check. Downloads are large; see
 
 RoboTwin interactive sessions preserve its native head, left-wrist, and
 right-wrist views and 14D qpos action contract. Select any of the 50 named
-tasks in the browser; for Flex-π, switch between world-action co-generation
+tasks in the terminal picker or browser; for Flex-π, switch between world-action co-generation
 and action-only inference without loading another checkpoint. Choose
 `--mode batch` for the model publisher's native evaluation/reporting path.
 

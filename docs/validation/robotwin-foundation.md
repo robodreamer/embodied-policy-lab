@@ -86,9 +86,11 @@ process. This avoids serializing three RGB/depth observations or translating
 absolute 14D qpos actions into the unrelated LIBERO HTTP schema:
 
 ```bash
-./lab --backend robotwin --model fastwam --mode interactive \
-  --task-set demo_clean --task-id click_bell --default
-./lab --backend robotwin --model flexpi --mode interactive \
+./lab --backend robo_twin --list-tasks
+./lab --backend robo_twin --model flexpi  # searchable phase/task picker
+./lab --backend robo_twin --model fastwam --mode interactive \
+  --task-set demo_clean --task click_bell --default
+./lab --backend robo_twin --model flexpi --mode interactive \
   --task-set demo_randomized --task-id turn_switch --default
 ```
 
@@ -106,6 +108,17 @@ action chunks. Do not interpret the absence of a comparison panel as
 action-only inference; the selected mode remains recorded in `state.json` and
 `report.json`.
 
+The released Flex-π checkpoint contains complete video and action experts. Its
+saved training config nevertheless requests the Wan and ActionDiT initialization
+bases, while the upstream RoboTwin inference preset correctly sets
+`skip_dit_load_from_pretrain: true`. Loading the saved config used to overwrite
+that inference-only setting and either trigger an unnecessary roughly 20 GB Wan
+download or fail with an empty `wan_video_dit` path when downloads were disabled.
+The launchers now verify that both expert key sets are complete and create a
+session-local hard-linked checkpoint view with the inference overrides. No
+checkpoint bytes are copied, publisher files remain unchanged, and
+`inference-release.json` records the decision in the session evidence.
+
 Each rollout intentionally keeps RoboTwin's upstream expert seed check and
 unseen-instruction generator. Preparation is therefore slower than merely
 resetting a scene, but the resulting score follows the native evaluator's seed
@@ -120,15 +133,15 @@ HTTP policy boundary or a matched cross-model benchmark.
 
 ```bash
 # Fast-WAM action inference; 24 actions executed from each 32-action chunk.
-./lab --backend robotwin --model fastwam --mode batch \
+./lab --backend robo_twin --model fastwam --mode batch \
   --task-set demo_clean --task-id click_bell --trials 1 --default
 
 # Flex-π full world-action co-generation; all 32 actions are the native default.
-./lab --backend robotwin --model flexpi --mode batch \
+./lab --backend robo_twin --model flexpi --mode batch \
   --task-set demo_clean --task-id click_bell --trials 1 --default
 
 # The same Flex-π checkpoint on its lower-compute action-only path.
-./lab --backend robotwin --model flexpi --flexpi-mode action-only --mode batch \
+./lab --backend robo_twin --model flexpi --flexpi-mode action-only --mode batch \
   --task-set demo_randomized --task-id turn_switch --trials 1 --default
 ```
 

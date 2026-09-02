@@ -13,7 +13,7 @@ Usage:
   ./scripts/run_interactive_showcase.sh [options]
 
 Backend, model, and task options:
-  --backend libero|robocasa|robotwin Simulator backend (default: libero)
+  --backend libero|robocasa|robo_twin Simulator backend (default: libero)
   --model pi05|fastwam|flexpi|groot-n1.5 Local policy plugin (default: pi05)
   --flexpi-mode MODE              full-joint (default for Flex-pi) or action-only
   --world-model NAME              none (default) or robocasa-sim oracle baseline
@@ -59,7 +59,7 @@ Examples:
   ./scripts/run_showcase.sh --backend libero --task-suite libero_spatial --task-ids 0,1
   ./scripts/run_interactive_showcase.sh --backend libero --model fastwam --task-id 2
   ./scripts/run_interactive_showcase.sh --backend libero --model flexpi --flexpi-mode full-joint
-  ./scripts/run_interactive_showcase.sh --backend robotwin --model flexpi --task-id click_bell
+  ./scripts/run_interactive_showcase.sh --backend robo_twin --model flexpi --task-id click_bell
 
 Environment-variable controls remain supported for backward compatibility.
 EOF
@@ -154,6 +154,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 BACKEND="${BACKEND,,}"
+[[ "$BACKEND" != "robo_twin" ]] || BACKEND="robotwin"
 MODEL="${MODEL,,}"
 WORLD_MODEL="${WORLD_MODEL,,}"
 case "$MODEL" in

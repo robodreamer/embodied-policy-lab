@@ -20,13 +20,14 @@ Usage:
 
 Options:
   --policy-family NAME vla (default) or wam
-  --backend NAME       robocasa (default), libero, or robotwin
+  --backend NAME       robocasa (default), libero, or robo_twin (`robotwin` alias)
   --model NAME         pi05 (default), fastwam, flexpi, or groot-n1.5
   --flexpi-mode MODE   full-joint (default) or action-only
   --world-model NAME   none (default) or robocasa-sim oracle baseline
   --mode MODE          interactive (default) or batch
   --task-set NAME      task collection (backend default when omitted)
-  --task-id ID         numeric task ID, or RoboTwin task name (default: click_bell)
+  --task NAME          numeric task ID, or RoboTwin task name (alias: --task-id)
+  --list-tasks         show the 50-task RoboTwin catalog and exit
   --trials COUNT       batch attempts (default: 1)
   --default            skip the picker and use missing defaults
   --dry-run            print the resolved command without running it
@@ -38,7 +39,8 @@ Examples:
   ./lab --default
   ./lab --policy-family wam
   ./lab --backend libero --model flexpi --flexpi-mode action-only --default
-  ./lab --backend robotwin --model flexpi --mode interactive --task-id click_bell --default
+  ./lab --backend robo_twin --model flexpi --mode interactive --task click_bell --default
+  ./lab --backend robo_twin --list-tasks
   ./lab --backend robocasa --model groot-n1.5 --mode interactive --default
   ./lab --default --dry-run -- --dashboard-port 8086
 
@@ -50,21 +52,42 @@ EOF
 
 list_profiles() {
   cat <<'EOF'
-FAMILY  BACKEND   MODEL         MODE          STATUS
-VLA     robocasa  pi05          action-only   ready / default
-VLA     robocasa  groot-n1.5    action-only   ready
-VLA     libero    pi05          action-only   ready
-WAM     libero    fastwam       action-only   experimental / staged 24 GB profile
-WAM     libero    flexpi        full-joint    experimental / world-action co-generation (default)
-WAM     libero    flexpi        action-only   experimental / lower-compute action path
-WAM     robotwin  fastwam       action-only   experimental / browser studio + native batch
-WAM     robotwin  flexpi        full-joint    experimental / browser studio + native batch (default)
-WAM     robotwin  flexpi        action-only   experimental / browser studio + native batch
+FAMILY  BACKEND     MODEL         MODE          STATUS
+VLA     robocasa    pi05          action-only   ready / default
+VLA     robocasa    groot-n1.5    action-only   ready
+VLA     libero      pi05          action-only   ready
+WAM     libero      fastwam       action-only   experimental / staged 24 GB profile
+WAM     libero      flexpi        full-joint    experimental / world-action co-generation (default)
+WAM     libero      flexpi        action-only   experimental / lower-compute action path
+WAM     robo_twin   fastwam       action-only   experimental / browser studio + native batch
+WAM     robo_twin   flexpi        full-joint    experimental / browser studio + native batch (default)
+WAM     robo_twin   flexpi        action-only   experimental / browser studio + native batch
 
 PREDICTOR / BASELINE  BACKEND    STATUS
 none                  any        ready / default direct execution
 robocasa-sim          robocasa   ready / deterministic oracle baseline
 EOF
+}
+
+robotwin_task_options() {
+  local task steps label
+  while IFS=$'\t' read -r task steps; do
+    [[ -n "$task" ]] || continue
+    label="${task//_/ }"
+    printf '%s\t%s · %s · %s simulator steps\n' "$task" "$label" "$task" "$steps"
+  done < "$PROJECT_DIR/showcase/robotwin_tasks.tsv"
+}
+
+list_robotwin_tasks() {
+  local task steps label index=1
+  printf 'ROBOTWIN TASK CATALOG (pinned release)\n\n'
+  printf '%-4s %-34s %-44s %s\n' '#' 'TASK ID' 'LABEL' 'MAX STEPS'
+  while IFS=$'\t' read -r task steps; do
+    [[ -n "$task" ]] || continue
+    label="${task//_/ }"
+    printf '%-4s %-34s %-44s %s\n' "$index" "$task" "$label" "$steps"
+    ((index++)) || true
+  done < "$PROJECT_DIR/showcase/robotwin_tasks.tsv"
 }
 
 # Options are id<TAB>human label. Prints only the selected id.
@@ -118,7 +141,7 @@ shell_command() {
 
 main() {
   local policy_family="" backend="" model="" flexpi_mode="${FLEXPI_MODE:-}" world_model="" mode="" task_set="" task_id="0" trials="1"
-  local use_defaults=0 dry_run=0 list_only=0 task_id_set=0 trials_set=0 flexpi_mode_set=0
+  local use_defaults=0 dry_run=0 list_only=0 list_tasks=0 task_id_set=0 trials_set=0 flexpi_mode_set=0
   local -a extra_args=()
 
   while [[ $# -gt 0 ]]; do
@@ -130,19 +153,30 @@ main() {
       --world-model) world_model="${2:?--world-model requires a value}"; shift 2 ;;
       --mode) mode="${2:?--mode requires a value}"; shift 2 ;;
       --task-set|--task-suite) task_set="${2:?$1 requires a value}"; shift 2 ;;
-      --task-id) task_id="${2:?--task-id requires a value}"; task_id_set=1; shift 2 ;;
+      --task|--task-id) task_id="${2:?$1 requires a value}"; task_id_set=1; shift 2 ;;
       --trials) trials="${2:?--trials requires a value}"; trials_set=1; shift 2 ;;
       --default) use_defaults=1; shift ;;
       --dry-run) dry_run=1; shift ;;
       --list) list_only=1; shift ;;
+      --list-tasks) list_tasks=1; shift ;;
       -h|--help) usage; return 0 ;;
       --) shift; extra_args=("$@"); break ;;
       *) die "unknown option: $1 (use -- before advanced showcase flags)" ;;
     esac
   done
 
+  # `robotwin` was the original internal spelling. Keep it as a compatibility
+  # alias while presenting the more readable `robo_twin` in the public CLI.
+  [[ "$backend" != "robo_twin" ]] || backend="robotwin"
+
   if [[ "$list_only" == "1" ]]; then
     list_profiles
+    return 0
+  fi
+  if [[ "$list_tasks" == "1" ]]; then
+    [[ -z "$backend" || "$backend" == "robotwin" ]] \
+      || die "--list-tasks currently applies to --backend robo_twin"
+    list_robotwin_tasks
     return 0
   fi
 
@@ -184,7 +218,7 @@ main() {
         backend="$(pick_id \
           "Choose a WAM simulator" \
           $'libero\tLIBERO · interactive studio + matched local benchmark · recommended' \
-          $'robotwin\tRoboTwin 2.0 · bimanual SAPIEN benchmark · three-camera browser studio')" || return 1
+          $'robotwin\tRoboTwin 2.0 (`robo_twin`) · bimanual SAPIEN · three-camera studio')" || return 1
       else
         backend="$(pick_id \
           "Choose a VLA simulator" \
@@ -267,13 +301,17 @@ main() {
         fi
       fi
     fi
+    if [[ "$backend" == "robotwin" && "$task_id_set" == "0" ]]; then
+      local -a robotwin_tasks=()
+      mapfile -t robotwin_tasks < <(robotwin_task_options)
+      task_id="$(pick_id \
+        "Choose a RoboTwin task · type to search all 50 published tasks" \
+        "${robotwin_tasks[@]}")" || return 1
+      task_id_set=1
+    fi
     if [[ "$mode" == "batch" ]]; then
       if [[ "$task_id_set" == "0" ]]; then
-        if [[ "$backend" == "robotwin" ]]; then
-          task_id="$(read_value "RoboTwin task name to run: " "click_bell")" || return 1
-        else
-          task_id="$(read_value "Task ID to run: " "$task_id")" || return 1
-        fi
+        task_id="$(read_value "Task ID to run: " "$task_id")" || return 1
       fi
       if [[ "$trials_set" == "0" ]]; then
         trials="$(read_value "Trials for this task: " "$trials")" || return 1
@@ -316,7 +354,7 @@ main() {
   esac
   if [[ "$policy_family" == "wam" && \
     "$backend" != "libero" && "$backend" != "robotwin" ]]; then
-    die "WAM experiments require --backend libero or robotwin"
+    die "WAM experiments require --backend libero or robo_twin"
   fi
 
   case "$backend/$model" in
@@ -386,7 +424,9 @@ main() {
 
   local rendered summary
   rendered="$(shell_command "${command[@]}")"
-  summary="Embodied Policy Lab\nExperiment: ${policy_family^^}\nSimulator: $backend\nPolicy Model: $model\nPredictor: $world_model\nMode: $mode"
+  local display_backend="$backend"
+  [[ "$display_backend" != "robotwin" ]] || display_backend="robo_twin"
+  summary="Embodied Policy Lab\nExperiment: ${policy_family^^}\nSimulator: $display_backend\nPolicy Model: $model\nPredictor: $world_model\nMode: $mode"
   if [[ "$backend" == "robotwin" ]]; then
     summary+="\nPhase: $task_set · task $task_id"
   else

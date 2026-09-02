@@ -190,6 +190,15 @@ MODEL_ALIASES = {
     "flex-π": "flexpi",
 }
 
+BACKEND_ALIASES = {
+    "robo_twin": "robotwin",
+}
+
+
+def normalize_backend(key: str) -> str:
+    normalized = key.strip().lower()
+    return BACKEND_ALIASES.get(normalized, normalized)
+
 
 def normalize_model(key: str) -> str:
     normalized = key.strip().lower()
@@ -197,8 +206,9 @@ def normalize_model(key: str) -> str:
 
 
 def get_simulator(key: str) -> SimulatorSpec:
+    normalized = normalize_backend(key)
     try:
-        return SIMULATORS[key.lower()]
+        return SIMULATORS[normalized]
     except KeyError as error:
         supported = ", ".join(sorted(SIMULATORS))
         raise ValueError(

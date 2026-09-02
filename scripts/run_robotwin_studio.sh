@@ -135,12 +135,16 @@ for required in "$runtime_python" "$checkpoint" "$statistics" \
 done
 
 session_dir="${session_dir:-$PROJECT_DIR/showcase-runs/$(date +%Y%m%d-%H%M%S)-robotwin}"
+runtime_checkpoint="$checkpoint"
+if [[ "$model" == "flexpi" ]]; then
+  runtime_checkpoint="$session_dir/flexpi-inference-release/checkpoints/weights/$(basename "$checkpoint")"
+fi
 runner=(
   "$runtime_python" "$PROJECT_DIR/showcase/interactive_robotwin.py"
   --model "$model"
   --model-root "$model_root"
   --robotwin-root "$robotwin_root"
-  --checkpoint "$checkpoint"
+  --checkpoint "$runtime_checkpoint"
   --dataset-stats "$statistics"
   --task-profile "$task_profile"
   --task "$task"
@@ -171,6 +175,16 @@ fi
 
 mkdir -p "$session_dir/frames" "$session_dir/videos" "$session_dir/controls" "$PROJECT_DIR/showcase-runs"
 ln -sfn "$session_dir" "$PROJECT_DIR/showcase-runs/latest"
+if [[ "$model" == "flexpi" ]]; then
+  prepared_checkpoint="$(
+    "$runtime_python" "$PROJECT_DIR/showcase/prepare_flexpi_inference_release.py" \
+      --checkpoint "$checkpoint" \
+      --config "$model_root/runs/flexpi-robotwin/config.yaml" \
+      --destination "$session_dir/flexpi-inference-release"
+  )"
+  [[ "$prepared_checkpoint" == "$runtime_checkpoint" ]] \
+    || die "unexpected Flex-π runtime checkpoint path: $prepared_checkpoint"
+fi
 
 mkdir -p "$PROJECT_DIR/showcase-runs"
 lock_path="$PROJECT_DIR/showcase-runs/.active-session.lock"

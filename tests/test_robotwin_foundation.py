@@ -14,6 +14,7 @@ class ArrayLike:
 
 def test_robotwin_simulator_contract_matches_release_profiles():
     simulator = backend_registry.get_simulator("robotwin")
+    assert backend_registry.get_simulator("robo_twin") is simulator
     assert simulator.simulator == "RoboTwin 2.0 / SAPIEN / Vulkan"
     assert simulator.state_dimension == 14
     assert simulator.action_dimension == 14
@@ -90,6 +91,27 @@ def test_flexpi_asset_downloader_uses_file_hashes_not_modelscope_file_revisions(
     assert '"$PYTHON" "$PROJECT_DIR/scripts/download_flexpi_assets.py"' in libero_setup
 
 
+def test_flexpi_robotwin_launch_uses_complete_checkpoint_without_training_bases():
+    project = Path(__file__).resolve().parents[1]
+    preparer = (
+        project / "showcase/prepare_flexpi_inference_release.py"
+    ).read_text(encoding="utf-8")
+    studio = (project / "scripts/run_robotwin_studio.sh").read_text(
+        encoding="utf-8"
+    )
+    batch = (project / "scripts/run_robotwin_evaluation.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'config["model"]["skip_dit_load_from_pretrain"] = True' in preparer
+    assert 'config["model"]["action_dit_pretrained_path"] = None' in preparer
+    assert '"video": sum(key.startswith("mixtures.video.")' in preparer
+    assert '"action": sum(key.startswith("mixtures.action.")' in preparer
+    assert "os.link(checkpoint, runtime_checkpoint)" in preparer
+    assert "prepare_flexpi_inference_release.py" in studio
+    assert "prepare_flexpi_inference_release.py" in batch
+
+
 def test_robotwin_studio_preserves_three_distinct_camera_routes():
     assert CAMERA_FILES == {
         "head_camera": "external.jpg",
@@ -109,6 +131,20 @@ def test_robotwin_studio_catalog_uses_named_tasks(tmp_path):
     assert tasks[0]["position"] == 1
     assert limits == {"click_bell": 400, "turn_switch": 500}
     assert humanize_task("click_bell") == "click bell"
+
+
+def test_cli_robotwin_catalog_matches_pinned_upstream_task_contract():
+    project = Path(__file__).resolve().parents[1]
+    catalog = project / "showcase/robotwin_tasks.tsv"
+    tasks = {}
+    for line in catalog.read_text(encoding="utf-8").splitlines():
+        task, steps = line.split("\t")
+        tasks[task] = int(steps)
+
+    assert len(tasks) == 50
+    assert tasks["click_bell"] == 400
+    assert tasks["turn_switch"] == 400
+    assert tasks["put_bottles_dustbin"] == 1700
 
 
 def test_dashboard_exposes_right_wrist_camera_route():
