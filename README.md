@@ -28,9 +28,9 @@ are retained when the selected model exposes a generated future.
 </p>
 
 <p align="center"><sub>
-The complete local studio after a successful Fast-WAM RoboTwin functional
-check: choose a task, review the scored rollout contract, and inspect the local
-runtime and simulator state.
+The experiment setup after a successful Fast-WAM RoboTwin functional check:
+choose a task, review the scored rollout contract, and inspect the active local
+runtime before starting another rollout.
 </sub></p>
 
 ## Why this lab is different
@@ -77,13 +77,19 @@ tradeoffs inspectable without confusing publisher results with local evidence.
 | VLA | NVIDIA Isaac GR00T N1.5 | action chunks | RoboCasa | supported |
 | WAM | Fast-WAM | 32×7 EEF or 32×14 qpos action chunks | LIBERO, RoboTwin 2.0 | experimental; RoboTwin studio + native batch |
 | WAM | Flex-π action-only | 32×7 EEF or 32×14 qpos action chunks | LIBERO, RoboTwin 2.0 | experimental; RoboTwin studio + native batch |
-| WAM | Flex-π full-joint | actions + RGB/DINO/pointmap futures | LIBERO, RoboTwin 2.0 | experimental; default Flex-π mode; RoboTwin studio + native batch |
+| WAM | Flex-π full-joint | 32×7 EEF actions + RGB/DINO/pointmap futures | LIBERO | experimental; default Flex-π mode |
+| WAM | Flex-π full-joint | 32×14 qpos actions; future media not yet retained by the studio | RoboTwin 2.0 | experimental; studio + native batch |
 
 RoboCasa also exposes `robocasa-sim`, an optional deterministic simulator-oracle
 baseline. It replays action prefixes in a matched MuJoCo environment; it is not
 a learned world model. Unsupported model/simulator pairs never appear in the
 picker. See the [plugin contract](docs/model-plugins.md) and
 [world-model guide](docs/world-model-plugins.md).
+
+Generated-future media is currently decoded and retained by the LIBERO Flex-π
+adapter. RoboTwin full-joint mode enables the released joint-denoising path,
+but its shared studio currently retains the executed three-camera rollout and
+14D action chunks rather than generated-future media.
 
 ## Quick start
 
@@ -146,9 +152,10 @@ non-mutating readiness check. Downloads are large; see
 
 RoboTwin interactive sessions preserve its native head, left-wrist, and
 right-wrist views and 14D qpos action contract. Select any of the 50 named
-tasks in the terminal picker or browser; for Flex-π, switch between world-action co-generation
-and action-only inference without loading another checkpoint. Choose
-`--mode batch` for the model publisher's native evaluation/reporting path.
+tasks in the terminal picker or browser; for Flex-π, switch between
+full-joint and action-only inference without loading another checkpoint.
+Choose `--mode batch` for the model publisher's native evaluation/reporting
+path.
 
 ## One dashboard, comparable evidence
 
@@ -174,9 +181,9 @@ visible together, with the source and model-input dimensions labeled explicitly.
 
 **Execute a policy**
 
-The live dashboard keeps external and wrist cameras, exact language command,
-action-chunk shape, task progress, success state, latency, and GPU telemetry in
-one place.
+The live dashboard keeps each simulator's available camera views, exact
+language command, action-chunk shape, task progress, success state, latency,
+and GPU telemetry in one place.
 
 </td>
 <td width="52%" align="center">
@@ -208,7 +215,7 @@ After each attempt, review:
 
 ```text
 showcase-runs/<session>/
-├── report.md + summary.json        # portable result and rollup
+├── report.md + summary.json      # portable result and rollup
 ├── state.json                    # dashboard state and latency samples
 ├── inference-audit.jsonl         # prompts, hashes, steps, timing
 ├── gpu.csv                       # one-second NVIDIA telemetry
@@ -313,8 +320,8 @@ Treat the figures below as planning guidance, not minimum guarantees.
 | GR00T N1.5 inference checkpoint | ~7.6 GB |
 | Flex-π release checkpoint | ~12 GB, plus VAE/T5/DINO assets |
 | Fast-WAM RoboTwin release checkpoint | ~12 GB |
-| Flex-π action-only peak reservation | 13.24 GiB in the bounded local check |
-| Flex-π full-joint peak reservation | 16.45 GiB in the bounded local check |
+| Flex-π action-only peak reservation | 13.24 GiB in the bounded LIBERO check |
+| Flex-π full-joint peak reservation | 16.45 GiB in the bounded LIBERO check |
 
 Large policies run one at a time. The launcher reserves the policy GPU before
 starting optional prompt generation and rejects accidental concurrent lab
@@ -335,7 +342,7 @@ camera presentation controls, and troubleshooting live in the
 | [GR00T N1.5 RoboCasa validation](docs/validation/groot-n1.5-robocasa.md) | pinned integration and bounded local evidence |
 | [Fast-WAM validation](docs/validation/fastwam-libero.md) | released-checkpoint boundary and bounded experiment |
 | [Flex-π validation](docs/validation/flexpi-libero.md) | full-joint implementation and measured local checks |
-| [RoboTwin integration](docs/validation/robotwin-foundation.md) | 14D bimanual contract, three-camera studio, model-free smoke, and native batch path |
+| [RoboTwin integration](docs/validation/robotwin-foundation.md) | 14D bimanual contract, three policy cameras plus observer, model-free smoke, and native batch path |
 | [WAM benchmark](docs/benchmarks/fastwam-flexpi-libero.md) | headless protocol, provenance, and claims |
 | [Results](results/README.md) | sanitized publishable validation summaries |
 
