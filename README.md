@@ -23,13 +23,14 @@ are retained when the selected model exposes a generated future.
 
 <p align="center">
   <img src="docs/assets/studio-overview.png"
-       alt="Embodied Policy Lab studio showing the active Flex-pi profile, LIBERO task controls, and local runtime status"
+       alt="Embodied Policy Lab studio showing a completed Fast-WAM RoboTwin run, task controls, and local runtime status"
        width="1200">
 </p>
 
 <p align="center"><sub>
-The complete local studio: choose a compatible policy and simulator, define the
-scored rollout, select the Flex-π inference regime, and inspect runtime state.
+The complete local studio after a successful Fast-WAM RoboTwin functional
+check: choose a task, review the scored rollout contract, and inspect the local
+runtime and simulator state.
 </sub></p>
 
 ## Why this lab is different
@@ -153,18 +154,18 @@ and action-only inference without loading another checkpoint. Choose
 
 The studio keeps experiment setup, live simulator state, model inputs,
 post-rollout comparisons, and system telemetry in one reviewable session.
-External and wrist cameras stay visible while the policy runs; generated
-futures are withheld until execution finishes.
+The simulator cameras stay visible while the policy runs; generated futures,
+when available for the selected profile, are withheld until execution finishes.
 
 <p align="center">
   <img src="docs/assets/studio-live-cameras.png"
-       alt="Embodied Policy Lab external and wrist camera views with the exact applied LIBERO instruction"
+       alt="Embodied Policy Lab RoboTwin front observer, head, left-wrist, and right-wrist camera views"
        width="1200">
 </p>
 
 <p align="center"><sub>
-Live external and wrist views, camera and model-input dimensions, the applied
-instruction, task suite, task ID, and seed remain visible together.
+RoboTwin's monitoring-only front observer and all three policy cameras remain
+visible together, with the source and model-input dimensions labeled explicitly.
 </sub></p>
 
 <table>
@@ -193,14 +194,14 @@ prompt generator.
 
 <p align="center">
   <img src="docs/assets/studio-evidence.png"
-       alt="Embodied Policy Lab action trajectory, inference latency, local runtime path, GPU telemetry, and attempt history"
+       alt="Embodied Policy Lab Fast-WAM RoboTwin instruction, action trajectory, latency, runtime path, telemetry, and attempt history"
        width="1200">
 </p>
 
 <p align="center"><sub>
-The lower studio turns a rollout into evidence: predicted action channels,
-warm latency, startup time, replay cadence, GPU telemetry, runtime path, and
-per-prompt result history.
+The lower studio turns the same completed rollout into evidence: the applied
+instruction, 14D action channels, warm latency, startup time, replay cadence,
+GPU telemetry, runtime path, and per-prompt result history.
 </sub></p>
 
 After each attempt, review:
