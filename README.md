@@ -15,7 +15,8 @@ are retained when the selected model exposes a generated future.
 ![Status](https://img.shields.io/badge/status-research%20preview-f59f00.svg)
 ![Simulators](https://img.shields.io/badge/sim-LIBERO%20%7C%20RoboCasa%20%7C%20RoboTwin-7c3aed.svg)
 
-[Quick start](#quick-start) · [Model matrix](#model-matrix) ·
+[Quick start](#quick-start) · [Models](#model-matrix) ·
+[Environments](#environments-at-a-glance) ·
 [World-action replay](#see-the-future-next-to-the-rollout) ·
 [Benchmarks](#matched-wam-benchmark) · [Documentation](#documentation)
 
@@ -90,6 +91,57 @@ Generated-future media is currently decoded and retained by the LIBERO Flex-π
 adapter. RoboTwin full-joint mode enables the released joint-denoising path,
 but its shared studio currently retains the executed three-camera rollout and
 14D action chunks rather than generated-future media.
+
+## Environments at a glance
+
+The lab preserves each simulator's native camera and action contracts while
+standardizing how runs are launched, observed, and saved. Each strip below
+uses only the simulator's front/external observer view and presents three task
+scenes at the same 960×240 size. Frames are selected for scene legibility, not
+rollout-time alignment, and camera intrinsics still belong to each simulator.
+These are local run artifacts, not cross-simulator benchmark results.
+
+<table>
+  <tr>
+    <th>LIBERO / robosuite / MuJoCo</th>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="docs/assets/environment-libero.png"
+           alt="Three LIBERO front-camera task scenes with different black-bowl spatial arrangements"
+           width="960">
+    </td>
+  </tr>
+  <tr>
+    <td><sub>Left to right: bowl between plate and ramekin · bowl on ramekin · bowl beside cookie box.</sub></td>
+  </tr>
+  <tr>
+    <th>RoboCasa365 / robosuite / MuJoCo</th>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="docs/assets/environment-robocasa.png"
+           alt="Three RoboCasa front-camera task scenes with a blender, toaster oven, and stove"
+           width="960">
+    </td>
+  </tr>
+  <tr>
+    <td><sub>Left to right: close blender lid · close toaster-oven door · turn off rear-left burner.</sub></td>
+  </tr>
+  <tr>
+    <th>RoboTwin 2.0 / SAPIEN / Vulkan</th>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="docs/assets/environment-robotwin.png"
+           alt="Three RoboTwin front-observer task scenes with a hammer, handled pot, and bread basket"
+           width="960">
+    </td>
+  </tr>
+  <tr>
+    <td><sub>Left to right: beat block with hammer · lift two-handled pot · place bread in basket.</sub></td>
+  </tr>
+</table>
 
 ## Quick start
 
@@ -187,15 +239,15 @@ and GPU telemetry in one place.
 
 </td>
 <td width="52%" align="center">
-  <img src="docs/assets/robocasa-pi05-rollout.gif"
-       alt="Pi zero point five completing a two-object RoboCasa task"
+  <img src="docs/assets/libero-fastwam-rollout.gif"
+       alt="Fast-WAM completing a two-object LIBERO-10 task"
        width="448">
 </td>
 </tr>
 </table>
 
-The example above is a locally validated π0.5 rollout that places both moka
-pots on the stove. The lab also supports prompt variants, live instruction
+The example above is a locally validated Fast-WAM LIBERO-10 rollout that places
+both moka pots on the stove. The lab also supports prompt variants, live instruction
 updates, unscored exploratory commands, and an optional loopback-only local
 prompt generator.
 
