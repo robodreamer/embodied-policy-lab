@@ -1,0 +1,55 @@
+name: Bug report
+description: Report a reproducible launcher, dashboard, adapter, or benchmark problem.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Do not paste access tokens, private URLs, or full logs without checking
+        them first. Use a private security advisory for vulnerabilities.
+  - type: input
+    id: commit
+    attributes:
+      label: Lab commit
+      description: Output of `git rev-parse HEAD`.
+    validations:
+      required: true
+  - type: dropdown
+    id: profile
+    attributes:
+      label: Profile
+      options:
+        - RoboCasa + pi05
+        - RoboCasa + groot-n1.5
+        - LIBERO + pi05
+        - LIBERO + Fast-WAM
+        - LIBERO + Flex-pi full-joint
+        - LIBERO + Flex-pi action-only
+        - CPU-only tests or tooling
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and reproduction command
+    validations:
+      required: true
+  - type: textarea
+    id: system
+    attributes:
+      label: System information
+      description: OS, GPU, driver/CUDA, Python runtime, and relevant setup check.
+    validations:
+      required: true
+  - type: textarea
+    id: sanitized_logs
+    attributes:
+      label: Sanitized log excerpt
+      render: shell

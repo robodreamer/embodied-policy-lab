@@ -1,0 +1,40 @@
+name: Model or experiment request
+description: Propose a policy, simulator, predictor, or reproducible evaluation.
+title: "[Experiment]: "
+labels: [experiment]
+body:
+  - type: input
+    id: upstream
+    attributes:
+      label: Authoritative project or paper
+      placeholder: https://github.com/organization/project
+    validations:
+      required: true
+  - type: textarea
+    id: question
+    attributes:
+      label: Research question
+      description: What behavior or claim should this experiment test?
+    validations:
+      required: true
+  - type: textarea
+    id: interface
+    attributes:
+      label: Observation and action interface
+      description: Cameras, state, prompt, action representation, horizon, and simulator.
+    validations:
+      required: true
+  - type: textarea
+    id: assets
+    attributes:
+      label: Checkpoints, licenses, and compute
+      description: Include access requirements, approximate download/VRAM, and license links.
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Proposed validation
+      description: Tasks, seeds, trials, baselines, metrics, and claim boundary.
+    validations:
+      required: true

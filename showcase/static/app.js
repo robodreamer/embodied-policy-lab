@@ -1,6 +1,7 @@
 const $ = (id) => document.getElementById(id);
 let lastState = {};
 let configured = false;
+let controlsConfiguration = null;
 let editingPrompt = false;
 let draftDirty = false;
 let taskDirty = false;
@@ -10,6 +11,13 @@ let randomGenerationEnabled = false;
 let budgetDirty = false;
 let evaluationDirty = false;
 let pendingCommand = null;
+let worldModelDirty = false;
+let comparisonDirty = false;
+let policyModeDirty = false;
+let lastPreviewUrl = "";
+let lastActualUrl = "";
+let lastExternalPreviewUrl = "";
+let lastExternalActualUrl = "";
 
 function format(value, digits = 0) {
   return value !== null && value !== "" && Number.isFinite(Number(value))
@@ -63,8 +71,14 @@ function drawLatency(values) {
 
 function refreshFrames() {
   const stamp = Date.now();
+  if (!$("observerCard").classList.contains("hidden")) {
+    $("observerFrame").src = `/frames/observer.jpg?t=${stamp}`;
+  }
   $("externalFrame").src = `/frames/external.jpg?t=${stamp}`;
   $("wristFrame").src = `/frames/wrist.jpg?t=${stamp}`;
+  if (!$("rightWristCard").classList.contains("hidden")) {
+    $("rightWristFrame").src = `/frames/right_wrist.jpg?t=${stamp}`;
+  }
 }
 
 async function postJson(route, payload) {
@@ -130,13 +144,54 @@ function populateTasks(tasks, selected) {
   select.replaceChildren(...tasks.map(task => {
     const option = document.createElement("option");
     option.value = task.id;
-    option.textContent = `Task ${Number(task.id) + 1} — ${task.name || task.prompt}`;
+    const numericId = Number(task.id);
+    const position = task.position || (Number.isFinite(numericId) ? numericId + 1 : "—");
+    option.textContent = `Task ${position} — ${task.name || task.prompt}`;
     return option;
   }));
   select.value = desired;
   const collection = lastState.suite || "the selected task set";
   $("taskCatalogSummary").textContent = `${tasks.length} tasks loaded from ${collection}. The CLI task ID chooses only the initial scene; switch here at any time.`;
   syncTaskExplanation();
+}
+
+function populateWorldModels(models, selected) {
+  const select = $("worldModelSelect");
+  const available = Array.isArray(models) && models.length > 0;
+  $("worldModelSetting").classList.toggle("hidden", !available);
+  if (!available) return;
+  const desired = worldModelDirty ? select.value : String(selected || "none");
+  select.replaceChildren(...models.map(model => {
+    const option = document.createElement("option");
+    option.value = model.key;
+    option.disabled = !model.available;
+    option.textContent = `${model.display_name}${model.available ? "" : " · setup/adapter required"}`;
+    option.dataset.description = model.available
+      ? model.description
+      : `${model.description} Unavailable: ${model.unavailable_reason}`;
+    return option;
+  }));
+  select.value = desired;
+  const selectedOption = select.selectedOptions[0];
+  $("worldModelHelp").textContent = selectedOption?.dataset.description
+    || "Choose a compatible predictor or an explicitly labeled simulator baseline.";
+}
+
+function populatePolicyModes(modes, selected) {
+  const select = $("policyModeSelect");
+  const available = Array.isArray(modes) && modes.length > 0;
+  $("policyModeSetting").classList.toggle("hidden", !available);
+  if (!available) return;
+  const desired = policyModeDirty ? select.value : String(selected || "action-only");
+  select.replaceChildren(...modes.map(mode => {
+    const option = document.createElement("option");
+    option.value = mode.key;
+    option.textContent = mode.display_name;
+    option.dataset.description = mode.description || "";
+    return option;
+  }));
+  select.value = desired;
+  $("policyModeHelp").textContent = select.selectedOptions[0]?.dataset.description || "";
 }
 
 function isRateEligible(item) {
@@ -168,7 +223,7 @@ function renderHistory(history) {
         : (item.mixed_prompt ? "excluded · mixed prompt" : "excluded · aborted"));
     const values = [
       item.attempt,
-      Number(item.task_id) + 1,
+      item.task_position || (Number.isFinite(Number(item.task_id)) ? Number(item.task_id) + 1 : item.task_id),
       item.mixed_prompt ? `${item.prompt} (changed mid-run)` : item.prompt,
       item.prompt_source || "—",
       item.max_steps ? `${item.max_steps} steps` : "legacy",
@@ -198,12 +253,17 @@ function humanPhase(state) {
 function updateLoadingStatus(state) {
   const phase = state.phase || "waiting";
   const loading = ["waiting", "initializing", "preparing_task"].includes(phase);
-  $("loadingBanner").classList.toggle("hidden", !loading);
-  if (!loading) return;
+  const ready = phase === "awaiting_command";
+  $("loadingBanner").classList.toggle("hidden", !loading && !ready);
+  $("loadingBanner").classList.toggle("ready", ready);
+  if (!loading && !ready) return;
 
   const model = state.model_display_name || state.model || "local policy";
   const simulator = state.simulator || state.backend || "local simulator";
-  if (phase === "preparing_task") {
+  if (ready) {
+    $("loadingTitle").textContent = `${String(model).toUpperCase()} READY — START A ROLLOUT`;
+    $("loadingDetail").textContent = "The model is resident and waiting. Select the task below, then press 4 · Start a fresh scored rollout to create the simulator views and run inference.";
+  } else if (phase === "preparing_task") {
     $("loadingTitle").textContent = `PREPARING ${String(simulator).toUpperCase()}`;
     $("loadingDetail").textContent = state.command_message
       || "Constructing the selected scene and loading its task definition. This can take several seconds.";
@@ -226,9 +286,15 @@ function updateRunStatus(state) {
   const unscored = Number(state.unscored_attempts) || 0;
   if (phase === "running") {
     $("runStatus").textContent = `Running rollout ${state.attempt || 1}`;
-    $("runDetail").textContent = state.evaluation_mode === "exploratory"
+    const rolloutDetail = state.evaluation_mode === "exploratory"
       ? `Step ${Number(state.step) || 0} of ${state.max_steps || "—"}; custom experiments run the full budget unless stopped.`
       : `Step ${Number(state.step) || 0} of at most ${state.max_steps || "—"}; it ends early only when the selected goal succeeds.`;
+    const comparisonDetail = state.comparison_status === "predicting"
+      ? " Computing hidden predictor output before executing the same action prefix."
+      : (state.comparison_status === "executing_actual"
+        ? " Executing the real prefix; its hidden comparison will be revealed afterward."
+        : "");
+    $("runDetail").textContent = rolloutDetail + comparisonDetail;
     $("frameStatus").innerHTML = "<i></i> LIVE";
     $("progressLabel").textContent = "CURRENT ROLLOUT";
     $("progressText").textContent = `Step ${Number(state.step) || 0} / ${state.max_steps || "—"}`;
@@ -274,6 +340,10 @@ function updateControls(state) {
   $("promptInput").disabled = stopped || loading || commandPending;
   $("rolloutBudget").disabled = stopped || loading || commandPending;
   $("evaluationMode").disabled = stopped || loading || commandPending;
+  $("worldModelSelect").disabled = stopped || loading || state.phase !== "awaiting_command" || commandPending;
+  $("policyModeSelect").disabled = stopped || loading || state.phase !== "awaiting_command" || commandPending;
+  const hasPredictor = Boolean(state.world_model && state.world_model !== "none");
+  $("compareWorldModel").disabled = stopped || loading || state.phase !== "awaiting_command" || commandPending || !hasPredictor;
   const exploratory = selectedEvaluationMode() === "exploratory";
   const rolloutType = exploratory ? "CUSTOM UNSCORED" : "SCORED";
   $("startRun").textContent = stopped
@@ -295,11 +365,17 @@ function updateControls(state) {
     : (running
       ? "Available now. Keeps the scene and replans; the mixed-prompt attempt is excluded from per-prompt rates."
       : "Disabled until a rollout is running. Starting a rollout already applies the draft above.");
+  $("comparisonHelp").classList.toggle("error", state.comparison_status === "error");
+  $("comparisonHelp").textContent = state.comparison_status === "error"
+    ? `Predictor error: ${state.comparison_error || "unknown failure"}. The policy rollout continued without comparison.`
+    : (!hasPredictor
+    ? "Select an available predictor or simulator oracle to enable comparison. Direct policy execution remains active."
+    : (state.compare_world_model
+      ? "On for the next rollout. Policy execution is never gated; output appears only after its matching real prefix completes."
+      : "Off. The policy executes normally without creating comparison artifacts."));
 }
 
-async function configureControls() {
-  if (configured) return;
-  configured = true;
+async function configureControlsOnce() {
   const config = await fetch("/api/config", {cache: "no-store"}).then(r => r.json());
   localLlmEnabled = Boolean(config.local_llm_enabled);
   randomGenerationEnabled = Array.isArray(config.prompt_generation_modes);
@@ -348,12 +424,12 @@ async function configureControls() {
         draftDirty = false;
         const result = await postJson("/api/control", {
           action: "set_task",
-          task_id: Number(task.id),
+          task_id: task.id,
         });
         pendingCommand = {
           id: result.command.id,
           action: "set_task",
-          taskId: Number(task.id),
+          taskId: String(task.id),
         };
         setControlNote("Preparing the selected simulator scene and its exact canonical instruction…");
       } catch (error) { setControlNote(error.message, true); }
@@ -384,14 +460,73 @@ async function configureControls() {
     setControlNote(`Staged a ${selectedBudgetSteps()}-step budget for the next fresh rollout.`);
     updateControls(lastState);
   });
+  $("worldModelSelect").addEventListener("change", async () => {
+    worldModelDirty = true;
+    const option = $("worldModelSelect").selectedOptions[0];
+    $("worldModelHelp").textContent = option?.dataset.description || "";
+    try {
+      const requested = $("worldModelSelect").value;
+      if (requested === "none") $("compareWorldModel").checked = false;
+      const result = await postJson("/api/control", {
+        action: "set_world_model",
+        world_model: requested,
+      });
+      pendingCommand = {id: result.command.id, action: "set_world_model", worldModel: requested};
+      setControlNote("Switching the predictor/baseline. Policy selection is unchanged.");
+      updateControls(lastState);
+    } catch (error) { setControlNote(error.message, true); }
+  });
+  $("policyModeSelect").addEventListener("change", async () => {
+    policyModeDirty = true;
+    const requested = $("policyModeSelect").value;
+    $("policyModeHelp").textContent = $("policyModeSelect").selectedOptions[0]?.dataset.description || "";
+    try {
+      const result = await postJson("/api/control", {
+        action: "set_policy_mode",
+        policy_mode: requested,
+      });
+      pendingCommand = {id: result.command.id, action: "set_policy_mode", policyMode: requested};
+      setControlNote(requested === "full-joint"
+        ? (lastState.backend === "robotwin"
+          ? "World-action co-generation is staged. The current RoboTwin adapter charts executed actions but does not yet retain generated-future media."
+          : "World-action co-generation is staged. Its visual future appears only after the matching real action prefix executes.")
+        : "Fast action-only inference is staged; no visual future will be generated.");
+      updateControls(lastState);
+    } catch (error) { setControlNote(error.message, true); }
+  });
+  $("compareWorldModel").addEventListener("change", async () => {
+    comparisonDirty = true;
+    const enabled = $("compareWorldModel").checked;
+    try {
+      const result = await postJson("/api/control", {
+        action: "set_world_model_comparison",
+        enabled,
+      });
+      pendingCommand = {
+        id: result.command.id,
+        action: "set_world_model_comparison",
+        enabled,
+      };
+      setControlNote(enabled
+        ? "Comparison enabled for the next rollout. Predictions stay hidden until the matching real action prefix finishes."
+        : "Comparison disabled. The policy will execute directly without creating prediction clips.");
+      updateControls(lastState);
+    } catch (error) {
+      comparisonDirty = false;
+      $("compareWorldModel").checked = Boolean(lastState.compare_world_model);
+      setControlNote(error.message, true);
+    }
+  });
   updateEvaluationHelp();
   updateBudgetHelp();
   $("startRun").onclick = async () => {
     try {
       const expectedPrompt = $("promptInput").value.trim();
-      const expectedTask = Number($("taskSelect").value);
+      const expectedTask = $("taskSelect").value;
       const expectedBudget = selectedBudget();
       const expectedEvaluation = selectedEvaluationMode();
+      const expectedPolicyMode = $("policyModeSetting").classList.contains("hidden")
+        ? undefined : $("policyModeSelect").value;
       const result = await postJson("/api/control", {
         action: "start_rollout",
         task_id: expectedTask,
@@ -399,6 +534,7 @@ async function configureControls() {
         source: pendingPromptSource,
         rollout_budget_multiplier: expectedBudget,
         evaluation_mode: expectedEvaluation,
+        policy_mode: expectedPolicyMode,
       });
       pendingCommand = {
         id: result.command.id,
@@ -408,6 +544,7 @@ async function configureControls() {
         taskId: expectedTask,
         budget: expectedBudget,
         evaluationMode: expectedEvaluation,
+        policyMode: expectedPolicyMode,
       };
       setControlNote(`Start requested. Keeping this draft visible until the new simulator state confirms the exact prompt and ${selectedBudgetSteps()}-step budget.`);
       updateControls(lastState);
@@ -426,7 +563,7 @@ async function configureControls() {
         id: result.command.id,
         action: "set_prompt",
         prompt: $("promptInput").value.trim(),
-        taskId: Number($("taskSelect").value),
+        taskId: $("taskSelect").value,
         evaluationMode: selectedEvaluationMode(),
       };
       setControlNote("Draft sent. The policy will replan from the next observation; this attempt is now mixed-prompt.");
@@ -470,6 +607,17 @@ async function configureControls() {
   };
 }
 
+async function configureControls() {
+  if (configured) return;
+  if (!controlsConfiguration) controlsConfiguration = configureControlsOnce();
+  try {
+    await controlsConfiguration;
+    configured = true;
+  } finally {
+    controlsConfiguration = null;
+  }
+}
+
 async function updateState() {
   try {
     const state = await fetch("/api/state", {cache: "no-store"}).then(r => r.json());
@@ -482,17 +630,20 @@ async function updateState() {
       const promptMatches = pendingCommand.prompt === undefined || canonicalPromptAck
         || String(state.prompt || "").trim() === pendingCommand.prompt;
       const taskMatches = pendingCommand.taskId === undefined
-        || Number(state.task_id) === pendingCommand.taskId;
+        || String(state.task_id) === String(pendingCommand.taskId);
       const budgetMatches = pendingCommand.budget === undefined
         || Number(state.rollout_budget_multiplier) === pendingCommand.budget;
       const evaluationMatches = pendingCommand.evaluationMode === undefined
         || String(state.evaluation_mode || "scored") === pendingCommand.evaluationMode;
-      if (promptMatches && taskMatches && budgetMatches && evaluationMatches) {
+      const policyModeMatches = pendingCommand.policyMode === undefined
+        || String(state.policy_mode || "action-only") === pendingCommand.policyMode;
+      if (promptMatches && taskMatches && budgetMatches && evaluationMatches && policyModeMatches) {
         if (pendingCommand.action === "start_rollout") {
           draftDirty = false;
           taskDirty = false;
           budgetDirty = false;
           evaluationDirty = false;
+          policyModeDirty = false;
         } else if (pendingCommand.action === "set_prompt") {
           draftDirty = false;
           evaluationDirty = false;
@@ -501,6 +652,12 @@ async function updateState() {
           taskDirty = false;
           budgetDirty = false;
           evaluationDirty = false;
+        } else if (pendingCommand.action === "set_world_model") {
+          worldModelDirty = false;
+        } else if (pendingCommand.action === "set_world_model_comparison") {
+          comparisonDirty = false;
+        } else if (pendingCommand.action === "set_policy_mode") {
+          policyModeDirty = false;
         }
         pendingCommand = null;
       }
@@ -516,6 +673,11 @@ async function updateState() {
     $("phaseBadge").textContent = humanPhase(state);
     $("interactiveControls").classList.toggle("hidden", !state.interactive);
     populateTasks(state.available_tasks, state.task_id);
+    populateWorldModels(state.available_world_models, state.world_model);
+    populatePolicyModes(state.available_policy_modes, state.policy_mode);
+    if (!comparisonDirty && (!pendingCommand || pendingCommand.action !== "set_world_model_comparison")) {
+      $("compareWorldModel").checked = Boolean(state.compare_world_model);
+    }
     if (!budgetDirty && !pendingCommand && state.rollout_budget_multiplier) {
       $("rolloutBudget").value = String(state.rollout_budget_multiplier);
       updateBudgetHelp();
@@ -536,6 +698,7 @@ async function updateState() {
     updateControls(state);
     const modelDisplayName = state.model_display_name || state.model || "Local policy";
     const simulatorDisplayName = state.simulator || state.backend || "Local simulator";
+    const worldModelDisplayName = state.world_model_display_name || state.world_model || "No predictor";
     const backendName = state.backend ? String(state.backend).toUpperCase() : "BACKEND PENDING";
     const transportName = state.policy_transport ? String(state.policy_transport).toUpperCase() : "LOCAL";
     const taskPosition = state.task_position && state.total_tasks
@@ -546,9 +709,17 @@ async function updateState() {
     $("profileModelDetail").textContent = [state.model, state.runtime].filter(Boolean).join(" · ") || "Local policy";
     $("profileEnvironment").textContent = simulatorDisplayName;
     $("profileEnvironmentDetail").textContent = `${backendName} BACKEND`;
+    $("profileWorldModel").textContent = worldModelDisplayName;
+    $("profileWorldModelDetail").textContent = [
+      state.world_model_runtime,
+      state.compare_world_model ? "comparison on" : "comparison off",
+      state.world_model_prediction_kind === "simulator_oracle" ? "oracle baseline" : null,
+    ].filter(Boolean).join(" · ") || "Prediction comparison";
     $("profileTaskSet").textContent = state.suite || "—";
     $("profileTaskDetail").textContent = taskPosition;
-    $("profileTransport").textContent = `${transportName} · LOOPBACK`;
+    $("profileTransport").textContent = state.policy_transport === "in-process native"
+      ? "IN-PROCESS NATIVE · LOCAL"
+      : `${transportName} · LOOPBACK`;
     $("profileEndpoint").textContent = state.policy_endpoint || "Waiting for endpoint";
     $("modelRuntimeName").textContent = `${modelDisplayName} / ${String(state.runtime || "local runtime").replace(/^local /i, "")}`;
     $("prompt").textContent = state.model_ack_prompt || state.prompt || "Waiting for an instruction…";
@@ -578,14 +749,30 @@ async function updateState() {
     $("endpoint").textContent = state.policy_endpoint || "Waiting for local policy endpoint";
     const modelWidth = Number(state.model_image_width) || 224;
     const modelHeight = Number(state.model_image_height) || 224;
-    const viewerWidth = Number(state.viewer_width) || modelWidth;
-    const viewerHeight = Number(state.viewer_height) || modelHeight;
-    const cameraMeta = `${viewerWidth}×${viewerHeight} VIEW · MODEL INPUT ${modelWidth}×${modelHeight}`;
+    const sourceWidth = Number(state.camera_observation_width) || modelWidth;
+    const sourceHeight = Number(state.camera_observation_height) || modelHeight;
+    const viewerWidth = Number(state.viewer_width) || sourceWidth;
+    const viewerHeight = Number(state.viewer_height) || sourceHeight;
+    const liveWidth = state.backend === "libero" ? sourceWidth : viewerWidth;
+    const liveHeight = state.backend === "libero" ? sourceHeight : viewerHeight;
+    const cameraMeta = `${liveWidth}×${liveHeight} LIVE VIEW · POLICY CAMERA ${sourceWidth}×${sourceHeight} · MODEL INPUT ${modelWidth}×${modelHeight}`;
     $("externalCameraMeta").textContent = cameraMeta;
     $("wristCameraMeta").textContent = cameraMeta;
-    document.documentElement.style.setProperty("--camera-aspect", `${viewerWidth} / ${viewerHeight}`);
+    $("rightWristCameraMeta").textContent = cameraMeta;
+    const denoiser = String(state.render_denoiser || "default").toUpperCase();
+    $("observerCameraMeta").textContent = `${liveWidth}×${liveHeight} MONITORING ONLY · ${denoiser} DENOISER · NOT SENT TO POLICY`;
+    $("observerCameraTitle").textContent = state.observer_camera_label || "FRONT OBSERVER CAMERA";
+    $("externalCameraTitle").textContent = state.external_camera_label || "EXTERNAL CAMERA";
+    $("wristCameraTitle").textContent = state.wrist_camera_label || "WRIST CAMERA";
+    $("rightWristCameraTitle").textContent = state.third_camera_label || "RIGHT WRIST CAMERA";
+    document.documentElement.style.setProperty("--camera-aspect", `${liveWidth} / ${liveHeight}`);
     const cameraCount = Number(state.camera_count) || 2;
-    $("stateShape").textContent = `${cameraCount} RGB VIEW${cameraCount === 1 ? "" : "S"} · ${modelWidth}×${modelHeight} · ${state.state_dimension || "—"}D STATE`;
+    const threeCamera = cameraCount >= 3;
+    const observerCamera = Boolean(state.observer_camera_available);
+    $("observerCard").classList.toggle("hidden", !observerCamera);
+    $("rightWristCard").classList.toggle("hidden", !threeCamera);
+    $("heroGrid").classList.toggle("three-camera", threeCamera && !observerCamera);
+    $("stateShape").textContent = `${cameraCount} POLICY RGB VIEW${cameraCount === 1 ? "" : "S"}${observerCamera ? " + 1 OBSERVER" : ""} · ${sourceWidth}×${sourceHeight} SOURCE · ${state.state_dimension || "—"}D STATE`;
     $("actionShape").textContent = state.action_dimension ? `${state.action_dimension}D ACTIONS` : "POLICY ACTIONS";
     $("simulatorLabel").textContent = simulatorDisplayName;
     $("actionTitle").textContent = state.action_horizon
@@ -599,6 +786,99 @@ async function updateState() {
       item.textContent = label;
       return item;
     }));
+    const independentPreview = state.preview_result || {};
+    const policyPreview = state.policy_prediction_result || {};
+    const isSimulatorOracle = state.world_model_prediction_kind === "simulator_oracle";
+    const rolloutFinished = ["awaiting_command", "stopped", "complete"].includes(state.phase);
+    const independentComparisonReady = Boolean(
+      state.compare_world_model
+      && state.comparison_status === "ready"
+      && state.preview_video_url
+      && state.actual_video_url
+    );
+    const policyComparisonReady = Boolean(
+      rolloutFinished
+      && state.policy_prediction_status === "ready"
+      && state.policy_prediction_video_url
+      && state.policy_actual_video_url
+    );
+    const comparisonReady = independentComparisonReady || policyComparisonReady;
+    const preview = policyComparisonReady ? policyPreview : independentPreview;
+    const externalComparisonReady = Boolean(
+      policyComparisonReady
+      && state.policy_prediction_external_video_url
+      && state.policy_actual_external_video_url
+    );
+    $("previewCard").classList.toggle("hidden", !comparisonReady);
+    $("previewCard").classList.toggle("policy-view", policyComparisonReady);
+    $("actualExternalComparison").classList.toggle("hidden", !externalComparisonReady);
+    $("predictedExternalComparison").classList.toggle("hidden", !externalComparisonReady);
+    $("previewCardLabel").innerHTML = policyComparisonReady
+      ? '<span>05</span> FLEX-π POST-ROLLOUT WORLD-ACTION CHECK'
+      : (isSimulatorOracle
+        ? '<span>05</span> SIMULATOR ORACLE REPLAY VS COMPLETED EXECUTION'
+        : '<span>05</span> LEARNED PREDICTION VS COMPLETED EXECUTION');
+    $("predictedVideoLabel").textContent = policyComparisonReady
+      ? "FLEX-π GENERATED WRIST FUTURE"
+      : (isSimulatorOracle ? "SIMULATOR ORACLE REPLAY" : "LEARNED PREDICTION");
+    $("actualVideoLabel").textContent = policyComparisonReady
+      ? "ACTUAL WRIST EXECUTION"
+      : "ACTUAL POLICY EXECUTION";
+    $("previewKind").textContent = policyComparisonReady
+      ? `${modelDisplayName} · ${String(preview.kind || "joint_world_action").replaceAll("_", " ").toUpperCase()}`
+      : `${worldModelDisplayName} · ${String(state.world_model_prediction_kind || "preview").replaceAll("_", " ").toUpperCase()}`;
+    $("previewTitle").textContent = policyComparisonReady
+      ? `${preview.frame_count || "—"} aligned frames across ${preview.prefix_count || "—"} executed action prefixes`
+      : `${preview.previewed_steps || state.replan_steps || "—"}-step ${isSimulatorOracle ? "oracle replay" : "prediction"} and execution`;
+    $("previewDescription").textContent = preview.caveat
+      ? `${preview.caveat} Both clips were withheld until the rollout ended.`
+      : "Both clips start from the same pre-action state, use the same action prefix, and are revealed only after the rollout ends.";
+    const matchLabel = preview.predicted_matches_actual === true
+      ? "FINAL STATE MATCHES WITHIN TOLERANCE"
+      : (preview.predicted_matches_actual === false ? "FINAL STATE DIFFERS" : "FINAL STATE NOT CHECKED");
+    const stateError = preview.state_comparison?.shape_match
+      ? ` · MAX ΔQPOS ${Number(preview.state_comparison.max_qpos_error).toExponential(2)} · MAX ΔQVEL ${Number(preview.state_comparison.max_qvel_error).toExponential(2)}`
+      : "";
+    $("previewEvidence").textContent = policyComparisonReady
+      ? `EXTERNAL RGB PSNR ${format(preview.external_rgb_psnr_db, 2)} dB · WRIST RGB PSNR ${format(preview.wrist_rgb_psnr_db ?? preview.mean_rgb_psnr_db, 2)} dB · ${preview.frame_interval_actions || "—"} ACTIONS BETWEEN FRAMES · REVEALED AFTER ROLLOUT`
+      : (preview.live_state_unchanged
+        ? `${matchLabel}${stateError} · PREDICTED ${preview.predicted_state_sha256 || "—"} · ACTUAL ${preview.actual_state_sha256 || "—"} · ${format(preview.duration_ms, 1)} ms`
+        : "No completed comparison evidence recorded yet");
+    $("previewHelp").textContent = policyComparisonReady
+      ? "This is the replayable full-rollout sample timeline, not only the final second. External comparison is above wrist comparison; exact raw Flex-π composites and prefix offsets remain in the session artifacts."
+      : "Playback does not loop automatically, so each clip represents one finite action prefix.";
+    const previewUrl = policyComparisonReady
+      ? state.policy_prediction_video_url : (state.preview_video_url || "");
+    const actualUrl = policyComparisonReady
+      ? state.policy_actual_video_url : (state.actual_video_url || "");
+    const externalPreviewUrl = policyComparisonReady
+      ? state.policy_prediction_external_video_url : "";
+    const externalActualUrl = policyComparisonReady
+      ? state.policy_actual_external_video_url : "";
+    if (previewUrl && previewUrl !== lastPreviewUrl) {
+      lastPreviewUrl = previewUrl;
+      $("previewVideo").src = previewUrl;
+      $("previewVideo").currentTime = 0;
+      $("previewVideo").load();
+    }
+    if (actualUrl && actualUrl !== lastActualUrl) {
+      lastActualUrl = actualUrl;
+      $("actualVideo").src = actualUrl;
+      $("actualVideo").currentTime = 0;
+      $("actualVideo").load();
+    }
+    if (externalPreviewUrl && externalPreviewUrl !== lastExternalPreviewUrl) {
+      lastExternalPreviewUrl = externalPreviewUrl;
+      $("previewExternalVideo").src = externalPreviewUrl;
+      $("previewExternalVideo").currentTime = 0;
+      $("previewExternalVideo").load();
+    }
+    if (externalActualUrl && externalActualUrl !== lastExternalActualUrl) {
+      lastExternalActualUrl = externalActualUrl;
+      $("actualExternalVideo").src = externalActualUrl;
+      $("actualExternalVideo").currentTime = 0;
+      $("actualExternalVideo").load();
+    }
     const runningProgress = state.phase === "running" ? Math.max(0, Math.min(1, Number(state.progress) || 0)) : 0;
     $("progressBar").style.transform = `scaleX(${runningProgress})`;
     $("updated").textContent = state.updated_at ? `UPDATED ${new Date(state.updated_at).toLocaleTimeString()}` : "AWAITING TELEMETRY";
@@ -607,7 +887,12 @@ async function updateState() {
     drawAction(state.last_action_chunk || []);
     drawLatency(state.inference_latencies_ms || []);
     refreshFrames();
-  } catch (_) { $("phaseBadge").textContent = "RECONNECTING"; }
+  } catch (error) {
+    $("phaseBadge").textContent = "RECONNECTING";
+    $("loadingBanner").classList.remove("hidden", "ready");
+    $("loadingTitle").textContent = "DASHBOARD UPDATE FAILED";
+    $("loadingDetail").textContent = `${error?.message || "Unknown browser error"}. Retrying automatically; refresh this page if the controls remain unavailable.`;
+  }
 }
 
 async function updateTelemetry() {

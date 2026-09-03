@@ -8,9 +8,11 @@ repository.
 from __future__ import annotations
 
 import datetime
+import gc
 import json
 import os
 import pathlib
+import random
 import re
 
 import gymnasium as gym
@@ -20,17 +22,26 @@ from PIL import Image
 from robocasa.utils.dataset_registry import TASK_SET_REGISTRY
 from robocasa.utils.dataset_registry_utils import get_task_horizon
 from robocasa.utils.env_utils import convert_action
+from robosuite.utils.binding_utils import MjRenderContextOffscreen
 
+try:
+    from .robocasa_contracts import (
+        CAMERA_KEYS,
+        robot_state_from_observation,
+        validate_action_chunk,
+    )
+except ImportError:  # Direct script execution adds showcase/ to sys.path.
+    from robocasa_contracts import (
+        CAMERA_KEYS,
+        robot_state_from_observation,
+        validate_action_chunk,
+    )
 
-CAMERA_KEYS = (
-    "video.robot0_agentview_left",
-    "video.robot0_eye_in_hand",
-    "video.robot0_agentview_right",
-)
-VIEWER_CAMERA_NAMES = (
-    "robot0_agentview_left",
-    "robot0_eye_in_hand",
-)
+__all__ = [
+    "CAMERA_KEYS",
+    "robot_state_from_observation",
+    "validate_action_chunk",
+]
 
 
 def timestamp() -> str:
@@ -87,6 +98,10 @@ def parse_task_ids(raw: str, count: int) -> list[int]:
 def create_environment(task_name: str, split: str, seed: int):
     if split not in ("pretrain", "target"):
         raise ValueError("RoboCasa split must be 'pretrain' or 'target'")
+    # RoboCasa samples fixtures, layouts, and textures during construction using
+    # process-global NumPy and Python RNGs before Gym's reset seed takes effect.
+    np.random.seed(seed)
+    random.seed(seed)
     return gym.make(
         f"robocasa/{task_name}",
         split=split,
@@ -95,51 +110,128 @@ def create_environment(task_name: str, split: str, seed: int):
     )
 
 
-def robot_state_from_observation(observation: dict) -> np.ndarray:
-    robot_state = np.concatenate(
-        (
-            observation["state.end_effector_position_relative"],
-            observation["state.end_effector_rotation_relative"],
-            observation["state.base_position"],
-            observation["state.base_rotation"],
-            observation["state.gripper_qpos"],
-        ),
-        axis=0,
-    )
-    if robot_state.shape != (16,):
-        raise ValueError(f"Expected a 16D RoboCasa state; got {robot_state.shape}")
-    return robot_state
+def create_environment_pair(task_name: str, split: str, seed: int):
+    """Construct matching live and counterfactual environments.
 
-
-def render_viewer_frames(env, width: int, height: int) -> tuple[np.ndarray, ...]:
-    """Render presentation-quality views without changing policy observations.
-
-    RoboCasa's Gym wrapper intentionally supplies square 256px observations to
-    the policy. Rendering the dashboard views directly from MuJoCo lets the UI
-    use a sharper widescreen image while leaving that policy contract intact.
+    RoboCasa chooses fixtures and objects while constructing an environment.
+    Replaying the same NumPy RNG state is therefore required before a MuJoCo
+    state can be copied safely between the two models.
     """
+    numpy_state = np.random.get_state()
+    python_state = random.getstate()
+    live_env = None
+    try:
+        np.random.seed(seed)
+        random.seed(seed)
+        live_env = create_environment(task_name, split, seed)
+        live_numpy_state = np.random.get_state()
+        live_python_state = random.getstate()
+        np.random.seed(seed)
+        random.seed(seed)
+        branch_env = create_environment(task_name, split, seed)
+        np.random.set_state(live_numpy_state)
+        random.setstate(live_python_state)
+        return live_env, branch_env
+    except Exception:
+        if live_env is not None:
+            live_env.close()
+        np.random.set_state(numpy_state)
+        random.setstate(python_state)
+        raise
+
+
+def reset_environment_pair(live_env, branch_env, seed: int):
+    """Reset a paired environment with identical randomized scene choices."""
+    numpy_state = np.random.get_state()
+    python_state = random.getstate()
+    try:
+        np.random.seed(seed)
+        random.seed(seed)
+        live_observation, live_info = live_env.reset(seed=seed)
+        live_numpy_state = np.random.get_state()
+        live_python_state = random.getstate()
+        np.random.seed(seed)
+        random.seed(seed)
+        branch_env.reset(seed=seed)
+        np.random.set_state(live_numpy_state)
+        random.setstate(live_python_state)
+    except Exception:
+        np.random.set_state(numpy_state)
+        random.setstate(python_state)
+        raise
+
+    live_state = live_env.unwrapped.env.sim.get_state()
+    branch_state = branch_env.unwrapped.env.sim.get_state()
+    if (
+        np.asarray(live_state.qpos).shape != np.asarray(branch_state.qpos).shape
+        or np.asarray(live_state.qvel).shape != np.asarray(branch_state.qvel).shape
+    ):
+        raise ValueError(
+            "Paired RoboCasa resets produced different MuJoCo models; "
+            "counterfactual comparison cannot run safely"
+        )
+    return live_observation, live_info
+
+
+def suspend_environment_renderer(env) -> None:
+    """Release a branch EGL context so it cannot contaminate live rendering."""
+    sim = env.unwrapped.env.sim
+    context = sim._render_context_offscreen
+    if context is None:
+        return
+    sim._render_context_offscreen = None
+    del context
+    gc.collect()
+
+
+def resume_environment_renderer(env) -> None:
+    """Recreate an offscreen context immediately before branch prediction."""
+    inner = env.unwrapped.env
+    if inner.sim._render_context_offscreen is None:
+        MjRenderContextOffscreen(
+            inner.sim,
+            device_id=inner.render_gpu_device_id,
+        )
+
+
+def restore_environment_renderer(env) -> None:
+    """Rebuild the live context after another MuJoCo model used EGL.
+
+    RoboSuite's per-simulation render contexts share one process-level EGL
+    display. Creating or destroying the branch context can leave the existing
+    live context with stale framebuffer resources, producing duplicate cameras
+    or corrupted colors even though the correct context is made current.
+    """
+    suspend_environment_renderer(env)
+    resume_environment_renderer(env)
+
+
+def render_viewer_frames(
+    env, width: int, height: int, *, observation: dict | None = None
+) -> tuple[np.ndarray, ...]:
+    """Render full-resolution, correctly oriented dashboard cameras.
+
+    Results are copied immediately because MuJoCo reuses the offscreen buffer.
+    Counterfactual render contexts are suspended outside their prediction
+    window, so these live renders retain the correct camera and color state.
+    """
+    del observation  # Kept in the signature for branch/live call-site symmetry.
     if width < 1 or height < 1:
         raise ValueError("Viewer width and height must be positive")
-    robocasa_env = env.unwrapped.env
+    sim = env.unwrapped.env.sim
     return tuple(
         np.ascontiguousarray(
-            robocasa_env.sim.render(
-                camera_name=camera_name,
-                width=width,
-                height=height,
+            np.array(
+                sim.render(camera_name=camera_name, width=width, height=height),
+                dtype=np.uint8,
+                copy=True,
             )[::-1]
         )
-        for camera_name in VIEWER_CAMERA_NAMES
+        for camera_name in (
+            "robot0_agentview_left",
+            "robot0_eye_in_hand",
+        )
     )
-
-
-def validate_action_chunk(value) -> np.ndarray:
-    actions = np.asarray(value)
-    if actions.ndim != 2 or actions.shape[1] != 12:
-        raise ValueError(f"Expected a [horizon, 12] action chunk; got {actions.shape}")
-    if not np.isfinite(actions).all():
-        raise ValueError("Policy returned non-finite RoboCasa actions")
-    return actions
 
 
 def step_environment(env, action: np.ndarray):

@@ -13,8 +13,12 @@ Usage:
   ./scripts/run_interactive_showcase.sh [options]
 
 Backend, model, and task options:
-  --backend libero|robocasa       Simulator backend (default: libero)
-  --model pi05|groot-n1.5         Local policy plugin (default: pi05)
+  --backend libero|robocasa|robo_twin Simulator backend (default: libero)
+  --model pi05|fastwam|flexpi|groot-n1.5 Local policy plugin (default: pi05)
+  --flexpi-mode MODE              full-joint (default for Flex-pi) or action-only
+  --world-model NAME              none (default) or robocasa-sim oracle baseline
+  --compare-world-model           Compare prediction after each real action prefix
+  --no-compare-world-model        Run normally without comparison (default)
   --task-suite NAME               LIBERO suite or RoboCasa task set
   --task-set NAME                 Alias for --task-suite
   --task-id ID                    Initial task interactively, or one batch task
@@ -23,6 +27,7 @@ Backend, model, and task options:
   --trials COUNT                  Automatic attempts for a batch run
   --seed SEED                     Reproducible simulator seed
   --replan-steps COUNT            Actions executed before querying the policy again
+  --max-policy-steps COUNT        LIBERO test-only rollout cap; 0 uses suite default
   --viewer-width PX               RoboCasa dashboard render width (default: 960)
   --viewer-height PX              RoboCasa dashboard render height (default: 540)
   --viewer-fps FPS                Maximum dashboard render rate (default: 6)
@@ -35,6 +40,11 @@ Session options:
   --batch                         Start automatically and exit after --trials
   --auto-start                    Start the initial interactive rollout immediately
   --realtime-delay-ms MS          Delay after each simulator action
+  --benchmark-mode                Reduce per-step UI/file work for headless evaluation
+  --save-videos / --no-save-videos
+                                  Keep or omit rollout videos (default: keep)
+  --latency-probe-warmups COUNT   Repeated-observation warmups before the first rollout
+  --latency-probe-calls COUNT     Timed repeated-observation policy calls
   --policy-port PORT              Local policy server port
   --dashboard-port PORT           Browser dashboard port
   --hold-open / --no-hold-open    Keep or close the dashboard after completion
@@ -47,6 +57,9 @@ Examples:
   ./scripts/run_interactive_showcase.sh --backend robocasa --model groot-n1.5
   ./scripts/run_showcase.sh --backend robocasa --batch --task-id 2 --trials 3
   ./scripts/run_showcase.sh --backend libero --task-suite libero_spatial --task-ids 0,1
+  ./scripts/run_interactive_showcase.sh --backend libero --model fastwam --task-id 2
+  ./scripts/run_interactive_showcase.sh --backend libero --model flexpi --flexpi-mode full-joint
+  ./scripts/run_interactive_showcase.sh --backend robo_twin --model flexpi --task-id click_bell
 
 Environment-variable controls remain supported for backward compatibility.
 EOF
@@ -54,12 +67,15 @@ EOF
 
 BACKEND="${BACKEND:-libero}"
 MODEL="${MODEL:-pi05}"
+WORLD_MODEL="${WORLD_MODEL:-}"
+COMPARE_WORLD_MODEL="${COMPARE_WORLD_MODEL:-0}"
 TASK_SUITE="${TASK_SUITE:-}"
 TASK_IDS="${TASK_IDS:-}"
 ROBOCASA_SPLIT="${ROBOCASA_SPLIT:-target}"
 TRIALS_PER_TASK="${TRIALS_PER_TASK:-1}"
 SEED="${SEED:-7}"
 REPLAN_STEPS="${REPLAN_STEPS:-}"
+MAX_POLICY_STEPS="${MAX_POLICY_STEPS:-0}"
 VIEWER_WIDTH="${VIEWER_WIDTH:-960}"
 VIEWER_HEIGHT="${VIEWER_HEIGHT:-540}"
 VIEWER_FPS="${VIEWER_FPS:-6}"
@@ -78,17 +94,35 @@ LOCAL_LLM_URL="${LOCAL_LLM_URL:-}"
 LOCAL_LLM_MODEL="${LOCAL_LLM_MODEL:-}"
 LOCAL_LLM_NUM_GPU="${LOCAL_LLM_NUM_GPU:-0}"
 SESSION_DIR="${SESSION_DIR:-}"
+FASTWAM_DIR="${FASTWAM_DIR:-}"
+FLEXPI_DIR="${FLEXPI_DIR:-}"
+FLEXPI_MODE="${FLEXPI_MODE:-}"
+BENCHMARK_MODE="${BENCHMARK_MODE:-0}"
+SAVE_VIDEOS="${SAVE_VIDEOS:-1}"
+LATENCY_PROBE_WARMUPS="${LATENCY_PROBE_WARMUPS:-0}"
+LATENCY_PROBE_CALLS="${LATENCY_PROBE_CALLS:-0}"
+LIBERO_BENCHMARK_RUNTIME="${LIBERO_BENCHMARK_RUNTIME:-native}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --backend) BACKEND="${2:?--backend requires a value}"; shift 2 ;;
     --model) MODEL="${2:?--model requires a value}"; shift 2 ;;
+    --flexpi-mode) FLEXPI_MODE="${2:?--flexpi-mode requires a value}"; shift 2 ;;
+    --world-model) WORLD_MODEL="${2:?--world-model requires a value}"; shift 2 ;;
+    --preview-steps|--preview-approval)
+      echo "Warning: $1 is deprecated; comparison length follows --replan-steps." >&2
+      : "${2:?$1 requires a value}"
+      shift 2
+      ;;
+    --compare-world-model) COMPARE_WORLD_MODEL=1; shift ;;
+    --no-compare-world-model) COMPARE_WORLD_MODEL=0; shift ;;
     --task-suite|--task-set) TASK_SUITE="${2:?$1 requires a value}"; shift 2 ;;
     --task-id|--task-ids) TASK_IDS="${2:?$1 requires a value}"; shift 2 ;;
     --split) ROBOCASA_SPLIT="${2:?--split requires a value}"; shift 2 ;;
     --trials) TRIALS_PER_TASK="${2:?--trials requires a value}"; shift 2 ;;
     --seed) SEED="${2:?--seed requires a value}"; shift 2 ;;
     --replan-steps) REPLAN_STEPS="${2:?--replan-steps requires a value}"; shift 2 ;;
+    --max-policy-steps) MAX_POLICY_STEPS="${2:?--max-policy-steps requires a value}"; shift 2 ;;
     --viewer-width) VIEWER_WIDTH="${2:?--viewer-width requires a value}"; shift 2 ;;
     --viewer-height) VIEWER_HEIGHT="${2:?--viewer-height requires a value}"; shift 2 ;;
     --viewer-fps) VIEWER_FPS="${2:?--viewer-fps requires a value}"; shift 2 ;;
@@ -98,6 +132,12 @@ while [[ $# -gt 0 ]]; do
     --policy-port) POLICY_PORT="${2:?--policy-port requires a value}"; shift 2 ;;
     --dashboard-port) DASHBOARD_PORT="${2:?--dashboard-port requires a value}"; shift 2 ;;
     --realtime-delay-ms) REALTIME_DELAY_MS="${2:?--realtime-delay-ms requires a value}"; shift 2 ;;
+    --benchmark-mode) BENCHMARK_MODE=1; shift ;;
+    --no-benchmark-mode) BENCHMARK_MODE=0; shift ;;
+    --save-videos) SAVE_VIDEOS=1; shift ;;
+    --no-save-videos) SAVE_VIDEOS=0; shift ;;
+    --latency-probe-warmups) LATENCY_PROBE_WARMUPS="${2:?--latency-probe-warmups requires a value}"; shift 2 ;;
+    --latency-probe-calls) LATENCY_PROBE_CALLS="${2:?--latency-probe-calls requires a value}"; shift 2 ;;
     --session-dir) SESSION_DIR="${2:?--session-dir requires a value}"; shift 2 ;;
     --interactive) INTERACTIVE=1; shift ;;
     --batch) INTERACTIVE=0; shift ;;
@@ -114,23 +154,140 @@ while [[ $# -gt 0 ]]; do
 done
 
 BACKEND="${BACKEND,,}"
+[[ "$BACKEND" != "robo_twin" ]] || BACKEND="robotwin"
 MODEL="${MODEL,,}"
+WORLD_MODEL="${WORLD_MODEL,,}"
 case "$MODEL" in
   pi|pi0.5|pi-0.5) MODEL="pi05" ;;
   groot|gr00t|gr00t-n1.5|groot_n1.5|gr00t_n1.5) MODEL="groot-n1.5" ;;
+  fast-wam|fast_wam) MODEL="fastwam" ;;
+  flex-pi|flex_pi|flex-π) MODEL="flexpi" ;;
 esac
+
+case "$WORLD_MODEL" in
+  off|direct) WORLD_MODEL="none" ;;
+  sim|simulator|simulator-oracle) WORLD_MODEL="robocasa-sim" ;;
+esac
+
+# RoboTwin owns a native 14D qpos + three-camera adapter. Delegate before the
+# LIBERO/RoboCasa server setup so its isolated runtime is never forced through
+# either simulator's transport schema.
+if [[ "$BACKEND" == "robotwin" ]]; then
+  TASK_SUITE="${TASK_SUITE:-demo_clean}"
+  TASK_IDS="${TASK_IDS:-click_bell}"
+  [[ "$MODEL" == "fastwam" || "$MODEL" == "flexpi" ]] \
+    || { echo "RoboTwin supports fastwam or flexpi." >&2; exit 2; }
+  [[ -z "$WORLD_MODEL" || "$WORLD_MODEL" == "none" ]] \
+    || { echo "RoboTwin currently supports --world-model none." >&2; exit 2; }
+  robotwin_command=(
+    "$SCRIPT_DIR/run_robotwin_studio.sh"
+    --model "$MODEL"
+    --task "$TASK_IDS"
+    --phase "$TASK_SUITE"
+    --seed "$SEED"
+    --dashboard-port "$DASHBOARD_PORT"
+    --realtime-delay-ms "$REALTIME_DELAY_MS"
+  )
+  [[ -z "$REPLAN_STEPS" ]] || robotwin_command+=(--replan-steps "$REPLAN_STEPS")
+  [[ -z "$FLEXPI_MODE" ]] || robotwin_command+=(--flexpi-mode "$FLEXPI_MODE")
+  [[ "$AUTO_START" == "1" ]] && robotwin_command+=(--auto-start)
+  [[ "$AUTO_OPEN" == "1" ]] && robotwin_command+=(--open) || robotwin_command+=(--no-open)
+  [[ "$HOLD_OPEN" == "1" ]] && robotwin_command+=(--hold-open) || robotwin_command+=(--no-hold-open)
+  [[ "$NETWORK_AUDIT" == "1" ]] && robotwin_command+=(--network-audit) || robotwin_command+=(--no-network-audit)
+  [[ -z "$SESSION_DIR" ]] || robotwin_command+=(--session-dir "$SESSION_DIR")
+  if [[ "$INTERACTIVE" == "1" ]]; then
+    exec "${robotwin_command[@]}"
+  fi
+  batch_command=(
+    "$SCRIPT_DIR/run_robotwin_evaluation.sh"
+    --model "$MODEL"
+    --task "$TASK_IDS"
+    --phase "$TASK_SUITE"
+    --trials "$TRIALS_PER_TASK"
+    --seed "$SEED"
+  )
+  [[ -z "$REPLAN_STEPS" ]] || batch_command+=(--replan-steps "$REPLAN_STEPS")
+  [[ -z "$FLEXPI_MODE" ]] || batch_command+=(--flexpi-mode "$FLEXPI_MODE")
+  exec "${batch_command[@]}"
+fi
 
 case "$BACKEND" in
   libero)
-    if [[ "$MODEL" != "pi05" ]]; then
-      echo "Model $MODEL does not support LIBERO in this repository; choose pi05." >&2
-      exit 2
+    OPENPI_DIR="${LIBERO_OPENPI_DIR:-$PROJECT_DIR/upstream-openpi}"
+    # A git worktree does not share ignored virtualenvs with the primary
+    # checkout. Reuse that checkout's pinned LIBERO client when available.
+    if [[ -z "${LIBERO_OPENPI_DIR:-}" ]] && \
+      [[ ! -x "$OPENPI_DIR/examples/libero/.venv/bin/python" ]]; then
+      candidate="$PROJECT_DIR/../../embodied-policy-lab/upstream-openpi"
+      if [[ -x "$candidate/examples/libero/.venv/bin/python" ]]; then
+        OPENPI_DIR="$(cd "$candidate" && pwd)"
+      fi
     fi
-    OPENPI_DIR="$PROJECT_DIR/upstream-openpi"
-    RUNTIME_PYTHON="$OPENPI_DIR/.venv/bin/python"
-    CLIENT_PYTHON="$OPENPI_DIR/examples/libero/.venv/bin/python"
+    LIBERO_OPENPI_DATA_HOME="${OPENPI_DATA_HOME:-$PROJECT_DIR/cache/openpi}"
+    primary_openpi_cache="$(dirname "$OPENPI_DIR")/cache/openpi"
+    if [[ ! -d "$LIBERO_OPENPI_DATA_HOME/openpi-assets/checkpoints/pi05_libero" ]] && \
+      [[ -d "$primary_openpi_cache/openpi-assets/checkpoints/pi05_libero" ]]; then
+      LIBERO_OPENPI_DATA_HOME="$primary_openpi_cache"
+    fi
+    case "$MODEL" in
+      pi05)
+        RUNTIME_PYTHON="$OPENPI_DIR/.venv/bin/python"
+        CLIENT_PYTHON="${LIBERO_CLIENT_PYTHON:-$OPENPI_DIR/examples/libero/.venv/bin/python}"
+        ;;
+      fastwam)
+        if [[ -z "$FASTWAM_DIR" ]]; then
+          for candidate in "$PROJECT_DIR/../upstream-fastwam" \
+            "$PROJECT_DIR/../../upstream-fastwam"; do
+            if git -C "$candidate" rev-parse --git-dir >/dev/null 2>&1; then
+              FASTWAM_DIR="$(cd "$candidate" && pwd)"
+              break
+            fi
+          done
+        fi
+        if [[ -z "$FASTWAM_DIR" ]]; then
+          echo "Cannot find upstream-fastwam; set FASTWAM_DIR explicitly." >&2
+          exit 1
+        fi
+        RUNTIME_PYTHON="$FASTWAM_DIR/.venv/bin/python"
+        CLIENT_PYTHON="${LIBERO_CLIENT_PYTHON:-$OPENPI_DIR/examples/libero/.venv/bin/python}"
+        ;;
+      flexpi)
+        if [[ -z "$FLEXPI_DIR" ]]; then
+          for candidate in "$PROJECT_DIR/../upstream-flexpi" \
+            "$PROJECT_DIR/../../upstream-flexpi"; do
+            if git -C "$candidate" rev-parse --git-dir >/dev/null 2>&1; then
+              FLEXPI_DIR="$(cd "$candidate" && pwd)"
+              break
+            fi
+          done
+        fi
+        if [[ -z "$FLEXPI_DIR" ]]; then
+          echo "Cannot find upstream-flexpi; set FLEXPI_DIR explicitly." >&2
+          exit 1
+        fi
+        RUNTIME_PYTHON="$FLEXPI_DIR/.venv/bin/python"
+        CLIENT_PYTHON="$RUNTIME_PYTHON"
+        ;;
+      *)
+        echo "Model $MODEL does not support LIBERO; choose pi05, fastwam, or flexpi." >&2
+        exit 2
+        ;;
+    esac
     TASK_SUITE="${TASK_SUITE:-libero_spatial}"
     TASK_IDS="${TASK_IDS:-0}"
+    WORLD_MODEL="${WORLD_MODEL:-none}"
+    if [[ "$MODEL" == "flexpi" ]]; then
+      case "$TASK_SUITE" in
+        libero_spatial|libero_object|libero_goal|libero_10) ;;
+        *) echo "Flex-π release supports libero_spatial, libero_object, libero_goal, and libero_10." >&2; exit 2 ;;
+      esac
+      FLEXPI_SUITE_NAME="${TASK_SUITE}_no_noops_lerobot"
+      FLEXPI_INTRINSICS="${FLEXPI_INTRINSICS:-$FLEXPI_DIR/data/libero-intrinsics/$FLEXPI_SUITE_NAME/meta/camera_intrinsics.json}"
+    fi
+    if [[ "$WORLD_MODEL" != "none" ]]; then
+      echo "LIBERO currently supports only --world-model none." >&2
+      exit 2
+    fi
     ;;
   robocasa)
     case "$MODEL" in
@@ -151,6 +308,7 @@ case "$BACKEND" in
     esac
     TASK_SUITE="${TASK_SUITE:-${ROBOCASA_TASK_SET:-atomic_seen}}"
     TASK_IDS="${TASK_IDS:-${ROBOCASA_TASK_ID:-0}}"
+    WORLD_MODEL="${WORLD_MODEL:-none}"
     if [[ "$INTERACTIVE" == "1" ]] && [[ ! "$TASK_IDS" =~ ^[0-9]+$ ]]; then
       echo "Interactive RoboCasa mode requires one numeric --task-id." >&2
       exit 2
@@ -162,12 +320,66 @@ case "$BACKEND" in
     ;;
 esac
 
-if [[ -z "$REPLAN_STEPS" ]]; then
-  if [[ "$MODEL" == "groot-n1.5" ]]; then
-    REPLAN_STEPS=16
-  else
-    REPLAN_STEPS=5
+if [[ "$BACKEND" == "libero" && "$LIBERO_BENCHMARK_RUNTIME" == "flexpi" && \
+  "$MODEL" == "fastwam" ]]; then
+  if [[ -z "$FLEXPI_DIR" ]]; then
+    for candidate in "$PROJECT_DIR/../upstream-flexpi" \
+      "$PROJECT_DIR/../../upstream-flexpi"; do
+      if git -C "$candidate" rev-parse --git-dir >/dev/null 2>&1; then
+        FLEXPI_DIR="$(cd "$candidate" && pwd)"
+        break
+      fi
+    done
   fi
+  if [[ -z "$FLEXPI_DIR" || ! -x "$FLEXPI_DIR/.venv/bin/python" ]]; then
+    echo "The common Flex-π LIBERO runtime is not set up." >&2
+    exit 1
+  fi
+  CLIENT_PYTHON="$FLEXPI_DIR/.venv/bin/python"
+fi
+
+read -r DEFAULT_REPLAN_STEPS ACTION_HORIZON < <(
+  python3 - "$PROJECT_DIR" "$BACKEND" "$MODEL" <<'PY'
+import pathlib
+import sys
+
+sys.path.insert(0, sys.argv[1])
+from showcase import backend_registry
+
+profile = backend_registry.get_profile(sys.argv[2], sys.argv[3])
+print(profile.default_replan_steps, profile.action_horizon)
+PY
+)
+REPLAN_STEPS="${REPLAN_STEPS:-$DEFAULT_REPLAN_STEPS}"
+if [[ "$MODEL" == "fastwam" ]]; then
+  NUM_STEPS_WAIT=30
+else
+  NUM_STEPS_WAIT=10
+fi
+
+if [[ -z "$FLEXPI_MODE" ]]; then
+  if [[ "$MODEL" == "flexpi" ]]; then
+    FLEXPI_MODE="full-joint"
+  else
+    FLEXPI_MODE="action-only"
+  fi
+fi
+FLEXPI_MODE="$(python3 - "$PROJECT_DIR" "$FLEXPI_MODE" <<'PY'
+import sys
+
+sys.path.insert(0, sys.argv[1])
+from showcase.flexpi_contracts import normalize_flexpi_mode
+
+try:
+    print(normalize_flexpi_mode(sys.argv[2]))
+except ValueError as error:
+    print(error, file=sys.stderr)
+    raise SystemExit(2)
+PY
+)"
+if [[ "$MODEL" != "flexpi" && "$FLEXPI_MODE" != "action-only" ]]; then
+  echo "--flexpi-mode applies only to --model flexpi." >&2
+  exit 2
 fi
 
 if [[ "$MODEL" == "groot-n1.5" ]]; then
@@ -176,15 +388,38 @@ if [[ "$MODEL" == "groot-n1.5" ]]; then
   export NO_ALBUMENTATIONS_UPDATE=1
 fi
 
-for integer_value in "$TRIALS_PER_TASK" "$SEED" "$REPLAN_STEPS" "$POLICY_PORT" \
-  "$DASHBOARD_PORT" "$REALTIME_DELAY_MS" "$VIEWER_WIDTH" "$VIEWER_HEIGHT"; do
+for integer_value in "$TRIALS_PER_TASK" "$SEED" "$REPLAN_STEPS" "$MAX_POLICY_STEPS" "$POLICY_PORT" \
+  "$DASHBOARD_PORT" "$REALTIME_DELAY_MS" "$VIEWER_WIDTH" "$VIEWER_HEIGHT" \
+  "$LATENCY_PROBE_WARMUPS" "$LATENCY_PROBE_CALLS"; do
   if [[ ! "$integer_value" =~ ^[0-9]+$ ]]; then
     echo "Expected a non-negative integer, got: $integer_value" >&2
     exit 2
   fi
 done
+if [[ "$BENCHMARK_MODE" != "0" && "$BENCHMARK_MODE" != "1" ]] || \
+  [[ "$SAVE_VIDEOS" != "0" && "$SAVE_VIDEOS" != "1" ]]; then
+  echo "BENCHMARK_MODE and SAVE_VIDEOS must be 0 or 1." >&2
+  exit 2
+fi
+if [[ "$BENCHMARK_MODE" == "1" && "$INTERACTIVE" == "1" ]]; then
+  echo "--benchmark-mode requires --batch." >&2
+  exit 2
+fi
+if [[ "$LIBERO_BENCHMARK_RUNTIME" != "native" && \
+  "$LIBERO_BENCHMARK_RUNTIME" != "flexpi" ]]; then
+  echo "LIBERO_BENCHMARK_RUNTIME must be native or flexpi." >&2
+  exit 2
+fi
 if [[ "$TRIALS_PER_TASK" == "0" ]] || [[ "$REPLAN_STEPS" == "0" ]]; then
   echo "--trials and --replan-steps must be positive." >&2
+  exit 2
+fi
+if (( REPLAN_STEPS > ACTION_HORIZON )); then
+  echo "--replan-steps cannot exceed the $ACTION_HORIZON-action horizon for $BACKEND/$MODEL." >&2
+  exit 2
+fi
+if [[ "$COMPARE_WORLD_MODEL" != "0" && "$COMPARE_WORLD_MODEL" != "1" ]]; then
+  echo "COMPARE_WORLD_MODEL must be 0 or 1." >&2
   exit 2
 fi
 if [[ "$VIEWER_WIDTH" == "0" ]] || [[ "$VIEWER_HEIGHT" == "0" ]] || \
@@ -198,6 +433,10 @@ if [[ "$ROLLOUT_BUDGET_MULTIPLIER" != "0" ]] && \
   echo "--budget must be 1, 2, or 3." >&2
   exit 2
 fi
+if [[ "$BACKEND" != "libero" ]] && [[ "$MAX_POLICY_STEPS" != "0" ]]; then
+  echo "--max-policy-steps is currently a LIBERO-only test control." >&2
+  exit 2
+fi
 if [[ -n "$EVALUATION_MODE" ]] && \
   [[ "$EVALUATION_MODE" != "scored" && "$EVALUATION_MODE" != "exploratory" ]]; then
   echo "--evaluation-mode must be scored or exploratory." >&2
@@ -206,6 +445,16 @@ fi
 if [[ "$ROBOCASA_SPLIT" != "pretrain" && "$ROBOCASA_SPLIT" != "target" ]]; then
   echo "--split must be pretrain or target." >&2
   exit 2
+fi
+case "$BACKEND/$WORLD_MODEL" in
+  libero/none|robocasa/none|robocasa/robocasa-sim) ;;
+  *)
+    echo "World model $WORLD_MODEL does not support backend $BACKEND." >&2
+    exit 2
+    ;;
+esac
+if [[ "$WORLD_MODEL" == "none" ]]; then
+  COMPARE_WORLD_MODEL=0
 fi
 if [[ ! -x "$RUNTIME_PYTHON" ]] || [[ ! -x "$CLIENT_PYTHON" ]]; then
   if [[ "$MODEL" == "groot-n1.5" ]]; then
@@ -222,6 +471,30 @@ if [[ "$LOCAL_LLM_URL" == http://127.0.0.1:11434/* ]] && \
   ollama stop "$LOCAL_LLM_MODEL" >/dev/null 2>&1 || true
 fi
 
+# One heavyweight session at a time is the safe default on a 24 GB GPU. This
+# lock is independent from ALLOW_GPU_OVERSUBSCRIPTION so that flag cannot
+# accidentally start a second copy of this lab and exhaust cuBLAS resources.
+mkdir -p "$PROJECT_DIR/showcase-runs"
+LAB_LOCK_PATH="$PROJECT_DIR/showcase-runs/.active-session.lock"
+if [[ "${ALLOW_CONCURRENT_LAB_RUNS:-0}" != "1" ]]; then
+  if ! command -v flock >/dev/null 2>&1; then
+    echo "flock is required for the single-session safety guard." >&2
+    exit 1
+  fi
+  exec {LAB_LOCK_FD}>"$LAB_LOCK_PATH"
+  if ! flock -n "$LAB_LOCK_FD"; then
+    echo "Another Embodied Policy Lab session is already active:" >&2
+    sed -n '1,4p' "$LAB_LOCK_PATH" >&2 2>/dev/null || true
+    echo "Finish that session before launching another one." >&2
+    echo "Expert override: ALLOW_CONCURRENT_LAB_RUNS=1 (requires separate ports and sufficient VRAM)." >&2
+    exit 1
+  fi
+  printf 'pid=%s\nstarted=%s\nbackend=%s\nmodel=%s\n' \
+    "$$" "$(date --iso-8601=seconds)" "$BACKEND" "$MODEL" > "$LAB_LOCK_PATH"
+else
+  echo "Warning: concurrent lab session guard explicitly disabled." >&2
+fi
+
 GPU_COMPUTE_APPS="$(
   nvidia-smi --query-compute-apps=pid,process_name,used_memory \
     --format=csv,noheader 2>/dev/null || true
@@ -236,7 +509,8 @@ fi
 
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 SESSION_DIR="${SESSION_DIR:-$PROJECT_DIR/showcase-runs/$TIMESTAMP}"
-mkdir -p "$SESSION_DIR/frames" "$SESSION_DIR/videos" "$PROJECT_DIR/showcase-runs"
+mkdir -p "$SESSION_DIR/frames" "$SESSION_DIR/videos" "$SESSION_DIR/previews" \
+  "$PROJECT_DIR/showcase-runs"
 ln -sfn "$SESSION_DIR" "$PROJECT_DIR/showcase-runs/latest"
 
 cleanup() {
@@ -285,6 +559,67 @@ wait_for_http() {
   return 1
 }
 
+update_large_model_startup_status() {
+  local elapsed_seconds="$1"
+  local detail
+  if [[ "$MODEL" == "flexpi" ]]; then
+    local startup_phase=""
+    if [[ -f "$SESSION_DIR/server.log" ]]; then
+      startup_phase="$(sed -n 's/^FLEXPI_STARTUP: //p' "$SESSION_DIR/server.log" | tail -n 1)"
+    fi
+    if [[ -n "$startup_phase" ]]; then
+      detail="${startup_phase} — ${elapsed_seconds}s elapsed. Normal cached startup is about 95–105 seconds."
+    else
+      detail="Starting Flex-π — ${elapsed_seconds}s elapsed. Normal cached startup is about 95–105 seconds."
+    fi
+  elif (( elapsed_seconds < 120 )); then
+    detail="Deserializing the 12 GB Fast-WAM checkpoint on CPU - ${elapsed_seconds}s elapsed; typical startup is 90-120 seconds. GPU activity starts with the first policy request."
+  else
+    detail="Fast-WAM is still loading on CPU - ${elapsed_seconds}s elapsed. Competing CPU or RAM workloads can extend startup; the loader process is still active."
+  fi
+  echo "$detail"
+  "$RUNTIME_PYTHON" - "$SESSION_DIR/state.json" "$elapsed_seconds" "$detail" <<'PY'
+import datetime
+import json
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+elapsed_seconds = int(sys.argv[2])
+detail = sys.argv[3]
+state = json.loads(path.read_text(encoding="utf-8"))
+if state.get("phase") != "initializing":
+    raise SystemExit(0)
+state["command_message"] = detail
+state["startup_elapsed_seconds"] = elapsed_seconds
+state["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+temporary = path.with_suffix(".startup.tmp")
+temporary.write_text(json.dumps(state, indent=2), encoding="utf-8")
+temporary.replace(path)
+PY
+}
+
+wait_for_policy_http() {
+  local port="$1"
+  local route="$2"
+  local owner_pid="$3"
+  local started_at=$SECONDS
+  local attempt
+  for attempt in $(seq 1 900); do
+    if ! kill -0 "$owner_pid" 2>/dev/null; then
+      return 1
+    fi
+    if http_ready "$port" "$route"; then
+      return 0
+    fi
+    if [[ "$MODEL" == "fastwam" || "$MODEL" == "flexpi" ]] && (( attempt % 10 == 0 )); then
+      update_large_model_startup_status "$((SECONDS - started_at))"
+    fi
+    sleep 1
+  done
+  return 1
+}
+
 wait_for_tcp_listener() {
   local port="$1"
   local owner_pid="$2"
@@ -305,7 +640,8 @@ wait_for_tcp_listener() {
 "$RUNTIME_PYTHON" - \
   "$PROJECT_DIR" "$SESSION_DIR/state.json" "$BACKEND" "$MODEL" "$TASK_SUITE" \
   "$TASK_IDS" "$POLICY_PORT" "$INTERACTIVE" "$NETWORK_AUDIT" \
-  "$VIEWER_WIDTH" "$VIEWER_HEIGHT" <<'PY'
+  "$VIEWER_WIDTH" "$VIEWER_HEIGHT" "$WORLD_MODEL" \
+  "$COMPARE_WORLD_MODEL" "$REPLAN_STEPS" "$FLEXPI_MODE" <<'PY'
 import datetime
 import json
 import pathlib
@@ -318,23 +654,51 @@ port = int(sys.argv[7])
 interactive = sys.argv[8] == "1"
 network_audit = sys.argv[9] == "1"
 viewer_width, viewer_height = map(int, sys.argv[10:12])
+world_model_key = sys.argv[12]
+compare_world_model = sys.argv[13] == "1"
+replan_steps = int(sys.argv[14])
+flexpi_mode = sys.argv[15]
 sys.path.insert(0, str(project_dir))
 
 from showcase import backend_registry
+from showcase.flexpi_contracts import (
+    COMPOSITE_HEIGHT,
+    COMPOSITE_WIDTH,
+    FLEXPI_MODES,
+)
+from showcase import world_model_registry
 
 simulator, policy = backend_registry.require_compatible(backend, model)
 profile = backend_registry.get_profile(backend, model)
+world_model = world_model_registry.require_world_model(backend, world_model_key)
 now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-transport_scheme = "ws" if policy.transport == "websocket" else "tcp"
+transport_scheme = {"websocket": "ws", "http": "http"}.get(
+    policy.transport, "tcp"
+)
 try:
     task_id = int(task_ids)
 except ValueError:
     task_id = 0
 
+if model == "fastwam":
+    startup_message = (
+        "Deserializing the 12 GB Fast-WAM checkpoint on CPU; typical startup is "
+        "90-120 seconds. An idle GPU is expected until the first policy request."
+    )
+elif model == "flexpi":
+    startup_message = (
+        "Starting Flex-π world-action co-generation; phased progress will appear here."
+        if flexpi_mode == "full-joint"
+        else "Starting Flex-π action-only inference; phased progress will appear here."
+    )
+else:
+    startup_message = "Loading policy weights into local accelerator memory"
+
 state = {
     "phase": "initializing",
     "message": "Loading the selected local policy and simulator",
-    "command_message": "Loading policy weights into local accelerator memory",
+    "command_message": startup_message,
+    "startup_elapsed_seconds": 0,
     "backend": simulator.key,
     "simulator": simulator.simulator,
     "model_plugin": policy.key,
@@ -343,6 +707,15 @@ state = {
     "runtime": policy.runtime,
     "policy_transport": policy.transport,
     "policy_endpoint": f"{transport_scheme}://127.0.0.1:{port}",
+    "world_model": world_model.key,
+    "world_model_display_name": world_model.display_name,
+    "world_model_runtime": world_model.runtime,
+    "world_model_prediction_kind": world_model.prediction_kind,
+    "world_model_description": world_model.description,
+    "available_world_models": world_model_registry.catalog(backend),
+    "preview_steps": replan_steps,
+    "compare_world_model": compare_world_model,
+    "comparison_status": "initializing" if compare_world_model else "disabled",
     "suite": suite,
     "task_ids": task_ids,
     "task_id": task_id,
@@ -351,9 +724,11 @@ state = {
     "state_dimension": simulator.state_dimension,
     "action_dimension": simulator.action_dimension,
     "action_horizon": profile.action_horizon,
+    "policy_mode": flexpi_mode if model == "flexpi" else "action-only",
+    "available_policy_modes": list(FLEXPI_MODES) if model == "flexpi" else [],
     "camera_count": len(simulator.cameras),
-    "model_image_width": 224,
-    "model_image_height": 224,
+    "model_image_width": COMPOSITE_WIDTH if model == "flexpi" else 224,
+    "model_image_height": COMPOSITE_HEIGHT if model == "flexpi" else 224,
     "viewer_width": viewer_width,
     "viewer_height": viewer_height,
     "episodes": 0,
@@ -392,7 +767,7 @@ fi
 DASHBOARD_URL="http://127.0.0.1:$DASHBOARD_PORT"
 echo "Dashboard: $DASHBOARD_URL"
 echo "Session: $SESSION_DIR"
-echo "Backend: $BACKEND · Model: $MODEL · Task collection: $TASK_SUITE · Task ID: $TASK_IDS"
+echo "Backend: $BACKEND · Policy: $MODEL · Predictor: $WORLD_MODEL · Task collection: $TASK_SUITE · Task ID: $TASK_IDS"
 echo "Loading the local policy; startup progress is now visible in the dashboard."
 if [[ "$INTERACTIVE" == "1" ]]; then
   echo "Interactive mode: use the browser to run attempts and end the session."
@@ -404,10 +779,20 @@ fi
 echo "Starting local $MODEL server for $BACKEND..."
 if [[ "$NETWORK_AUDIT" == "1" ]]; then
   setsid strace -f -e trace=network -s 256 -o "$SESSION_DIR/network-server.log" \
-    env BACKEND="$BACKEND" MODEL="$MODEL" POLICY_PORT="$POLICY_PORT" "$SCRIPT_DIR/run_server.sh" \
+    env BACKEND="$BACKEND" MODEL="$MODEL" POLICY_PORT="$POLICY_PORT" \
+      LIBERO_OPENPI_DIR="${OPENPI_DIR:-}" \
+      OPENPI_DATA_HOME="${LIBERO_OPENPI_DATA_HOME:-}" \
+      FASTWAM_DIR="$FASTWAM_DIR" FASTWAM_ARTIFACT_DIR="$SESSION_DIR/policy-inference" \
+      FLEXPI_DIR="$FLEXPI_DIR" FLEXPI_INTRINSICS="${FLEXPI_INTRINSICS:-}" FLEXPI_ARTIFACT_DIR="$SESSION_DIR/policy-inference" \
+      "$SCRIPT_DIR/run_server.sh" \
     > "$SESSION_DIR/server.log" 2>&1 &
 else
-  setsid env BACKEND="$BACKEND" MODEL="$MODEL" POLICY_PORT="$POLICY_PORT" "$SCRIPT_DIR/run_server.sh" \
+  setsid env BACKEND="$BACKEND" MODEL="$MODEL" POLICY_PORT="$POLICY_PORT" \
+    LIBERO_OPENPI_DIR="${OPENPI_DIR:-}" \
+    OPENPI_DATA_HOME="${LIBERO_OPENPI_DATA_HOME:-}" \
+    FASTWAM_DIR="$FASTWAM_DIR" FASTWAM_ARTIFACT_DIR="$SESSION_DIR/policy-inference" \
+    FLEXPI_DIR="$FLEXPI_DIR" FLEXPI_INTRINSICS="${FLEXPI_INTRINSICS:-}" FLEXPI_ARTIFACT_DIR="$SESSION_DIR/policy-inference" \
+    "$SCRIPT_DIR/run_server.sh" \
     > "$SESSION_DIR/server.log" 2>&1 &
 fi
 SERVER_PID=$!
@@ -417,7 +802,7 @@ if [[ "$MODEL" == "groot-n1.5" ]]; then
   wait_for_tcp_listener "$POLICY_PORT" "$SERVER_PID" || POLICY_READY=$?
 else
   POLICY_READY=0
-  wait_for_http "$POLICY_PORT" /healthz "$SERVER_PID" || POLICY_READY=$?
+  wait_for_policy_http "$POLICY_PORT" /healthz "$SERVER_PID" || POLICY_READY=$?
 fi
 if [[ "$POLICY_READY" != "0" ]]; then
   echo "Policy server failed. See $SESSION_DIR/server.log" >&2
@@ -454,8 +839,14 @@ export MUJOCO_GL="${MUJOCO_GL:-egl}"
 export PYOPENGL_PLATFORM="${PYOPENGL_PLATFORM:-egl}"
 
 if [[ "$BACKEND" == "libero" ]]; then
-  export LIBERO_CONFIG_PATH="$PROJECT_DIR/config/libero"
-  export PYTHONPATH="$OPENPI_DIR/third_party/libero${PYTHONPATH:+:$PYTHONPATH}"
+  if [[ "$MODEL" == "flexpi" || "$LIBERO_BENCHMARK_RUNTIME" == "flexpi" ]]; then
+    export PYTHONNOUSERSITE=1
+    export LIBERO_CONFIG_PATH="$FLEXPI_DIR/.libero-config"
+    export PYTHONPATH="$FLEXPI_DIR/third_party/LIBERO:$FLEXPI_DIR/src${PYTHONPATH:+:$PYTHONPATH}"
+  else
+    export LIBERO_CONFIG_PATH="$PROJECT_DIR/config/libero"
+    export PYTHONPATH="$OPENPI_DIR/third_party/libero${PYTHONPATH:+:$PYTHONPATH}"
+  fi
   if [[ "$INTERACTIVE" == "1" ]]; then
     if [[ ! "$TASK_IDS" =~ ^[0-9]+$ ]]; then
       echo "Interactive LIBERO mode requires one numeric --task-id." >&2
@@ -463,9 +854,12 @@ if [[ "$BACKEND" == "libero" ]]; then
     fi
     CLIENT_COMMAND=(
       "$CLIENT_PYTHON" "$PROJECT_DIR/showcase/interactive_libero.py"
+      --model "$MODEL"
       --host 127.0.0.1
       --port "$POLICY_PORT"
       --replan-steps "$REPLAN_STEPS"
+      --num-steps-wait "$NUM_STEPS_WAIT"
+      --max-policy-steps "$MAX_POLICY_STEPS"
       --task-suite-name "$TASK_SUITE"
       --task-id "$TASK_IDS"
       --video-out-path "$SESSION_DIR/videos"
@@ -473,13 +867,20 @@ if [[ "$BACKEND" == "libero" ]]; then
       --seed "$SEED"
       --realtime-delay-ms "$REALTIME_DELAY_MS"
       --initial-prompt "$INITIAL_PROMPT"
+      --flexpi-mode "$FLEXPI_MODE"
     )
+    if [[ "$AUTO_START" == "1" ]]; then
+      CLIENT_COMMAND+=(--auto-start)
+    fi
   else
     CLIENT_COMMAND=(
       "$CLIENT_PYTHON" "$PROJECT_DIR/showcase/instrumented_libero.py"
+      --model "$MODEL"
       --host 127.0.0.1
       --port "$POLICY_PORT"
       --replan-steps "$REPLAN_STEPS"
+      --num-steps-wait "$NUM_STEPS_WAIT"
+      --max-policy-steps "$MAX_POLICY_STEPS"
       --task-suite-name "$TASK_SUITE"
       --task-ids "$TASK_IDS"
       --num-trials-per-task "$TRIALS_PER_TASK"
@@ -487,12 +888,24 @@ if [[ "$BACKEND" == "libero" ]]; then
       --session-dir "$SESSION_DIR"
       --seed "$SEED"
       --realtime-delay-ms "$REALTIME_DELAY_MS"
+      --flexpi-mode "$FLEXPI_MODE"
+    )
+    if [[ "$BENCHMARK_MODE" == "1" ]]; then
+      CLIENT_COMMAND+=(--benchmark-mode)
+    fi
+    if [[ "$SAVE_VIDEOS" == "0" ]]; then
+      CLIENT_COMMAND+=(--no-save-videos)
+    fi
+    CLIENT_COMMAND+=(
+      --latency-probe-warmups "$LATENCY_PROBE_WARMUPS"
+      --latency-probe-calls "$LATENCY_PROBE_CALLS"
     )
   fi
 else
   CLIENT_COMMAND=(
     "$CLIENT_PYTHON" "$PROJECT_DIR/showcase/interactive_robocasa.py"
     --model "$MODEL"
+    --world-model "$WORLD_MODEL"
     --host 127.0.0.1
     --port "$POLICY_PORT"
     --replan-steps "$REPLAN_STEPS"
@@ -509,6 +922,11 @@ else
     --initial-evaluation-mode "$EVALUATION_MODE"
     --initial-rollout-budget-multiplier "$ROLLOUT_BUDGET_MULTIPLIER"
   )
+  if [[ "$COMPARE_WORLD_MODEL" == "1" ]]; then
+    CLIENT_COMMAND+=(--compare-world-model)
+  else
+    CLIENT_COMMAND+=(--no-compare-world-model)
+  fi
   if [[ "$INTERACTIVE" == "1" ]]; then
     CLIENT_COMMAND+=(--interactive --task-id "$TASK_IDS")
     if [[ "$AUTO_START" == "1" ]]; then
@@ -539,6 +957,46 @@ else
   CLIENT_STATUS=${PIPESTATUS[0]}
 fi
 set -e
+
+# If the client was interrupted outside its normal shutdown path, do not leave
+# the browser/report claiming that a dead rollout is still running.
+"$RUNTIME_PYTHON" - "$SESSION_DIR/state.json" "$CLIENT_STATUS" <<'PY'
+import datetime
+import json
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+status = int(sys.argv[2])
+state = json.loads(path.read_text(encoding="utf-8"))
+if state.get("phase") in {"waiting", "initializing", "preparing_task", "running"}:
+    interrupted = status in {130, 143}
+    clean_exit = status == 0
+    state["phase"] = "stopped" if interrupted or clean_exit else "error"
+    state["stop_reason"] = (
+        "interrupted"
+        if interrupted
+        else ("client_exit_without_finalize" if clean_exit else "client_exit")
+    )
+    state["command_message"] = (
+        "Session interrupted; partial artifacts were saved"
+        if interrupted
+        else (
+            "Simulator client ended; partial artifacts were saved"
+            if clean_exit
+            else f"Simulator client exited with status {status}"
+        )
+    )
+    if not interrupted and not clean_exit:
+        state["error"] = f"Simulator client exited with status {status}"
+    state["finished_at"] = datetime.datetime.now(
+        datetime.timezone.utc
+    ).astimezone().isoformat()
+    state["updated_at"] = state["finished_at"]
+    temporary = path.with_suffix(".json.tmp")
+    temporary.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    temporary.replace(path)
+PY
 
 kill -- "-$SERVER_PID" 2>/dev/null || true
 wait "$SERVER_PID" 2>/dev/null || true

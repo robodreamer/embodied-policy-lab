@@ -15,10 +15,10 @@ import numpy as np
 
 try:
     from . import backend_registry
-    from . import robocasa_runtime as core
+    from . import robocasa_contracts as contracts
 except ImportError:  # Direct script execution adds showcase/ to sys.path.
     import backend_registry
-    import robocasa_runtime as core
+    import robocasa_contracts as contracts
 
 
 GR00T_VIDEO_KEYS = (
@@ -87,9 +87,9 @@ class Pi05PolicyPlugin:
                     self.resize_size,
                 )
             )
-            for key in core.CAMERA_KEYS
+            for key in contracts.CAMERA_KEYS
         ]
-        robot_state = core.robot_state_from_observation(observation)
+        robot_state = contracts.robot_state_from_observation(observation)
         payload = {
             "observation/image": images[0],
             "observation/wrist_image": images[1],
@@ -103,7 +103,7 @@ class Pi05PolicyPlugin:
         response = self._client.infer(request.payload)
         if "actions" not in response:
             raise ValueError("π0.5 response is missing the 'actions' field")
-        return core.validate_action_chunk(response["actions"])
+        return contracts.validate_action_chunk(response["actions"])
 
 
 class GrootN15PolicyPlugin:
@@ -138,7 +138,7 @@ class GrootN15PolicyPlugin:
         # array inside the server and cannot be indexed by its batch transform.
         payload[GR00T_LANGUAGE_KEY] = [str(prompt)]
         return PreparedRequest(
-            core.robot_state_from_observation(observation), payload, str(prompt)
+            contracts.robot_state_from_observation(observation), payload, str(prompt)
         )
 
     def infer(self, request: PreparedRequest) -> np.ndarray:
@@ -158,7 +158,7 @@ class GrootN15PolicyPlugin:
             if len(value) != horizon:
                 raise ValueError("GR00T action components have different horizons")
             components.append(value)
-        return core.validate_action_chunk(np.concatenate(components, axis=1))
+        return contracts.validate_action_chunk(np.concatenate(components, axis=1))
 
 
 def create_policy_plugin(

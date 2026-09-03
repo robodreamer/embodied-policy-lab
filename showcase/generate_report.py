@@ -105,14 +105,33 @@ def main():
     )
     duration = (finished - started).total_seconds()
     videos = sorted((session_dir / "videos").glob("*.mp4"))
+    previews = sorted(
+        path
+        for path in (session_dir / "previews").glob("*.mp4")
+        if not path.name.startswith("latest_") and path.name != "latest.mp4"
+    )
     llm_events = local_llm_events(session_dir / "llm-generations.jsonl")
     inference_events = local_llm_events(session_dir / "inference-audit.jsonl")
+    policy_inference_artifacts = sorted(
+        (session_dir / "policy-inference").glob("request-*.json")
+    )
+    preview_events = local_llm_events(session_dir / "preview-audit.jsonl")
+    completed_preview_events = [
+        event
+        for event in preview_events
+        if event.get("status") == "completed" or "predicted_matches_actual" in event
+    ]
+    failed_preview_events = [
+        event for event in preview_events if event.get("status") == "failed"
+    ]
 
     summary = {
         "backend": state.get("backend", "libero"),
         "simulator": state.get("simulator", "LIBERO / robosuite / MuJoCo"),
         "model": state.get("model"),
         "runtime": state.get("runtime"),
+        "world_model": state.get("world_model", "none"),
+        "world_model_runtime": state.get("world_model_runtime", "disabled"),
         "suite": state.get("suite"),
         "interactive": state.get("interactive", False),
         "task_ids": state.get("task_ids"),
@@ -132,10 +151,17 @@ def main():
         "gpu": gpu,
         "network": network,
         "videos": [video.name for video in videos],
+        "previews": [preview.name for preview in previews],
         "attempt_history": state.get("attempt_history", []),
         "prompt_stats": state.get("prompt_stats", {}),
         "local_llm_generations": llm_events,
         "inference_audit_events": len(inference_events),
+        "policy_inference_artifacts": [
+            path.name for path in policy_inference_artifacts
+        ],
+        "preview_audit_events": len(preview_events),
+        "completed_prediction_comparisons": len(completed_preview_events),
+        "prediction_failures": len(failed_preview_events),
     }
     (session_dir / "summary.json").write_text(
         json.dumps(summary, indent=2), encoding="utf-8"
@@ -153,6 +179,7 @@ def main():
 | Simulator | {simulator} |
 | Model | `{model}` |
 | Runtime | {runtime} |
+| Predictor / baseline | `{world_model}` ({world_model_runtime}) |
 | Task collection / IDs | `{suite}` / `{task_ids}` |
 | Episodes successful | **{successes}/{episodes}** |
 | Unscored exploratory / mixed attempts | {unscored_attempts} |
@@ -168,6 +195,8 @@ def main():
 | Peak GPU temperature | {temperature:.0f} °C |
 | Local prompt generations | {llm_generation_count} |
 | Audited policy requests | {inference_audit_count} |
+| Completed prediction/actual comparisons | {preview_audit_count} |
+| Non-gating predictor failures | {preview_failure_count} |
 
 ## Local-inference network audit
 
@@ -188,13 +217,18 @@ with the local policy server over loopback.
 - `network-*`: raw network system-call traces
 - `client.log` and `server.log`: runtime logs
 - `videos/`: rollout MP4 files ({video_count})
+- `previews/`: predictor/actual media, including retained discarded predictions ({preview_count})
 - `llm-generations.jsonl`: local prompt-generation provenance ({llm_generation_count})
 - `inference-audit.jsonl`: prompt and action hashes for synchronous policy requests ({inference_audit_count})
+- `policy-inference/`: exact Fast-WAM inputs, actions, and staging metrics ({policy_inference_count})
+- `preview-audit.jsonl`: completed comparisons and non-gating predictor failures ({preview_event_count} total events)
 """.format(
         backend=summary["backend"],
         simulator=summary["simulator"],
         model=summary["model"],
         runtime=summary["runtime"],
+        world_model=summary["world_model"],
+        world_model_runtime=summary["world_model_runtime"],
         suite=summary["suite"],
         task_ids=summary["task_ids"],
         successes=summary["successes"],
@@ -212,10 +246,15 @@ with the local policy server over loopback.
         temperature=gpu["max_temperature_c"],
         llm_generation_count=len(llm_events),
         inference_audit_count=len(inference_events),
+        policy_inference_count=len(policy_inference_artifacts),
+        preview_audit_count=len(completed_preview_events),
+        preview_failure_count=len(failed_preview_events),
+        preview_event_count=len(preview_events),
         verdict=network["verdict"],
         loopback=loopback_text,
         remote=remote_text,
         video_count=len(videos),
+        preview_count=len(previews),
     )
     (session_dir / "report.md").write_text(report, encoding="utf-8")
 

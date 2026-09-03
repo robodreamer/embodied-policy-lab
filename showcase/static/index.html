@@ -24,6 +24,11 @@
           <strong id="profileEnvironment">WAITING FOR SIMULATOR</strong>
           <span id="profileEnvironmentDetail">Backend metadata has not arrived</span>
         </div>
+        <div class="profile-item world-model-profile">
+          <small>PREDICTOR / BASELINE</small>
+          <strong id="profileWorldModel">WAITING FOR PREDICTOR</strong>
+          <span id="profileWorldModelDetail">Prediction metadata has not arrived</span>
+        </div>
         <div class="profile-item">
           <small>TASK COLLECTION</small>
           <strong id="profileTaskSet">—</strong>
@@ -98,6 +103,21 @@
             </select>
             <p id="budgetHelp">Extended attempts get twice as many simulator actions. A scored rollout still ends early when the selected simulator detects success.</p>
           </div>
+          <div id="policyModeSetting" class="rollout-setting hidden">
+            <label for="policyModeSelect"><span><b>3C</b> Flex-π inference</span><small>SAME CHECKPOINT, SELECTABLE COMPUTE REGIME</small></label>
+            <select id="policyModeSelect"></select>
+            <p id="policyModeHelp">Choose world-action co-generation or lower-memory action-only inference for the next rollout.</p>
+          </div>
+          <div id="worldModelSetting" class="rollout-setting">
+            <label for="worldModelSelect"><span><b>3D</b> Prediction comparison</span><small>INDEPENDENT FROM THE SELECTED POLICY</small></label>
+            <select id="worldModelSelect"></select>
+            <p id="worldModelHelp">Loading compatible world-model options…</p>
+            <label class="comparison-toggle" for="compareWorldModel">
+              <input id="compareWorldModel" type="checkbox">
+              <span>Compare predictor output after real execution</span>
+            </label>
+            <p id="comparisonHelp">Off by default. The policy executes normally; a prediction is shown only after the matching real action prefix finishes.</p>
+          </div>
         </div>
         <div class="control-actions">
           <div class="action-item"><button id="startRun" class="primary-action">4 · START A FRESH SCORED ROLLOUT</button><small id="startHelp">Resets the scene, uses the task and draft above, and counts the result.</small></div>
@@ -107,9 +127,16 @@
         <p id="controlNote">Choose a task and instruction, then start. Aborted and mixed-prompt attempts are excluded from per-prompt rates.</p>
       </section>
 
-      <section class="hero-grid">
-        <article class="camera-card primary">
-          <div class="card-label"><span>02</span> EXTERNAL CAMERA · SIMULATOR VIEW <small id="externalCameraMeta" class="camera-quality">—</small></div>
+      <section id="heroGrid" class="hero-grid">
+        <article id="observerCard" class="camera-card hidden">
+          <div class="card-label"><span>02</span> <b id="observerCameraTitle">FRONT OBSERVER CAMERA</b> · LIVE SIMULATOR PROGRESS <small id="observerCameraMeta" class="camera-quality">—</small></div>
+          <div class="camera-frame">
+            <img id="observerFrame" alt="Front observer camera feed">
+            <div class="reticle"></div>
+          </div>
+        </article>
+        <article id="externalCameraCard" class="camera-card primary">
+          <div class="card-label"><span>02</span> <b id="externalCameraTitle">EXTERNAL CAMERA</b> · LIVE SIMULATOR STATE <small id="externalCameraMeta" class="camera-quality">—</small></div>
           <div class="camera-frame">
             <img id="externalFrame" alt="External camera feed">
             <div class="reticle"></div>
@@ -117,9 +144,16 @@
           </div>
         </article>
         <article class="camera-card">
-          <div class="card-label"><span>03</span> WRIST CAMERA · SIMULATOR VIEW <small id="wristCameraMeta" class="camera-quality">—</small></div>
+          <div class="card-label"><span>03</span> <b id="wristCameraTitle">WRIST CAMERA</b> · LIVE SIMULATOR STATE <small id="wristCameraMeta" class="camera-quality">—</small></div>
           <div class="camera-frame wrist">
             <img id="wristFrame" alt="Wrist camera feed">
+            <div class="reticle"></div>
+          </div>
+        </article>
+        <article id="rightWristCard" class="camera-card hidden">
+          <div class="card-label"><span>03B</span> <b id="rightWristCameraTitle">RIGHT WRIST CAMERA</b> · LIVE SIMULATOR STATE <small id="rightWristCameraMeta" class="camera-quality">—</small></div>
+          <div class="camera-frame wrist">
+            <img id="rightWristFrame" alt="Right wrist camera feed">
             <div class="reticle"></div>
           </div>
         </article>
@@ -138,6 +172,37 @@
         </article>
       </section>
 
+      <section id="previewCard" class="preview-card hidden" aria-live="polite">
+        <div id="previewCardLabel" class="card-label"><span>05</span> PREDICTOR OUTPUT VS COMPLETED EXECUTION</div>
+        <div class="preview-layout">
+          <div class="comparison-media-grid">
+            <figure id="actualExternalComparison" class="comparison-video external policy-external hidden">
+              <figcaption>ACTUAL EXTERNAL EXECUTION</figcaption>
+              <video id="actualExternalVideo" controls muted playsinline preload="metadata"></video>
+            </figure>
+            <figure id="predictedExternalComparison" class="comparison-video external predicted policy-external hidden">
+              <figcaption>FLEX-π GENERATED EXTERNAL FUTURE</figcaption>
+              <video id="previewExternalVideo" controls muted playsinline preload="metadata"></video>
+            </figure>
+            <figure class="comparison-video wrist">
+              <figcaption id="actualVideoLabel">ACTUAL POLICY EXECUTION</figcaption>
+              <video id="actualVideo" controls muted playsinline preload="metadata"></video>
+            </figure>
+            <figure class="comparison-video wrist predicted">
+              <figcaption id="predictedVideoLabel">PREDICTOR OUTPUT</figcaption>
+              <video id="previewVideo" controls muted playsinline preload="metadata"></video>
+            </figure>
+          </div>
+          <div class="preview-decision">
+            <small id="previewKind">SELECTED PREDICTOR</small>
+            <strong id="previewTitle">Completed rollout comparison</strong>
+            <p id="previewDescription">Both clips use the same sampled action timeline and are revealed only after the real rollout completes.</p>
+            <code id="previewEvidence">No completed comparison recorded yet</code>
+            <p id="previewHelp">Playback does not loop automatically, so each clip represents one finite rollout.</p>
+          </div>
+        </div>
+      </section>
+
       <section class="metric-grid">
         <article class="metric accent"><small>INFERENCE</small><strong id="latency">—</strong><span>ms / action chunk</span></article>
         <article class="metric"><small>GPU LOAD</small><strong id="gpuUtil">—</strong><span>percent</span></article>
@@ -148,7 +213,7 @@
 
       <section class="analysis-grid">
         <article class="chart-card action-card">
-          <div class="card-label"><span>05</span> <b id="actionTitle">PREDICTED ACTION CHUNK</b></div>
+          <div class="card-label"><span>06</span> <b id="actionTitle">PREDICTED ACTION CHUNK</b></div>
           <canvas id="actionChart"></canvas>
           <div id="actionLegend" class="legend">
             <span class="x">ΔX</span><span class="y">ΔY</span><span class="z">ΔZ</span>
@@ -156,7 +221,7 @@
           </div>
         </article>
         <article class="chart-card">
-          <div class="card-label"><span>06</span> WARM INFERENCE LATENCY · FIRST REQUEST EXCLUDED</div>
+          <div class="card-label"><span>07</span> WARM INFERENCE LATENCY · FIRST REQUEST EXCLUDED</div>
           <canvas id="latencyChart"></canvas>
           <div class="latency-stats">
             <div><small>MEDIAN</small><strong id="medianLatency">—</strong></div>
@@ -166,7 +231,7 @@
           </div>
         </article>
         <article class="runtime-card">
-          <div class="card-label"><span>07</span> LOCAL RUNTIME PATH</div>
+          <div class="card-label"><span>08</span> LOCAL RUNTIME PATH</div>
           <div class="flow">
             <div><b>OBSERVATIONS</b><small id="stateShape">Waiting for input contract</small></div>
             <em>→</em>
@@ -179,7 +244,7 @@
         </article>
       </section>
       <section id="historyCard" class="history-card hidden">
-        <div class="card-label"><span>08</span> ATTEMPT HISTORY · PER-PROMPT SUCCESS</div>
+        <div class="card-label"><span>09</span> ATTEMPT HISTORY · PER-PROMPT SUCCESS</div>
         <div class="history-scroll"><table><thead><tr><th>ATTEMPT</th><th>TASK</th><th>INSTRUCTION</th><th>SOURCE</th><th>BUDGET</th><th>RESULT</th><th>RATE FOR TASK + PROMPT + BUDGET</th><th>DURATION</th></tr></thead><tbody id="historyBody"></tbody></table></div>
         <p class="sample-note">Success rates describe only this session. Small samples are functional checks, not benchmark accuracy.</p>
       </section>

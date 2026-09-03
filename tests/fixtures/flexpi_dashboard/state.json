@@ -1,0 +1,59 @@
+{
+  "phase": "awaiting_command",
+  "interactive": true,
+  "backend": "libero",
+  "simulator": "LIBERO / robosuite / MuJoCo",
+  "model_plugin": "flexpi",
+  "model": "flexpi_libero_stream_dropout",
+  "model_display_name": "Flex-π",
+  "runtime": "local PyTorch/CUDA · flexible world-action profile",
+  "policy_transport": "http",
+  "policy_endpoint": "http://127.0.0.1:8000",
+  "policy_mode": "full-joint",
+  "available_policy_modes": [
+    {
+      "key": "action-only",
+      "display_name": "Action only",
+      "description": "Fast action path without generated futures."
+    },
+    {
+      "key": "full-joint",
+      "display_name": "World-action co-generation",
+      "description": "Co-generate RGB, DINO, pointmap, and end-effector actions in one model pass."
+    }
+  ],
+  "world_model": "none",
+  "world_model_display_name": "No predictor",
+  "available_world_models": [],
+  "compare_world_model": false,
+  "suite": "libero_spatial",
+  "task_id": 0,
+  "task_position": 1,
+  "total_tasks": 2,
+  "available_tasks": [
+    {"id": 0, "prompt": "pick up the black bowl and place it on the plate"},
+    {"id": 1, "prompt": "pick up the black bowl beside the plate"}
+  ],
+  "canonical_prompt": "pick up the black bowl and place it on the plate",
+  "prompt": "pick up the black bowl and place it on the plate",
+  "prompt_source": "canonical",
+  "evaluation_mode": "scored",
+  "rollout_budget_multiplier": 1,
+  "base_max_steps": 220,
+  "max_steps": 220,
+  "replan_steps": 10,
+  "action_horizon": 32,
+  "action_dimension": 7,
+  "state_dimension": 8,
+  "camera_count": 2,
+  "camera_observation_width": 256,
+  "camera_observation_height": 256,
+  "model_image_width": 512,
+  "model_image_height": 448,
+  "network_audit": true,
+  "episodes": 0,
+  "successes": 0,
+  "attempt_history": [],
+  "inference_latencies_ms": [],
+  "command_message": "Choose a task and instruction, then start a rollout"
+}

@@ -500,8 +500,42 @@ def main():
                 )
             elif route == "/frames/external.jpg":
                 self._file(session_dir / "frames" / "external.jpg", "image/jpeg")
+            elif route == "/frames/observer.jpg":
+                self._file(session_dir / "frames" / "observer.jpg", "image/jpeg")
             elif route == "/frames/wrist.jpg":
                 self._file(session_dir / "frames" / "wrist.jpg", "image/jpeg")
+            elif route == "/frames/right_wrist.jpg":
+                self._file(
+                    session_dir / "frames" / "right_wrist.jpg", "image/jpeg"
+                )
+            elif route == "/previews/latest_prediction.mp4":
+                self._file(
+                    session_dir / "previews" / "latest_prediction.mp4", "video/mp4"
+                )
+            elif route == "/previews/latest_actual.mp4":
+                self._file(
+                    session_dir / "previews" / "latest_actual.mp4", "video/mp4"
+                )
+            elif route == "/previews/latest_policy_prediction.mp4":
+                self._file(
+                    session_dir / "previews" / "latest_policy_prediction.mp4",
+                    "video/mp4",
+                )
+            elif route == "/previews/latest_policy_actual.mp4":
+                self._file(
+                    session_dir / "previews" / "latest_policy_actual.mp4",
+                    "video/mp4",
+                )
+            elif route == "/previews/latest_policy_prediction_external.mp4":
+                self._file(
+                    session_dir / "previews" / "latest_policy_prediction_external.mp4",
+                    "video/mp4",
+                )
+            elif route == "/previews/latest_policy_actual_external.mp4":
+                self._file(
+                    session_dir / "previews" / "latest_policy_actual_external.mp4",
+                    "video/mp4",
+                )
             else:
                 super().do_GET()
 
@@ -521,6 +555,9 @@ def main():
                         "stop",
                         "set_prompt",
                         "set_task",
+                        "set_policy_mode",
+                        "set_world_model",
+                        "set_world_model_comparison",
                     }
                     if body.get("action") not in allowed:
                         self._json({"error": "Unsupported control action"}, 400)

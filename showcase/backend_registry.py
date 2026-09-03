@@ -63,6 +63,15 @@ SIMULATORS = {
         ),
         task_collection="atomic_seen",
     ),
+    "robotwin": SimulatorSpec(
+        key="robotwin",
+        display_name="RoboTwin 2.0",
+        simulator="RoboTwin 2.0 / SAPIEN / Vulkan",
+        state_dimension=14,
+        action_dimension=14,
+        cameras=("head_camera", "left_camera", "right_camera"),
+        task_collection="demo_clean",
+    ),
 }
 
 
@@ -81,6 +90,20 @@ POLICIES = {
         transport="zeromq",
         runtime_directory="upstream-robocasa-groot",
     ),
+    "fastwam": PolicySpec(
+        key="fastwam",
+        display_name="Fast-WAM",
+        runtime="local PyTorch/CUDA · staged 24 GB profile",
+        transport="http",
+        runtime_directory="../upstream-fastwam",
+    ),
+    "flexpi": PolicySpec(
+        key="flexpi",
+        display_name="Flex-π",
+        runtime="local PyTorch/CUDA · flexible world-action profile",
+        transport="http",
+        runtime_directory="../upstream-flexpi",
+    ),
 }
 
 
@@ -92,6 +115,22 @@ PROFILES = {
         checkpoint="gs://openpi-assets/checkpoints/pi05_libero",
         action_horizon=10,
         default_replan_steps=5,
+    ),
+    ("libero", "fastwam"): ProfileSpec(
+        backend="libero",
+        policy="fastwam",
+        model_name="fastwam_libero_uncond_2cam224",
+        checkpoint="checkpoints/fastwam_release/libero_uncond_2cam224.pt",
+        action_horizon=32,
+        default_replan_steps=10,
+    ),
+    ("libero", "flexpi"): ProfileSpec(
+        backend="libero",
+        policy="flexpi",
+        model_name="flexpi_libero_stream_dropout",
+        checkpoint="runs/flexpi-libero/checkpoints/weights/step_010860.pt",
+        action_horizon=32,
+        default_replan_steps=10,
     ),
     ("robocasa", "pi05"): ProfileSpec(
         backend="robocasa",
@@ -115,6 +154,22 @@ PROFILES = {
         action_horizon=16,
         default_replan_steps=16,
     ),
+    ("robotwin", "fastwam"): ProfileSpec(
+        backend="robotwin",
+        policy="fastwam",
+        model_name="robotwin_uncond_3cam_384",
+        checkpoint="checkpoints/fastwam_release/robotwin_uncond_3cam_384.pt",
+        action_horizon=32,
+        default_replan_steps=24,
+    ),
+    ("robotwin", "flexpi"): ProfileSpec(
+        backend="robotwin",
+        policy="flexpi",
+        model_name="flexpi_robotwin_3cam_384",
+        checkpoint="runs/flexpi-robotwin/checkpoints/weights/step_048060.pt",
+        action_horizon=32,
+        default_replan_steps=32,
+    ),
 }
 
 
@@ -128,7 +183,21 @@ MODEL_ALIASES = {
     "gr00t-n1.5": "groot-n1.5",
     "groot_n1.5": "groot-n1.5",
     "gr00t_n1.5": "groot-n1.5",
+    "fast-wam": "fastwam",
+    "fast_wam": "fastwam",
+    "flex-pi": "flexpi",
+    "flex_pi": "flexpi",
+    "flex-π": "flexpi",
 }
+
+BACKEND_ALIASES = {
+    "robo_twin": "robotwin",
+}
+
+
+def normalize_backend(key: str) -> str:
+    normalized = key.strip().lower()
+    return BACKEND_ALIASES.get(normalized, normalized)
 
 
 def normalize_model(key: str) -> str:
@@ -137,8 +206,9 @@ def normalize_model(key: str) -> str:
 
 
 def get_simulator(key: str) -> SimulatorSpec:
+    normalized = normalize_backend(key)
     try:
-        return SIMULATORS[key.lower()]
+        return SIMULATORS[normalized]
     except KeyError as error:
         supported = ", ".join(sorted(SIMULATORS))
         raise ValueError(
@@ -152,7 +222,9 @@ def get_policy(key: str) -> PolicySpec:
         return POLICIES[normalized]
     except KeyError as error:
         supported = ", ".join(sorted(POLICIES))
-        raise ValueError(f"Unknown model {key!r}; choose one of: {supported}") from error
+        raise ValueError(
+            f"Unknown model {key!r}; choose one of: {supported}"
+        ) from error
 
 
 def get_profile(backend: str, model: str) -> ProfileSpec:
