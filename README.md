@@ -15,7 +15,8 @@ are retained when the selected model exposes a generated future.
 ![Status](https://img.shields.io/badge/status-research%20preview-f59f00.svg)
 ![Simulators](https://img.shields.io/badge/sim-LIBERO%20%7C%20RoboCasa%20%7C%20RoboTwin-7c3aed.svg)
 
-[Quick start](#quick-start) · [Model matrix](#model-matrix) ·
+[Quick start](#quick-start) · [Models](#model-matrix) ·
+[Environments](#environments-at-a-glance) ·
 [World-action replay](#see-the-future-next-to-the-rollout) ·
 [Benchmarks](#matched-wam-benchmark) · [Documentation](#documentation)
 
@@ -90,6 +91,43 @@ Generated-future media is currently decoded and retained by the LIBERO Flex-π
 adapter. RoboTwin full-joint mode enables the released joint-denoising path,
 but its shared studio currently retains the executed three-camera rollout and
 14D action chunks rather than generated-future media.
+
+## Environments at a glance
+
+The lab preserves each simulator's native camera and action contracts while
+standardizing how runs are launched, observed, and saved. These are artifacts
+from local runs—not publisher marketing images or cross-simulator benchmark
+results.
+
+<table>
+  <tr>
+    <th width="33%">LIBERO / MuJoCo</th>
+    <th width="33%">RoboCasa / MuJoCo</th>
+    <th width="34%">RoboTwin / SAPIEN</th>
+  </tr>
+  <tr>
+    <td align="center" valign="middle">
+      <img src="docs/assets/environment-libero.png"
+           alt="LIBERO Flex-pi actual execution beside its generated external and wrist future"
+           height="240">
+    </td>
+    <td align="center" valign="middle">
+      <img src="docs/assets/environment-robocasa.png"
+           alt="RoboCasa pi0.5 robot moving a moka pot toward the stove"
+           height="240">
+    </td>
+    <td align="center" valign="middle">
+      <img src="docs/assets/studio-live-cameras.png"
+           alt="RoboTwin front observer, head, and dual wrist camera views"
+           height="240">
+    </td>
+  </tr>
+  <tr>
+    <td valign="top"><sub>Flex-π full-joint: actual and generated external/wrist views.</sub></td>
+    <td valign="top"><sub>π0.5: an executed two-object kitchen rollout.</sub></td>
+    <td valign="top"><sub>Fast-WAM: front observer plus head and both wrist policy cameras.</sub></td>
+  </tr>
+</table>
 
 ## Quick start
 
