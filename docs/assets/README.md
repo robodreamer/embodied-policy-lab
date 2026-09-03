@@ -5,7 +5,7 @@ contains no downloaded model weights or third-party marketing artwork.
 
 | Asset | Source run | Source commit | Profile and state | Transform |
 |---|---|---|---|---|
-| `studio-overview.png` | `showcase-runs/20260903-114826-robotwin` | `9fa46a7` | Fast-WAM action-only, RoboTwin `beat_block_hammer`; successful functional check and ready for another rollout | Browser capture at a 1440 px publication viewport; scrollbar cropped |
+| `studio-overview.png` | `showcase-runs/20260903-114826-robotwin` | `9fa46a7` | Fast-WAM action-only, RoboTwin `beat_block_hammer`; successful functional check and ready for another rollout | Browser capture at a 1440 px publication viewport; cropped at the experiment-panel border before the camera grid |
 | `studio-live-cameras.png` | `showcase-runs/20260903-114826-robotwin` | `9fa46a7` | Fast-WAM action-only; completed front-observer, head, left-wrist, and right-wrist views | Browser capture cropped to the four-camera grid; no content edits |
 | `studio-world-action-comparison.png` | `showcase-runs/20260826-100813` | `2859c61` | Flex-π full-joint; post-rollout actual/generated external and wrist comparison | Unaltered browser capture |
 | `studio-evidence.png` | `showcase-runs/20260903-114826-robotwin` | `9fa46a7` | Fast-WAM action-only; applied prompt, completed telemetry, 14D action, runtime, and single-run result panels | Browser capture cropped to the evidence panels; no content edits |
