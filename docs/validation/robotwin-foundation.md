@@ -160,6 +160,22 @@ benchmark—filesystem cache state was uncontrolled—but it verifies the optimi
 path and removes the unnecessary eager CPU checkpoint copy. The model remains
 resident for subsequent tasks and rollouts in the same studio session.
 
+Fast-WAM's pinned deployment wrapper originally moved both its 6.02B-parameter
+world-action network and the frozen UMT5-XXL text encoder onto CUDA. On a 24 GB
+GPU that consumed approximately 23.37 GiB before SAPIEN or inference could
+allocate working memory. The studio now memory-maps the release checkpoint,
+keeps UMT5-XXL on CPU, and retains only the current prompt embedding on CUDA.
+This does not quantize or alter the released policy weights. Repeated action
+chunks for the same instruction reuse the embedding; changing the instruction
+replaces the one-entry cache.
+
+On 2026-09-03, a bounded RTX PRO 5000 validation loaded Fast-WAM in 78.0
+seconds at 13,336 MiB VRAM. With SAPIEN active, a real `click_bell` rollout
+reached 17,626 MiB in an observed sample and succeeded in 56 simulator steps.
+The first request, including CPU prompt encoding, took 8.00 seconds; its two
+cached follow-up requests took 443 and 449 ms. This is one functional check,
+not a throughput or task-success benchmark.
+
 Each rollout intentionally keeps RoboTwin's upstream expert seed check and
 unseen-instruction generator. Preparation is therefore slower than merely
 resetting a scene, but the resulting score follows the native evaluator's seed

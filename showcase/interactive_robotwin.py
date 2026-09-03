@@ -205,23 +205,22 @@ def camera_frames(observation: dict[str, Any]) -> dict[str, np.ndarray]:
 
 
 def load_policy(args: argparse.Namespace, state: LiveState):
+    from fastwam_memory import load_fastwam_with_cpu_text_encoder
+
     policy_name = "fastwam_policy" if args.model == "fastwam" else "flexpi_policy"
     deploy = args.model_root / "experiments" / "robotwin" / policy_name / "deploy_policy.py"
     startup_note = (
         "typically 80–100 seconds on this workstation"
         if args.model == "flexpi"
-        else "this cold load runs once per studio session"
+        else "typically about 80 seconds with the frozen text encoder on CPU"
     )
     state.update(
         command_message=(
             f"Loading {args.model_display_name} checkpoint · {startup_note}; "
             "the model remains resident afterward"
         ),
-        checkpoint_io_mode=(
-            "memory-mapped weights-only"
-            if args.model == "flexpi"
-            else "publisher default"
-        ),
+        checkpoint_io_mode="memory-mapped weights-only",
+        text_encoder_placement="cpu · prompt embedding cached on cuda",
     )
     module = load_module(deploy, f"embodied_lab_{policy_name}")
     joint = args.flexpi_mode == "full-joint"
@@ -245,16 +244,15 @@ def load_policy(args: argparse.Namespace, state: LiveState):
             infer_joint_pointmap=joint,
         )
     started = time.perf_counter()
-    checkpoint_context = (
-        memory_mapped_checkpoint(args.checkpoint)
-        if args.model == "flexpi"
-        else contextlib.nullcontext()
-    )
+    checkpoint_context = memory_mapped_checkpoint(args.checkpoint)
     with (
         startup_progress(state, args.model_display_name, startup_note, started),
         checkpoint_context,
     ):
-        policy = module.get_model(policy_args)
+        if args.model == "fastwam":
+            policy = load_fastwam_with_cpu_text_encoder(module.get_model, policy_args)
+        else:
+            policy = module.get_model(policy_args)
     elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
     state.update(
         cold_inference_latency_ms=elapsed_ms,

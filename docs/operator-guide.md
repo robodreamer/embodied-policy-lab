@@ -126,6 +126,15 @@ checkpoint to avoid an eager second CPU copy, and keeps the loaded model
 resident across task changes and rollouts. A missing simulator dependency is
 checked before this heavyweight load begins.
 
+Fast-WAM also takes roughly 80 seconds to load on the validation workstation.
+Its browser-studio adapter keeps the frozen UMT5-XXL encoder on CPU and caches
+only the current prompt embedding on CUDA. This reduces observed checkpoint
+residency from a 23.37 GiB out-of-memory load to 13,336 MiB before SAPIEN and
+17,626 MiB during one successful `click_bell` rollout. Expect the first request
+for a new instruction to include CPU text-encoding latency; later replans for
+that instruction reuse the cached embedding. The publisher-native batch path
+does not currently apply this studio-specific offload.
+
 You can preselect part of the configuration and let the picker fill the rest,
 or bypass it entirely:
 

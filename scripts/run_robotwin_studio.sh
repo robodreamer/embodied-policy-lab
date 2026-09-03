@@ -170,6 +170,7 @@ printf 'RoboTwin browser studio\n'
 printf '  model: %s · mode: %s\n  task: %s · phase: %s\n' "$model" "$flexpi_mode" "$task" "$phase"
 printf '  contract: head + left wrist + right wrist · 14D qpos · horizon 32 · replan %s\n' "$replan_steps"
 printf '  monitor: front observer (not sent to policy) · denoiser %s\n' "$render_denoiser"
+printf '  memory: frozen text encoder on CPU · prompt embedding cached on GPU\n'
 printf '  session: %s\n' "$session_dir"
 printf 'Command:'
 printf ' %q' "${runner[@]}"

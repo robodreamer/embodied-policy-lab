@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from showcase import backend_registry
+from showcase.fastwam_memory import prompt_cache_key
 from showcase.interactive_robotwin import (
     CAMERA_FILES,
     OBSERVER_FILE,
@@ -146,6 +147,7 @@ def test_robotwin_launch_fails_fast_and_memory_maps_the_release_checkpoint():
     assert '"memory-mapped weights-only"' in adapter
     assert 'kwargs.setdefault("mmap", True)' in adapter
     assert 'kwargs.setdefault("weights_only", True)' in adapter
+    assert "load_fastwam_with_cpu_text_encoder(module.get_model, policy_args)" in adapter
     assert "import pkg_resources, sapien" in studio
 
 
@@ -171,6 +173,11 @@ def test_robotwin_render_denoiser_accepts_explicit_compatible_modes():
     assert resolve_render_denoiser("none") == "none"
     with pytest.raises(ValueError, match="render denoiser"):
         resolve_render_denoiser("broken")
+
+
+def test_fastwam_prompt_cache_key_handles_single_and_batched_prompts():
+    assert prompt_cache_key("pick up the bottle") == "pick up the bottle"
+    assert prompt_cache_key(["left", "right"]) == ("left", "right")
 
 
 def test_robotwin_expert_seed_check_rejects_publisher_planner_error():
