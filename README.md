@@ -95,37 +95,51 @@ but its shared studio currently retains the executed three-camera rollout and
 ## Environments at a glance
 
 The lab preserves each simulator's native camera and action contracts while
-standardizing how runs are launched, observed, and saved. These are artifacts
-from local runs—not publisher marketing images or cross-simulator benchmark
-results.
+standardizing how runs are launched, observed, and saved. Each strip below
+uses only the simulator's front/external observer view and presents three task
+scenes at the same 960×240 size. Frames are selected for scene legibility, not
+rollout-time alignment, and camera intrinsics still belong to each simulator.
+These are local run artifacts, not cross-simulator benchmark results.
 
 <table>
   <tr>
-    <th width="33%">LIBERO / MuJoCo</th>
-    <th width="33%">RoboCasa / MuJoCo</th>
-    <th width="34%">RoboTwin / SAPIEN</th>
+    <th>LIBERO / robosuite / MuJoCo</th>
   </tr>
   <tr>
-    <td align="center" valign="middle">
+    <td align="center">
       <img src="docs/assets/environment-libero.png"
-           alt="LIBERO Flex-pi actual execution beside its generated external and wrist future"
-           height="240">
-    </td>
-    <td align="center" valign="middle">
-      <img src="docs/assets/environment-robocasa.png"
-           alt="RoboCasa pi0.5 robot moving a moka pot toward the stove"
-           height="240">
-    </td>
-    <td align="center" valign="middle">
-      <img src="docs/assets/studio-live-cameras.png"
-           alt="RoboTwin front observer, head, and dual wrist camera views"
-           height="240">
+           alt="Three LIBERO front-camera task scenes with different black-bowl spatial arrangements"
+           width="960">
     </td>
   </tr>
   <tr>
-    <td valign="top"><sub>Flex-π full-joint: actual and generated external/wrist views.</sub></td>
-    <td valign="top"><sub>π0.5: an executed two-object kitchen rollout.</sub></td>
-    <td valign="top"><sub>Fast-WAM: front observer plus head and both wrist policy cameras.</sub></td>
+    <td><sub>Left to right: bowl between plate and ramekin · bowl on ramekin · bowl beside cookie box.</sub></td>
+  </tr>
+  <tr>
+    <th>RoboCasa365 / robosuite / MuJoCo</th>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="docs/assets/environment-robocasa.png"
+           alt="Three RoboCasa front-camera task scenes with a blender, toaster oven, and stove"
+           width="960">
+    </td>
+  </tr>
+  <tr>
+    <td><sub>Left to right: close blender lid · close toaster-oven door · turn off rear-left burner.</sub></td>
+  </tr>
+  <tr>
+    <th>RoboTwin 2.0 / SAPIEN / Vulkan</th>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="docs/assets/environment-robotwin.png"
+           alt="Three RoboTwin front-observer task scenes with a hammer, handled pot, and bread basket"
+           width="960">
+    </td>
+  </tr>
+  <tr>
+    <td><sub>Left to right: beat block with hammer · lift two-handled pot · place bread in basket.</sub></td>
   </tr>
 </table>
 
@@ -225,15 +239,15 @@ and GPU telemetry in one place.
 
 </td>
 <td width="52%" align="center">
-  <img src="docs/assets/robocasa-pi05-rollout.gif"
-       alt="Pi zero point five completing a two-object RoboCasa task"
+  <img src="docs/assets/libero-fastwam-rollout.gif"
+       alt="Fast-WAM completing a two-object LIBERO-10 task"
        width="448">
 </td>
 </tr>
 </table>
 
-The example above is a locally validated π0.5 rollout that places both moka
-pots on the stove. The lab also supports prompt variants, live instruction
+The example above is a locally validated Fast-WAM LIBERO-10 rollout that places
+both moka pots on the stove. The lab also supports prompt variants, live instruction
 updates, unscored exploratory commands, and an optional loopback-only local
 prompt generator.
 
