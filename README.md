@@ -4,18 +4,18 @@
 
 **Run the policy. See the future it predicted. Compare it with what actually happened.**
 
-Embodied Policy Lab is a local evaluation and observability studio for robot
-VLAs and world-action models. Run π0.5, GR00T, Fast-WAM, and Flex-π through one
-experiment boundary, then keep the prediction replays, actions, metrics,
-prompts, and provenance needed to understand the result. Prediction replays
-are retained when the selected model exposes a generated future.
+Embodied Policy Lab is a local studio for robot vision-language-action (VLA)
+and world-action (WAM) models. It runs released checkpoints in simulators,
+shows the live rollout, and stores the prompts, actions, videos, metrics, and
+provenance from each attempt. When a model also generates a future, that
+prediction is kept and shown next to the executed rollout.
 
 [![CI](https://img.shields.io/github/actions/workflow/status/robodreamer/embodied-policy-lab/ci.yml?branch=main&label=CI)](https://github.com/robodreamer/embodied-policy-lab/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-4c6ef5.svg)](LICENSE)
 ![Status](https://img.shields.io/badge/status-research%20preview-f59f00.svg)
 ![Simulators](https://img.shields.io/badge/sim-LIBERO%20%7C%20RoboCasa%20%7C%20RoboTwin-7c3aed.svg)
 
-[Quick start](#quick-start) · [Models](#model-matrix) ·
+[Overview](#overview) · [Quick start](#quick-start) · [Models](#model-matrix) ·
 [Environments](#environments-at-a-glance) ·
 [World-action replay](#see-the-future-next-to-the-rollout) ·
 [Benchmarks](#matched-wam-benchmark) · [Documentation](#documentation)
@@ -29,46 +29,30 @@ are retained when the selected model exposes a generated future.
 </p>
 
 <p align="center"><sub>
-The experiment setup after a successful Fast-WAM RoboTwin functional check:
-choose a task, review the scored rollout contract, and inspect the active local
-runtime before starting another rollout.
+Studio after a Fast-WAM RoboTwin run: choose a task, review the scored
+rollout contract, and inspect the local runtime.
 </sub></p>
 
-## Why this lab is different
+## Overview
 
-The community already has strong model implementations, training libraries,
-simulators, and leaderboards. Embodied Policy Lab sits between them as the
-local experiment and evidence layer:
+The lab is a local evaluation and observability layer around released robot
+policies. A session typically looks like this:
 
-- **Match unlike models fairly.** Compatible VLA and WAM profiles share the
-  same task, seed, rollout budget, dashboard, and result schema.
-- **Compare prediction with reality.** Flex-π external and wrist futures are
-  aligned with the action prefixes actually executed and revealed only after
-  the rollout finishes.
-- **Keep evidence, not just a demo.** Every attempt preserves prompts, action
-  hashes, latency, GPU telemetry, simulator video, source revisions, and
-  success state.
-- **Run locally and audit the boundary.** Policy inference, simulation, prompt
-  generation, and telemetry stay on the workstation; observed network
-  destinations are recorded.
-- **Respect upstream contracts.** Heavy models stay in pinned, independent
-  runtimes instead of being forced through one lossy preprocessing path.
+1. Choose a compatible model and simulator.
+2. Run a closed-loop task with a declared seed and action budget.
+3. Watch the live cameras, instruction, actions, latency, and success state.
+4. After the attempt, review saved artifacts — and, when the model produces
+   them, aligned prediction-versus-execution replays.
 
-Upstream projects remain authoritative for training and model claims. This lab
-owns the repeatable workflow for asking a different question: **what did this
-model predict, what did the robot actually do, and what evidence supports the
-comparison?** Read the [public roadmap](ROADMAP.md) for the competitive boundary
-and next priorities.
+Compatible VLA and WAM profiles share the same launcher, dashboard, and result
+schema. Each profile keeps the cameras, state ordering, image transforms, and
+action contract of its released checkpoint. Heavy models run in pinned,
+isolated runtimes, one large policy at a time.
 
-This is a research workbench, not a robot-safety system or a claim that unlike
-papers have been reproduced under identical conditions.
-
-### When is future imagination worth it?
-
-The current WAM experiment compares Fast-WAM's direct action path with Flex-π
-in action-only and full-joint world-action modes under a shared local LIBERO
-schedule. That makes the speed, memory, control, and visible-prediction
-tradeoffs inspectable without confusing publisher results with local evidence.
+Current models are π0.5, NVIDIA Isaac GR00T N1.5, Fast-WAM, and Flex-π.
+Simulators are LIBERO, RoboCasa, and RoboTwin 2.0. Upstream repositories remain
+the source for training, architecture, and publisher benchmark claims. See the
+[roadmap](ROADMAP.md) for current priorities.
 
 ## Model matrix
 
@@ -87,19 +71,17 @@ a learned world model. Unsupported model/simulator pairs never appear in the
 picker. See the [plugin contract](docs/model-plugins.md) and
 [world-model guide](docs/world-model-plugins.md).
 
-Generated-future media is currently decoded and retained by the LIBERO Flex-π
-adapter. RoboTwin full-joint mode enables the released joint-denoising path,
-but its shared studio currently retains the executed three-camera rollout and
-14D action chunks rather than generated-future media.
+Generated-future media is decoded and retained for Flex-π on LIBERO. RoboTwin
+full-joint mode runs the released joint-denoising path; the studio keeps the
+three-camera rollout and 14D action chunks.
 
 ## Environments at a glance
 
 The lab preserves each simulator's native camera and action contracts while
 standardizing how runs are launched, observed, and saved. Each strip below
-uses only the simulator's front/external observer view and presents three task
-scenes at the same 960×240 size. Frames are selected for scene legibility, not
-rollout-time alignment, and camera intrinsics still belong to each simulator.
-These are local run artifacts, not cross-simulator benchmark results.
+uses that simulator's front/external observer view and shows three task
+scenes at the same 960×240 size. Frames are chosen for scene legibility, not
+rollout-time alignment.
 
 <table>
   <tr>
@@ -209,12 +191,12 @@ full-joint and action-only inference without loading another checkpoint.
 Choose `--mode batch` for the model publisher's native evaluation/reporting
 path.
 
-## One dashboard, comparable evidence
+## Dashboard
 
 The studio keeps experiment setup, live simulator state, model inputs,
-post-rollout comparisons, and system telemetry in one reviewable session.
-The simulator cameras stay visible while the policy runs; generated futures,
-when available for the selected profile, are withheld until execution finishes.
+post-rollout comparisons, and system telemetry in one session. Simulator
+cameras stay visible while the policy runs. Generated futures, when the
+selected profile produces them, appear after execution finishes.
 
 <p align="center">
   <img src="docs/assets/studio-live-cameras.png"
@@ -246,10 +228,10 @@ and GPU telemetry in one place.
 </tr>
 </table>
 
-The example above is a locally validated Fast-WAM LIBERO-10 rollout that places
-both moka pots on the stove. The lab also supports prompt variants, live instruction
-updates, unscored exploratory commands, and an optional loopback-only local
-prompt generator.
+The clip above is a Fast-WAM LIBERO-10 rollout that places both moka pots on
+the stove. The lab also supports prompt variants, live instruction updates,
+unscored exploratory commands, and an optional loopback-only local prompt
+generator.
 
 <p align="center">
   <img src="docs/assets/studio-evidence.png"
@@ -307,8 +289,8 @@ executed action prefixes for this run.
        width="960">
 </p>
 
-This is a temporal diagnostic, not a counterfactual planner: the generated
-future does not score candidate actions or change the completed rollout. The
+The generated future is aligned to the executed action prefixes and does not
+change the completed rollout. The
 [Flex-π validation note](docs/validation/flexpi-libero.md)
 documents the camera, depth, action-space, and release-asset contracts.
 
@@ -327,9 +309,9 @@ and one auditable session per configuration.
 ```
 
 Results land under `benchmark-runs/wam-libero-*/`. The `paper` profile is a
-matched **local** comparison; it is not a reproduction of either project's
-complete paper protocol. Read the
-[benchmark protocol and claim boundaries](docs/benchmarks/fastwam-flexpi-libero.md).
+matched local schedule of 6,000 episodes. Protocol details, coverage, and
+claim labels are in the
+[benchmark protocol](docs/benchmarks/fastwam-flexpi-libero.md).
 
 ## How it fits together
 
@@ -353,33 +335,36 @@ flowchart LR
     ALIGN --> EVIDENCE
 ```
 
-Each profile translates the simulator's canonical observations into the exact
-camera, state, prompt, and action representation expected by its released
-checkpoint. Profile-specific preprocessing is deliberately preserved; forcing
-one universal transform would make the comparison less faithful, not more.
+Each profile translates the simulator's canonical observations into the camera,
+state, prompt, and action representation expected by its released checkpoint.
 
 ## Hardware and storage
 
-The currently validated local profile is Ubuntu on a 24 GB NVIDIA RTX PRO 5000.
-Treat the figures below as planning guidance, not minimum guarantees.
+Model rollouts target Ubuntu with an NVIDIA GPU and a current CUDA driver.
+CPU-only machines can run the test suite, but not live policy inference.
 
-| Resource | Observed / expected footprint |
+Plan around **~24 GB of GPU memory** for the larger world-action profiles.
+Smaller VLA checkpoints may fit in less VRAM. Peak usage depends on the model,
+simulator, and whether generated-future decoding is enabled. Run one large
+policy at a time; the launcher reserves the policy GPU and rejects accidental
+concurrent lab sessions unless you override it.
+
+Downloads and caches are large. Approximate footprints:
+
+| Resource | Typical footprint |
 |---|---:|
-| π0.5 inference checkpoint | ~12 GB download |
-| First LIBERO/OpenPI cache | ~11.6 GiB |
+| π0.5 inference checkpoint | ~12 GB |
+| First LIBERO/OpenPI cache | ~12 GB |
 | RoboCasa assets | ~23 GB |
 | RoboTwin assets | ~16 GB, shared by the isolated Fast-WAM/Flex-π runtimes |
-| GR00T N1.5 inference checkpoint | ~7.6 GB |
+| GR00T N1.5 inference checkpoint | ~8 GB |
 | Flex-π release checkpoint | ~12 GB, plus VAE/T5/DINO assets |
 | Fast-WAM RoboTwin release checkpoint | ~12 GB |
-| Flex-π action-only peak reservation | 13.24 GiB in the bounded LIBERO check |
-| Flex-π full-joint peak reservation | 16.45 GiB in the bounded LIBERO check |
+| Flex-π action-only peak GPU reservation | ~13 GB |
+| Flex-π full-joint peak GPU reservation | ~16 GB |
 
-Large policies run one at a time. The launcher reserves the policy GPU before
-starting optional prompt generation and rejects accidental concurrent lab
-sessions unless explicitly overridden. Exact setup, environment variables,
-camera presentation controls, and troubleshooting live in the
-[operator guide](docs/operator-guide.md).
+Exact setup, environment variables, camera controls, and troubleshooting are
+in the [operator guide](docs/operator-guide.md).
 
 ## Documentation
 
@@ -389,7 +374,7 @@ camera presentation controls, and troubleshooting live in the
 | [Model plugins](docs/model-plugins.md) | adding a policy without coupling it to a simulator |
 | [World-model plugins](docs/world-model-plugins.md) | predictor semantics and the RoboCasa simulator-oracle baseline |
 | [External assets](docs/external-assets.md) | source/weight licenses, pinned revisions, integrity checks |
-| [Roadmap](ROADMAP.md) | public priorities, scope boundaries, and research direction |
+| [Roadmap](ROADMAP.md) | public priorities and research direction |
 | [π0.5 RoboCasa validation](docs/validation/robocasa-pi05.md) | observation/action contract and bounded local evidence |
 | [GR00T N1.5 RoboCasa validation](docs/validation/groot-n1.5-robocasa.md) | pinned integration and bounded local evidence |
 | [Fast-WAM validation](docs/validation/fastwam-libero.md) | released-checkpoint boundary and bounded experiment |
