@@ -13,7 +13,7 @@ help_output="$($PROJECT_DIR/lab --help)"
 grep -E -- "-V, --version" <<<"$help_output" >/dev/null
 grep -F "$expected_version" "$PROJECT_DIR/CHANGELOG.md" >/dev/null
 grep -F "version: $expected_version" "$PROJECT_DIR/CITATION.cff" >/dev/null
-grep -F "version-${expected_version}-" "$PROJECT_DIR/README.md" >/dev/null
+grep -F "github/v/release/robodreamer/embodied-policy-lab" "$PROJECT_DIR/README.md" >/dev/null
 grep -F "tag \`v${expected_version}\`" "$PROJECT_DIR/SECURITY.md" >/dev/null
 
 list_output="$($PROJECT_DIR/lab --list)"

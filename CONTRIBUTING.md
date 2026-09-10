@@ -62,7 +62,8 @@ profile becomes runnable.
 Record user-visible changes under `## [Unreleased]` in
 [CHANGELOG.md](CHANGELOG.md). Do not bump [VERSION](VERSION) in a feature PR;
 the next tagged release copies Unreleased into a version heading and updates
-`VERSION`, `CITATION.cff`, and the README version badge together.
+`VERSION` and `CITATION.cff` together. The README version badge tracks the
+latest GitHub Release.
 
 By submitting a contribution, you agree that it is licensed under the
 repository's [Apache License 2.0](LICENSE).

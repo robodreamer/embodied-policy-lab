@@ -12,7 +12,7 @@ prediction is kept and shown next to the executed rollout.
 
 [![CI](https://img.shields.io/github/actions/workflow/status/robodreamer/embodied-policy-lab/ci.yml?branch=main&label=CI)](https://github.com/robodreamer/embodied-policy-lab/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-4c6ef5.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.1.0-4c6ef5.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/github/v/release/robodreamer/embodied-policy-lab)](https://github.com/robodreamer/embodied-policy-lab/releases)
 ![Status](https://img.shields.io/badge/status-research%20preview-f59f00.svg)
 ![Simulators](https://img.shields.io/badge/sim-LIBERO%20%7C%20RoboCasa%20%7C%20RoboTwin-7c3aed.svg)
 
