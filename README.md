@@ -12,13 +12,15 @@ prediction is kept and shown next to the executed rollout.
 
 [![CI](https://img.shields.io/github/actions/workflow/status/robodreamer/embodied-policy-lab/ci.yml?branch=main&label=CI)](https://github.com/robodreamer/embodied-policy-lab/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-4c6ef5.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-0.1.0-4c6ef5.svg)](CHANGELOG.md)
 ![Status](https://img.shields.io/badge/status-research%20preview-f59f00.svg)
 ![Simulators](https://img.shields.io/badge/sim-LIBERO%20%7C%20RoboCasa%20%7C%20RoboTwin-7c3aed.svg)
 
 [Overview](#overview) · [Quick start](#quick-start) · [Models](#model-matrix) ·
 [Environments](#environments-at-a-glance) ·
 [World-action replay](#see-the-future-next-to-the-rollout) ·
-[Benchmarks](#matched-wam-benchmark) · [Documentation](#documentation)
+[Benchmarks](#matched-wam-benchmark) · [Changelog](CHANGELOG.md) ·
+[Documentation](#documentation)
 
 </div>
 
@@ -370,6 +372,7 @@ in the [operator guide](docs/operator-guide.md).
 
 | Document | Use it for |
 |---|---|
+| [Changelog](CHANGELOG.md) | released versions and user-visible changes |
 | [Operator guide](docs/operator-guide.md) | complete setup, dashboard workflow, runtime flags, artifacts, troubleshooting |
 | [Model plugins](docs/model-plugins.md) | adding a policy without coupling it to a simulator |
 | [World-model plugins](docs/world-model-plugins.md) | predictor semantics and the RoboCasa simulator-oracle baseline |

@@ -9,6 +9,7 @@
 - [ ] `bash -n bin/embodied-lab scripts/*.sh tests/*.sh`
 - [ ] No checkpoints, caches, tokens, private paths, or raw run artifacts added
 - [ ] Screenshots/clips included for dashboard changes
+- [ ] User-visible changes recorded under `## [Unreleased]` in CHANGELOG.md
 - [ ] Empirical claims include revisions, hardware, tasks, seeds, and trial count
 
 ## Claim boundary
