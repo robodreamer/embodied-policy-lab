@@ -9,6 +9,10 @@ contracts may still change. Git tags use a `v` prefix (`v0.1.0`).
 
 ## [Unreleased]
 
+### Changed
+
+- README version badge now tracks the latest GitHub Release.
+
 ## [0.1.0] - 2026-09-08
 
 First tagged snapshot of the local studio: run a released VLA or world-action
