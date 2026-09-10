@@ -3,6 +3,19 @@ set -euo pipefail
 
 PROJECT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
+expected_version="$(tr -d '[:space:]' < "$PROJECT_DIR/VERSION")"
+[[ -n "$expected_version" ]]
+version_output="$($PROJECT_DIR/lab --version)"
+[[ "$version_output" == "embodied-policy-lab $expected_version" ]]
+v_flag_output="$($PROJECT_DIR/lab -V)"
+[[ "$v_flag_output" == "embodied-policy-lab $expected_version" ]]
+help_output="$($PROJECT_DIR/lab --help)"
+grep -E -- "-V, --version" <<<"$help_output" >/dev/null
+grep -F "$expected_version" "$PROJECT_DIR/CHANGELOG.md" >/dev/null
+grep -F "version: $expected_version" "$PROJECT_DIR/CITATION.cff" >/dev/null
+grep -F "version-${expected_version}-" "$PROJECT_DIR/README.md" >/dev/null
+grep -F "tag \`v${expected_version}\`" "$PROJECT_DIR/SECURITY.md" >/dev/null
+
 list_output="$($PROJECT_DIR/lab --list)"
 grep -F "VLA     robocasa    pi05          action-only   ready / default" <<<"$list_output" >/dev/null
 grep -F "VLA     robocasa    groot-n1.5    action-only   ready" <<<"$list_output" >/dev/null

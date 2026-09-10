@@ -32,6 +32,7 @@ Options:
   --default            skip the picker and use missing defaults
   --dry-run            print the resolved command without running it
   --list               show compatible simulator/model profiles
+  -V, --version        print the lab version and exit
   -h, --help           show this help
 
 Examples:
@@ -48,6 +49,18 @@ The recommended/default setup is RoboCasa + π0.5 + atomic_seen task 0 in the
 interactive browser dashboard. Install fzf for arrow-key menus; a numbered
 terminal menu is used otherwise.
 EOF
+}
+
+lab_version() {
+  local version_file="$PROJECT_DIR/VERSION" version=""
+  [[ -f "$version_file" ]] || die "missing VERSION file"
+  version="$(tr -d '[:space:]' < "$version_file")"
+  [[ -n "$version" ]] || die "VERSION file is empty"
+  printf '%s\n' "$version"
+}
+
+print_version() {
+  printf 'embodied-policy-lab %s\n' "$(lab_version)"
 }
 
 list_profiles() {
@@ -159,6 +172,7 @@ main() {
       --dry-run) dry_run=1; shift ;;
       --list) list_only=1; shift ;;
       --list-tasks) list_tasks=1; shift ;;
+      --version|-V) print_version; return 0 ;;
       -h|--help) usage; return 0 ;;
       --) shift; extra_args=("$@"); break ;;
       *) die "unknown option: $1 (use -- before advanced showcase flags)" ;;

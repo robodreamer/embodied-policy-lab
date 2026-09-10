@@ -1,9 +1,14 @@
 # Security policy
 
-## Supported version
+## Supported versions
 
-Security fixes target the latest commit on `main`. Experimental branches and
-locally modified upstream checkouts are not supported releases.
+| Version | Support |
+|---|---|
+| 0.1.x (`main`, tag `v0.1.0`) | security fixes |
+| Unreleased branches and local forks | not supported |
+
+Security fixes land on `main` and ship in the next `0.1.x` tag. Experimental
+branches and locally modified upstream checkouts are not supported releases.
 
 ## Reporting a vulnerability
 

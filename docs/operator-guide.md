@@ -2,7 +2,8 @@
 
 This is the complete setup, runtime, dashboard, and troubleshooting reference.
 For the project overview and shortest path to a first rollout, start with the
-[main README](../README.md).
+[main README](../README.md). The lab version is `./lab --version`; user-visible
+changes are in the [changelog](../CHANGELOG.md).
 
 > A local, publishable workbench for plugging vision-language-action policies
 > into robot simulators with live rollouts, prompt experiments, success scoring,
