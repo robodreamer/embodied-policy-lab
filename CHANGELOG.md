@@ -21,6 +21,12 @@ milestone at `f0c574d`. The current release is `v0.7.0`.
 
 ## [Unreleased]
 
+### Added
+
+- Record Rolling-WAM as an unpublished LIBERO and RoboTwin candidate. It is
+  not a selectable model until its code, checkpoint, and action contract are
+  published.
+
 ## [0.7.0] - 2026-09-30
 
 Explicit CLI version reporting and reconciled version history.

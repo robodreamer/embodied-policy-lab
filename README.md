@@ -66,6 +66,7 @@ the source for training, architecture, and publisher benchmark claims. See the
 | WAM | Flex-π action-only | 32×7 EEF or 32×14 qpos action chunks | LIBERO, RoboTwin 2.0 | experimental; RoboTwin studio + native batch |
 | WAM | Flex-π full-joint | 32×7 EEF actions + RGB/DINO/pointmap futures | LIBERO | experimental; default Flex-π mode |
 | WAM | Flex-π full-joint | 32×14 qpos actions; future media not yet retained by the studio | RoboTwin 2.0 | experimental; studio + native batch |
+| WAM | Rolling-WAM | unpublished; paper executes 16-action chunks from an 80-action rolling window | LIBERO, RoboTwin 2.0 (paper only) | not registered |
 
 RoboCasa also exposes `robocasa-sim`, an optional deterministic simulator-oracle
 baseline. It replays action prefixes in a matched MuJoCo environment; it is not
@@ -383,6 +384,7 @@ in the [operator guide](docs/operator-guide.md).
 | [Fast-WAM validation](docs/validation/fastwam-libero.md) | released-checkpoint boundary and bounded experiment |
 | [Flex-π validation](docs/validation/flexpi-libero.md) | full-joint implementation and measured local checks |
 | [RoboTwin integration](docs/validation/robotwin-foundation.md) | 14D bimanual contract, three policy cameras plus observer, model-free smoke, and native batch path |
+| [Rolling-WAM candidate](docs/validation/rolling-wam.md) | unpublished LIBERO/RoboTwin contract; not a selectable model |
 | [WAM benchmark](docs/benchmarks/fastwam-flexpi-libero.md) | headless protocol, provenance, and claims |
 | [Results](results/README.md) | sanitized publishable validation summaries |
 

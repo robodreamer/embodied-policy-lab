@@ -45,6 +45,7 @@ Use these labels precisely:
 | Operator behavior | `docs/operator-guide.md` |
 | Model extension boundary | `docs/model-plugins.md` |
 | External revisions and licenses | `docs/external-assets.md` |
+| Unpublished model candidates | `showcase/rolling_wam_candidate.py` |
 | Public validation protocols | `docs/validation/` and `docs/benchmarks/` |
 | Sanitized public evidence | `results/README.md` |
 
@@ -63,7 +64,9 @@ Do not add a selector option only in HTML, shell text, or Markdown.
   RoboCasa. RoboTwin WAM profiles expose the shared studio through an explicit
   in-process native adapter and retain the publisher-native batch path. Update
   the registry, tests, compatibility table, and operator guide together when
-  this changes.
+  this changes. Rolling-WAM is an unpublished candidate in
+  `showcase/rolling_wam_candidate.py` and is not a valid public pairing until
+  `ready_to_register()` is true.
 - Keep heavyweight or conflicting CUDA/Python stacks in isolated runtimes.
   Import model-specific dependencies lazily and communicate through an
   explicit local policy boundary. RoboTwin keeps policy and SAPIEN together in
