@@ -16,6 +16,7 @@ revision-checked sibling repositories, simulator assets, or model publishers.
 | Fast-WAM | revision-checked sibling checkout | MIT |
 | Flex-π | revision-checked sibling checkout | MIT |
 | RoboTwin 2.0 | exact-revision sibling checkout; model vendors retain local adapters | MIT |
+| Rolling-WAM | not consumed; inspected commit has no inference code | Apache-2.0 |
 
 Each component's own `LICENSE` file is authoritative. Preserve it when copying
 or modifying upstream code.
@@ -32,6 +33,7 @@ used by the validated profiles.
 | Flex-π LIBERO | `flex-pi/flexpi-libero` | MIT | MIT | Pinned Hub/source revisions plus SHA-256 for checkpoint, config, statistics, intrinsics, VAE, T5/tokenizer, and DINOv3 assets |
 | Fast-WAM RoboTwin | `yuanty/fastwam` | MIT | Not separately specified on the model card as of 2026-09-02 | Pinned Hub/source/RoboTwin revisions plus SHA-256 for checkpoint and statistics |
 | Flex-π RoboTwin | `flex-pi/flexpi-robotwin` | MIT | MIT | Pinned Hub/source/RoboTwin revisions plus SHA-256 for checkpoint, config, statistics, VAE, T5/tokenizer, and DINOv3 assets |
+| Rolling-WAM | no publisher checkpoint as of the inspected commit `9dbe8abcf36cbd11db2fc8d392a27c4a8a2a9c9a` | Apache-2.0 repository; paper is CC BY 4.0 | not published | No weights to verify |
 
 The source license does not automatically establish a license for separately
 published weights. Confirm the publisher's current terms before redistributing

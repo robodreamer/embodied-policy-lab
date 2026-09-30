@@ -46,6 +46,10 @@ The central research question is:
 - Refresh the deliberately pinned GR00T N1.5 profile toward current GR00T
   releases and expand simulator coverage only when matched evaluation remains
   possible.
+- Admit Rolling-WAM on LIBERO and RoboTwin only after its code, checkpoint,
+  image preprocessing, and action dimension are published. Keep the rolling
+  window in an isolated stateful runtime. The paper's reported success rates
+  are not lab results.
 - Add `./lab doctor`, download/storage/VRAM estimates, resumable setup, and
   container recipes for stable profiles.
 

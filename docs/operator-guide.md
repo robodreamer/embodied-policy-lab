@@ -18,6 +18,12 @@ matrix is:
 | RoboCasa365 | ✓ | — | — | ✓ |
 | RoboTwin 2.0 | — | experimental, studio + native batch | experimental, studio + native batch | — |
 
+Rolling-WAM is recorded in
+[the candidate note](validation/rolling-wam.md) and is intentionally absent
+from this matrix. Its paper evaluates LIBERO and RoboTwin, but the upstream
+repository has not published inference code or checkpoints, and the action
+dimension is not stated. `rolling-wam` is not a model argument.
+
 RoboCasa also has an independent predictor selector. Direct execution
 (`--world-model none`) is the default. The optional `robocasa-sim` choice is a
 deterministic simulator-oracle baseline: it replays each action prefix in a

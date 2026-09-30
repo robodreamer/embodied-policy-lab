@@ -107,6 +107,17 @@ success confidence intervals, warm batch-1 latency, and peak VRAM. Details and
 claim limits are in
 [the benchmark protocol](benchmarks/fastwam-flexpi-libero.md).
 
+## Rolling-WAM is not a plugin yet
+
+Rolling-WAM (arXiv:2609.30247) is a joint video-action model with a stateful
+rolling denoising window. The paper evaluates LIBERO and RoboTwin 2.0. The
+upstream repository at commit `9dbe8abc` has no inference code or checkpoint,
+and it does not state the LIBERO or RoboTwin action dimension. The candidate
+record in `showcase/rolling_wam_candidate.py` stays outside `POLICIES` until
+its admission gates pass. Details and the publisher-reported numbers, which
+are not lab results, are in
+[the candidate note](validation/rolling-wam.md).
+
 ## Adding another model
 
 1. Add a `PolicySpec` and aliases in `showcase/backend_registry.py`.
