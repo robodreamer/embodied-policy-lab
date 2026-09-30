@@ -4,7 +4,7 @@
 
 | Version | Support |
 |---|---|
-| 0.7.x (`main`, planned tag `v0.7.0`) | security fixes |
+| 0.7.x (`main`, tag `v0.7.0`) | security fixes |
 | Unreleased branches and local forks | not supported |
 
 Security fixes land on `main` and ship in the next `0.7.x` tag. Experimental

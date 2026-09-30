@@ -8,6 +8,7 @@ authors:
   - family-names: Park
     given-names: Andy
 version: 0.7.0
+date-released: 2026-09-30
 repository-code: https://github.com/robodreamer/embodied-policy-lab
 license: Apache-2.0
 keywords:
