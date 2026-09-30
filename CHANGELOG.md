@@ -17,16 +17,11 @@ The history below was reconstructed from Git commits. Versions through `0.6.0`
 identify development milestones; their dates and links identify the corresponding
 source changes. Those milestones are not Git tags. The published tag `v0.1.0`
 is `81053ae` (2026-09-10), a later snapshot than the retrospective `[0.1.0]`
-milestone at `f0c574d`. The current source version is `0.7.0`, prepared for
-release and anchored at `bc7befb` until it is tagged.
+milestone at `f0c574d`. The current release is `v0.7.0`.
 
 ## [Unreleased]
 
-### Fixed
-
-- Closed the `0.7.0` changelog compare range at `bc7befb` and separated it from later changes.
-
-## [0.7.0] - Unreleased
+## [0.7.0] - 2026-09-30
 
 Explicit CLI version reporting and reconciled version history.
 
@@ -151,8 +146,8 @@ Retrospective milestone: initial local π0.5 LIBERO lab.
 
 - Prompt handoff during interactive runs and rollout budget handling.
 
-[Unreleased]: https://github.com/robodreamer/embodied-policy-lab/compare/bc7befb...HEAD
-[0.7.0]: https://github.com/robodreamer/embodied-policy-lab/compare/24c2e00...bc7befb
+[Unreleased]: https://github.com/robodreamer/embodied-policy-lab/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/robodreamer/embodied-policy-lab/compare/24c2e00...v0.7.0
 [0.6.0]: https://github.com/robodreamer/embodied-policy-lab/compare/caaef86...24c2e00
 [0.5.1]: https://github.com/robodreamer/embodied-policy-lab/compare/69a7ecd...caaef86
 [0.5.0]: https://github.com/robodreamer/embodied-policy-lab/compare/a0edca7...69a7ecd
