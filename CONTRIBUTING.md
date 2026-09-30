@@ -62,8 +62,15 @@ profile becomes runnable.
 Record user-visible changes under `## [Unreleased]` in
 [CHANGELOG.md](CHANGELOG.md). Do not bump [VERSION](VERSION) in a feature PR;
 the next tagged release copies Unreleased into a version heading and updates
-`VERSION` and `CITATION.cff` together. The README version badge tracks the
-latest GitHub Release.
+`VERSION`, `CITATION.cff`, the README version badge, and the security support
+policy together. Add `date-released` to the citation when the release is
+published. The README version badge tracks the current source version.
+
+During `0.y.z` development, increment the minor version for new capabilities
+or incompatible public contract changes, and the patch version for compatible
+fixes or documentation changes. The public contracts include CLI flags, model
+and simulator profiles, plugin interfaces, dashboard controls, and the saved
+evidence schema. Move to `1.0.0` when those contracts are stable.
 
 By submitting a contribution, you agree that it is licensed under the
 repository's [Apache License 2.0](LICENSE).
